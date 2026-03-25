@@ -3,269 +3,320 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>贪吃蛇小游戏</title>
+    <title>Claude Code 中文学习导航</title>
     <style>
       :root {
-        --bg: #111827;
-        --panel: #1f2937;
-        --grid: #243042;
-        --snake: #22c55e;
-        --food: #ef4444;
+        --bg: #0b1020;
+        --bg-soft: #111827;
+        --panel: rgba(17, 24, 39, 0.88);
+        --border: #2a3445;
         --text: #e5e7eb;
         --muted: #9ca3af;
+        --primary: #60a5fa;
+        --primary-strong: #2563eb;
+        --success: #34d399;
       }
-      * { box-sizing: border-box; }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
         min-height: 100vh;
-        display: grid;
-        place-items: center;
-        background: radial-gradient(circle at top, #1f2937, #0b1020 60%);
+        background: radial-gradient(circle at top, #172554 0%, #0b1020 55%);
+        color: var(--text);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .page {
+        width: min(1120px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 48px 0 64px;
+      }
+
+      .hero {
+        padding: 40px 32px;
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(17, 24, 39, 0.92));
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(37, 99, 235, 0.16);
+        border: 1px solid rgba(96, 165, 250, 0.28);
+        color: #bfdbfe;
+        font-size: 13px;
+      }
+
+      h1 {
+        margin: 18px 0 12px;
+        font-size: clamp(32px, 5vw, 52px);
+        line-height: 1.1;
+      }
+
+      .lead {
+        max-width: 760px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.8;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 18px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        font-size: 14px;
+        font-weight: 600;
+        transition: 0.2s ease;
+      }
+
+      .button.primary {
+        background: var(--primary-strong);
+        color: white;
+      }
+
+      .button.primary:hover {
+        background: #1d4ed8;
+      }
+
+      .button.secondary {
+        border-color: var(--border);
+        background: rgba(15, 23, 42, 0.7);
         color: var(--text);
       }
+
+      .button.secondary:hover {
+        border-color: #41516b;
+        background: rgba(30, 41, 59, 0.88);
+      }
+
+      .section {
+        margin-top: 28px;
+      }
+
+      .section-title {
+        margin: 0 0 14px;
+        font-size: 22px;
+      }
+
+      .section-desc {
+        margin: 0 0 18px;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+      }
+
       .card {
-        width: min(92vw, 560px);
-        background: rgba(17, 24, 39, 0.88);
-        border: 1px solid #374151;
-        border-radius: 16px;
-        padding: 14px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-      }
-      .topbar {
         display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        margin-bottom: 10px;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 220px;
+        padding: 20px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: var(--panel);
+        backdrop-filter: blur(12px);
       }
-      .title {
-        font-size: 18px;
-        font-weight: 700;
+
+      .card-tag {
+        font-size: 12px;
+        color: var(--success);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
       }
-      .score {
+
+      .card h3 {
+        margin: 0;
+        font-size: 20px;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.75;
         font-size: 14px;
-        color: var(--muted);
       }
-      canvas {
-        width: 100%;
-        height: auto;
-        display: block;
-        border-radius: 12px;
-        border: 1px solid #374151;
-        background: linear-gradient(#0f172a, #0b1222);
+
+      .card-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: auto;
       }
-      .hint {
-        margin-top: 10px;
+
+      .mini {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(15, 23, 42, 0.72);
         font-size: 13px;
-        color: var(--muted);
-        line-height: 1.5;
+        font-weight: 600;
       }
-      .hint b { color: #d1d5db; }
+
+      .mini:hover {
+        border-color: #41516b;
+      }
+
+      .note {
+        margin-top: 22px;
+        padding: 16px 18px;
+        border-radius: 14px;
+        border: 1px solid rgba(96, 165, 250, 0.2);
+        background: rgba(30, 41, 59, 0.55);
+        color: var(--muted);
+        line-height: 1.8;
+        font-size: 14px;
+      }
+
+      .footer {
+        margin-top: 28px;
+        color: #94a3b8;
+        font-size: 13px;
+      }
+
+      code {
+        padding: 2px 6px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      @media (max-width: 640px) {
+        .page {
+          width: min(100vw - 20px, 1120px);
+          padding: 20px 0 40px;
+        }
+
+        .hero {
+          padding: 24px 18px;
+          border-radius: 18px;
+        }
+      }
     </style>
   </head>
   <body>
-    <div class="card">
-      <div class="topbar">
-        <div class="title">贪吃蛇</div>
-        <div class="score">分数：<span id="score">0</span> ｜ 最高分：<span id="best">0</span></div>
+    <main class="page">
+      <section class="hero">
+        <div class="badge">Claude Code 中文学习资源导航</div>
+        <h1>从入门到进阶，系统学习 Claude Code</h1>
+        <p class="lead">
+          这个仓库整理了适合中文用户的 Claude Code 学习资料，包括安装说明、入门指南、核心概念详解和高频提示词模板。
+          如果你准备把这个仓库发布到 GitHub Pages，这个首页可以作为统一的文档导航入口。
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="https://github.com/IVANLEE99/learn-claude-code">查看 GitHub 仓库</a>
+          <a class="button secondary" href="https://github.com/IVANLEE99/learn-claude-code/blob/main/README.md">阅读 README</a>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">推荐阅读顺序</h2>
+        <p class="section-desc">
+          如果你是第一次接触 Claude Code，建议先看安装与入门，再看概念解释，最后结合提示词模板进行实战。
+        </p>
+        <div class="grid">
+          <article class="card">
+            <div class="card-tag">Step 1</div>
+            <h3>Claude Code 安装文档</h3>
+            <p>适合刚开始使用 Claude Code 的用户，帮助你完成环境准备、安装、登录和基础使用配置。</p>
+            <div class="card-actions">
+              <a class="mini" href="https://github.com/IVANLEE99/learn-claude-code/blob/main/Claude%20Code安装文档/Claude%20Code安装文档.md">在 GitHub 中阅读</a>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-tag">Step 2</div>
+            <h3>Claude Code 新手入门</h3>
+            <p>用最容易上手的方式理解 Claude Code 是什么、怎么提需求、怎么和它配合完成任务。</p>
+            <div class="card-actions">
+              <a class="mini" href="https://github.com/IVANLEE99/learn-claude-code/blob/main/Claude%20Code新手入门.md">在 GitHub 中阅读</a>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-tag">Step 3</div>
+            <h3>Claude 相关概念详解</h3>
+            <p>详细解释 Claude、Claude Code、Agent、Skill、MCP、Tool、Hook、Memory、Settings、Plan Mode 等常见概念。</p>
+            <div class="card-actions">
+              <a class="mini" href="https://github.com/IVANLEE99/learn-claude-code/blob/main/Claude相关概念详解.md">在 GitHub 中阅读</a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">进阶与实战资料</h2>
+        <p class="section-desc">
+          下面这些内容更适合已经开始实际使用 Claude Code，希望提升提问质量、工作流效率和整体理解深度的用户。
+        </p>
+        <div class="grid">
+          <article class="card">
+            <div class="card-tag">Prompt</div>
+            <h3>中文提示词模板</h3>
+            <p>整理了适合 Claude Code 的中文提示词模板，覆盖看项目、解释代码、修 Bug、改功能、审查代码等场景。</p>
+            <div class="card-actions">
+              <a class="mini" href="https://github.com/IVANLEE99/learn-claude-code/blob/main/prompt_template.md">在 GitHub 中阅读</a>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-tag">Guide</div>
+            <h3>AI 工具飞速上手之 Claude Code</h3>
+            <p>更完整的长文教程，涵盖背景、安装、常见命令、工作流、IDE 配合等内容，适合系统化阅读。</p>
+            <div class="card-actions">
+              <a class="mini" href="https://github.com/IVANLEE99/learn-claude-code/blob/main/AI工具飞速上手之Claude%20Code/AI工具飞速上手之Claude%20Code.md">在 GitHub 中阅读</a>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-tag">Repo</div>
+            <h3>仓库源码与资源</h3>
+            <p>如果你想查看原始 Markdown、图片素材、目录结构或后续更新记录，可以直接进入 GitHub 仓库浏览。</p>
+            <div class="card-actions">
+              <a class="mini" href="https://github.com/IVANLEE99/learn-claude-code">打开仓库</a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <div class="note">
+        提示：这个站点首页是导航页。当前主要内容仍以仓库中的 Markdown 文档为主，因此按钮会跳转到 GitHub 中已渲染的文档页面，阅读体验会比直接打开原始 <code>.md</code> 文件更好。
       </div>
-      <canvas id="game" width="480" height="480" aria-label="贪吃蛇游戏画布"></canvas>
-      <div class="hint">
-        <b>操作：</b>方向键 / WASD 控制，<b>空格</b>暂停继续，<b>R</b>重新开始。撞墙或撞到自己会结束。
+
+      <div class="footer">
+        GitHub Pages 建议从 <code>main</code> 分支的根目录发布，本页文件为 <code>index.html</code>。
       </div>
-    </div>
-
-    <script>
-      const canvas = document.getElementById("game");
-      const ctx = canvas.getContext("2d");
-      const scoreEl = document.getElementById("score");
-      const bestEl = document.getElementById("best");
-
-      const GRID = 20;
-      const CELL = canvas.width / GRID;
-      const BASE_STEP_MS = 130;
-      const MIN_STEP_MS = 70;
-
-      let snake = [];
-      let dir = { x: 1, y: 0 };
-      let nextDir = { x: 1, y: 0 };
-      let food = { x: 10, y: 10 };
-      let score = 0;
-      let best = Number(localStorage.getItem("snake_best") || 0);
-      let gameOver = false;
-      let paused = false;
-      let lastTime = 0;
-      let acc = 0;
-
-      bestEl.textContent = String(best);
-
-      function reset() {
-        snake = [
-          { x: 8, y: 10 },
-          { x: 7, y: 10 },
-          { x: 6, y: 10 },
-        ];
-        dir = { x: 1, y: 0 };
-        nextDir = { x: 1, y: 0 };
-        score = 0;
-        gameOver = false;
-        paused = false;
-        scoreEl.textContent = "0";
-        placeFood();
-      }
-
-      function placeFood() {
-        while (true) {
-          const p = {
-            x: Math.floor(Math.random() * GRID),
-            y: Math.floor(Math.random() * GRID),
-          };
-          if (!snake.some((s) => s.x === p.x && s.y === p.y)) {
-            food = p;
-            return;
-          }
-        }
-      }
-
-      function setDirection(x, y) {
-        if (x === -dir.x && y === -dir.y) return;
-        nextDir = { x, y };
-      }
-
-      function stepSpeed() {
-        return Math.max(MIN_STEP_MS, BASE_STEP_MS - Math.floor(score / 4) * 5);
-      }
-
-      function tick() {
-        dir = nextDir;
-        const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
-
-        if (head.x < 0 || head.x >= GRID || head.y < 0 || head.y >= GRID) {
-          gameOver = true;
-          return;
-        }
-
-        if (snake.some((s) => s.x === head.x && s.y === head.y)) {
-          gameOver = true;
-          return;
-        }
-
-        snake.unshift(head);
-
-        if (head.x === food.x && head.y === food.y) {
-          score += 1;
-          scoreEl.textContent = String(score);
-          if (score > best) {
-            best = score;
-            bestEl.textContent = String(best);
-            localStorage.setItem("snake_best", String(best));
-          }
-          placeFood();
-        } else {
-          snake.pop();
-        }
-      }
-
-      function drawGrid() {
-        ctx.strokeStyle = "#1f2937";
-        ctx.lineWidth = 1;
-        for (let i = 1; i < GRID; i++) {
-          const p = i * CELL;
-          ctx.beginPath();
-          ctx.moveTo(p, 0);
-          ctx.lineTo(p, canvas.height);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(0, p);
-          ctx.lineTo(canvas.width, p);
-          ctx.stroke();
-        }
-      }
-
-      function drawCell(x, y, color, radius = 5) {
-        const px = x * CELL;
-        const py = y * CELL;
-        ctx.fillStyle = color;
-        const r = Math.min(radius, CELL / 2 - 1);
-        ctx.beginPath();
-        ctx.roundRect(px + 1.5, py + 1.5, CELL - 3, CELL - 3, r);
-        ctx.fill();
-      }
-
-      function drawOverlay(text, sub) {
-        ctx.fillStyle = "rgba(0,0,0,0.45)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        ctx.fillStyle = "#f9fafb";
-        ctx.textAlign = "center";
-        ctx.font = "bold 36px sans-serif";
-        ctx.fillText(text, canvas.width / 2, canvas.height / 2 - 8);
-
-        ctx.font = "16px sans-serif";
-        ctx.fillStyle = "#d1d5db";
-        ctx.fillText(sub, canvas.width / 2, canvas.height / 2 + 24);
-      }
-
-      function render() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        drawGrid();
-
-        drawCell(food.x, food.y, "#ef4444", 8);
-
-        for (let i = snake.length - 1; i >= 0; i--) {
-          const s = snake[i];
-          const color = i === 0 ? "#4ade80" : "#22c55e";
-          drawCell(s.x, s.y, color, i === 0 ? 7 : 5);
-        }
-
-        if (paused && !gameOver) drawOverlay("已暂停", "按空格继续");
-        if (gameOver) drawOverlay("游戏结束", "按 R 重新开始");
-      }
-
-      function loop(ts) {
-        const dt = ts - lastTime;
-        lastTime = ts;
-
-        if (!paused && !gameOver) {
-          acc += dt;
-          const step = stepSpeed();
-          while (acc >= step) {
-            tick();
-            acc -= step;
-            if (gameOver) break;
-          }
-        }
-
-        render();
-        requestAnimationFrame(loop);
-      }
-
-      window.addEventListener("keydown", (e) => {
-        const k = e.key.toLowerCase();
-
-        if (["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "w", "a", "s", "d", "r"].includes(k) || e.key === " ") {
-          e.preventDefault();
-        }
-
-        if (k === "arrowup" || k === "w") setDirection(0, -1);
-        if (k === "arrowdown" || k === "s") setDirection(0, 1);
-        if (k === "arrowleft" || k === "a") setDirection(-1, 0);
-        if (k === "arrowright" || k === "d") setDirection(1, 0);
-
-        if (k === " ") {
-          if (!gameOver) paused = !paused;
-        }
-
-        if (k === "r") {
-          reset();
-        }
-      });
-
-      reset();
-      requestAnimationFrame((t) => {
-        lastTime = t;
-        loop(t);
-      });
-    </script>
+    </main>
   </body>
 </html>
