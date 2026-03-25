@@ -1,5 +1,17 @@
-https://x.com/AI_Jasonyu/status/2026455606970954087
-https://x.com/fankaishuoai/status/2020094295844470980?s=20
+[OpenClaw新手完整学习路径-更适合新手食用的学习+使用教程](https://x.com/AI_Jasonyu/status/2026455606970954087)
+[OpenClaw 新手保姆级教程：Mac 一次装好，Telegram / WhatsApp 直接开用](https://x.com/fankaishuoai/status/2020094295844470980?s=20)
+
+skill/oepnclaw 常用命令自查表
+[🐲🦞扫盲版-给不会使用的同学看](https://my.feishu.cn/wiki/THLNw1vWCiXJD6kvomlcYpu5nRe)
+
+skill/oepnclaw 常用命令自查表
+
+[OpenClaw 多 Agent 飞书 Bot 完整配置指南](https://my.feishu.cn/docx/Qj46dEvfvoSuZOx0vUvcWIcGnyd)
+
+[OpenClaw 从入门到精通指南](https://my.feishu.cn/docx/P6zsdsgYco6i4XxLeIccvlpvnQe)
+
+[OpenClaw 完全实战手册：从认识到上手，从配置到变现](https://my.feishu.cn/wiki/HPFDwzivviH2PzkP3uockjuGn8N)
+
 
 以下文档由openclaw生成
 
