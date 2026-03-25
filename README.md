@@ -2,6 +2,12 @@
 
 > 下面是对 `/help` 常见内容的中文整理，便于快速查阅。
 
+## GitHub Pages
+
+- 文档首页：<https://ivanlee99.github.io/learn-claude-code/>
+- 站内阅读器（README）：<https://ivanlee99.github.io/learn-claude-code/viewer.html?doc=readme>
+
+
 ## 基础命令
 
 - `/help`：查看可用命令列表。
