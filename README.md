@@ -6,6 +6,7 @@
 
 - 文档首页：<https://ivanlee99.github.io/learn-claude-code/>
 - 站内阅读器（README）：<https://ivanlee99.github.io/learn-claude-code/viewer.html?doc=readme>
+- 模型选择记录：<https://ivanlee99.github.io/learn-claude-code/viewer.html?doc=models>
 
 
 ## 基础命令
