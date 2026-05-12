@@ -1,0 +1,61 @@
+<!--pages/index/index.wxml-->
+<view class="page">
+  <!-- 加载态 -->
+  <view wx:if="{{loading}}" class="loading-state">
+    <view class="loading-spinner"></view>
+    <text class="loading-text">加载中...</text>
+  </view>
+
+  <view wx:else class="content">
+    <!-- 连续打卡天数 -->
+    <view class="streak-section">
+      <text class="streak-number">{{consecutiveDays}}</text>
+      <text class="streak-label">连续打卡天数</text>
+    </view>
+
+    <!-- 打卡按钮 -->
+    <view class="checkin-section">
+      <view
+        class="checkin-btn {{isCheckedIn ? 'checked' : ''}}"
+        bindtap="onCheckin"
+        hover-class="checkin-btn-hover"
+      >
+        <image
+          wx:if="{{isCheckedIn}}"
+          class="checkin-icon"
+          src="/assets/icon-check.png"
+          mode="aspectFit"
+        />
+        <text class="checkin-text">{{isCheckedIn ? '已打卡' : '打卡'}}</text>
+      </view>
+      <text class="checkin-date">{{todayDate}}</text>
+    </view>
+
+    <!-- 本月统计卡片 -->
+    <view class="stats-card card">
+      <text class="stats-title">本月打卡统计</text>
+      <view class="stats-row">
+        <view class="stats-item">
+          <text class="stats-value">{{monthlyCheckins}}</text>
+          <text class="stats-label">已打卡</text>
+        </view>
+        <view class="stats-divider"></view>
+        <view class="stats-item">
+          <text class="stats-value">{{monthlyTotal}}</text>
+          <text class="stats-label">总天数</text>
+        </view>
+        <view class="stats-divider"></view>
+        <view class="stats-item">
+          <text class="stats-value">{{checkinRate}}</text>
+          <text class="stats-label">打卡率</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 历史最高连续天数 -->
+    <view class="record-card card" wx:if="{{maxConsecutiveDays > 0}}">
+      <text class="record-label">历史最高连续打卡</text>
+      <text class="record-value">{{maxConsecutiveDays}} 天</text>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,91 @@
+/* miniprogram/styles/variables.wxss */
+/* 由 ui-designer agent 生成，勿手动修改 */
+/* 如需调整，修改 /docs/DESIGN_SYSTEM.md 后重新生成 */
+
+page {
+  /* ===== 颜色 ===== */
+
+  /* 品牌色 */
+  --color-primary: #1AAD7A;
+  --color-primary-light: #E8F8F2;
+  --color-primary-dark: #129066;
+
+  /* 功能色 */
+  --color-success: #07c160;
+  --color-warning: #fa9d3b;
+  --color-danger:  #fa5151;
+  --color-info:    #10aeff;
+
+  /* 强调色 */
+  --color-highlight: #FF6B35;
+
+  /* 文字色 */
+  --color-text-primary:   #181818;
+  --color-text-secondary: #999999;
+  --color-text-tertiary:  #cccccc;
+  --color-text-disabled:  #cccccc;
+
+  /* 背景色 */
+  --color-bg-page:        #f6f6f6;
+  --color-bg-card:        #ffffff;
+  --color-bg-input:       #f5f5f5;
+
+  /* 分割线 */
+  --color-border:         #e5e5e5;
+
+  /* ===== 字体 ===== */
+
+  --font-size-xs:   20rpx;
+  --font-size-sm:   24rpx;
+  --font-size-md:   28rpx;
+  --font-size-lg:   32rpx;
+  --font-size-xl:   36rpx;
+  --font-size-2xl:  44rpx;
+  --font-size-3xl:  72rpx;
+
+  --line-height-tight:  1.25;
+  --line-height-normal: 1.5;
+  --line-height-loose:  1.75;
+
+  --font-weight-normal:  400;
+  --font-weight-medium:  500;
+  --font-weight-bold:    700;
+
+  /* ===== 间距 ===== */
+
+  --spacing-1:  8rpx;
+  --spacing-2:  16rpx;
+  --spacing-3:  24rpx;
+  --spacing-4:  32rpx;
+  --spacing-5:  40rpx;
+  --spacing-6:  48rpx;
+  --spacing-8:  64rpx;
+
+  --page-padding: 32rpx;
+  --card-padding: 32rpx;
+  --list-item-min-height: 88rpx;
+  --safe-area-bottom: env(safe-area-inset-bottom);
+
+  /* ===== 圆角 ===== */
+
+  --radius-sm:   8rpx;
+  --radius-md:   16rpx;
+  --radius-lg:   24rpx;
+  --radius-xl:   32rpx;
+  --radius-full: 50%;
+
+  /* ===== 阴影 ===== */
+
+  --shadow-sm:  0 2rpx 6rpx rgba(0, 0, 0, 0.08);
+  --shadow-md:  0 8rpx 24rpx rgba(0, 0, 0, 0.10);
+  --shadow-lg:  0 16rpx 48rpx rgba(0, 0, 0, 0.12);
+
+  /* ===== 动效 ===== */
+
+  --duration-fast:   150ms;
+  --duration-normal: 250ms;
+  --duration-slow:   350ms;
+
+  --ease-out:  cubic-bezier(0.0, 0.0, 0.2, 1);
+  --ease-in:   cubic-bezier(0.4, 0.0, 1, 1);
+}

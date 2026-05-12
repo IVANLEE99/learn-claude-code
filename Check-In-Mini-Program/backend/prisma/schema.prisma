@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
+  openid    String     @unique @db.VarChar(64)
+  unionid   String?    @db.VarChar(64)
+  nickName  String     @map("nick_name") @default("") @db.VarChar(100)
+  avatarUrl String     @map("avatar_url") @default("") @db.VarChar(500)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  deletedAt DateTime?  @map("deleted_at")
+
+  checkins  Checkin[]
+
+  @@index([unionid])
+  @@map("users")
+}
+
+model Checkin {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  userId      BigInt   @map("user_id") @db.UnsignedBigInt
+  checkinDate DateTime @map("checkin_date") @db.Date
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, checkinDate])
+  @@index([userId])
+  @@index([checkinDate])
+  @@map("checkins")
+}

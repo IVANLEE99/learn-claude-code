@@ -1,0 +1,55 @@
+<!--pages/profile/profile.wxml-->
+<view class="page">
+  <!-- 加载态 -->
+  <view wx:if="{{loading}}" class="loading-state">
+    <view class="loading-spinner"></view>
+    <text class="loading-text">加载中...</text>
+  </view>
+
+  <view wx:else class="content">
+    <!-- 用户信息区 -->
+    <view class="user-section">
+      <image
+        class="avatar"
+        src="{{userInfo.avatarUrl || '/assets/default-avatar.png'}}"
+        mode="aspectFill"
+      />
+      <text class="nickname">{{userInfo.nickName || '微信用户'}}</text>
+    </view>
+
+    <!-- 统计卡片 -->
+    <view class="stats-card card">
+      <view class="stats-row">
+        <view class="stats-item">
+          <text class="stats-value">{{totalCheckinDays}}</text>
+          <text class="stats-label">总打卡天数</text>
+        </view>
+        <view class="stats-divider"></view>
+        <view class="stats-item">
+          <text class="stats-value">{{consecutiveDays}}</text>
+          <text class="stats-label">当前连续</text>
+        </view>
+        <view class="stats-divider"></view>
+        <view class="stats-item">
+          <text class="stats-value">{{maxConsecutiveDays}}</text>
+          <text class="stats-label">最高连续</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 注册时间 -->
+    <view class="info-card card">
+      <view class="info-row">
+        <text class="info-label">注册时间</text>
+        <text class="info-value">{{createdAt}}</text>
+      </view>
+    </view>
+
+    <!-- 退出登录 -->
+    <view class="logout-section">
+      <view class="logout-btn" bindtap="onLogout">
+        <text class="logout-text">退出登录</text>
+      </view>
+    </view>
+  </view>
+</view>

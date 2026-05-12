@@ -1,0 +1,171 @@
+/* pages/history/history.wxss */
+@import "../../styles/variables.wxss";
+
+.page {
+  min-height: 100vh;
+  background: var(--color-bg-page);
+  padding: var(--page-padding);
+  box-sizing: border-box;
+}
+
+/* 加载态 */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 80vh;
+}
+
+.loading-spinner {
+  width: 60rpx;
+  height: 60rpx;
+  border: 4rpx solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  margin-top: var(--spacing-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* 月份切换 */
+.month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-4) 0;
+}
+
+.nav-btn {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-card);
+}
+
+.nav-arrow {
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-bold);
+}
+
+.month-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+/* 星期头 */
+.weekday-header {
+  display: flex;
+  padding: var(--spacing-2) 0;
+  border-bottom: 2rpx solid var(--color-border);
+}
+
+.weekday-item {
+  flex: 1;
+  text-align: center;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* 日历网格 */
+.calendar-grid {
+  display: flex;
+  flex-wrap: wrap;
+  padding: var(--spacing-2) 0;
+}
+
+.calendar-day {
+  width: calc(100% / 7);
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.calendar-day.empty {
+  visibility: hidden;
+}
+
+.day-number {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+}
+
+.calendar-day.checked {
+  background: var(--color-primary-light);
+  border-radius: var(--radius-md);
+}
+
+.calendar-day.checked .day-number {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-bold);
+}
+
+.calendar-day.today {
+  border: 2rpx solid var(--color-primary);
+  border-radius: var(--radius-md);
+}
+
+.calendar-day.future .day-number {
+  color: var(--color-text-disabled);
+}
+
+.check-dot {
+  width: 8rpx;
+  height: 8rpx;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  margin-top: 4rpx;
+}
+
+/* 统计卡片 */
+.stats-card {
+  margin-top: var(--spacing-6);
+}
+
+.stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+}
+
+.stats-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.stats-value {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-primary);
+}
+
+.stats-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-top: var(--spacing-1);
+}
+
+.stats-divider {
+  width: 2rpx;
+  height: 60rpx;
+  background: var(--color-border);
+}

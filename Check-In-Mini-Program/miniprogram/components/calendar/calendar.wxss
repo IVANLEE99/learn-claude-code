@@ -1,0 +1,75 @@
+/*components/calendar/calendar.wxss*/
+@import "../../styles/variables.wxss";
+
+.calendar {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-3);
+}
+
+/* 星期头 */
+.weekday-header {
+  display: flex;
+  padding-bottom: var(--spacing-2);
+  border-bottom: 2rpx solid var(--color-border);
+  margin-bottom: var(--spacing-2);
+}
+
+.weekday-item {
+  flex: 1;
+  text-align: center;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* 日历网格 */
+.calendar-grid {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.calendar-day {
+  width: calc(100% / 7);
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-sizing: border-box;
+  border-radius: var(--radius-sm);
+}
+
+.calendar-day.empty {
+  visibility: hidden;
+}
+
+.day-number {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+}
+
+.calendar-day.checked {
+  background: var(--color-primary-light);
+}
+
+.calendar-day.checked .day-number {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-bold);
+}
+
+.calendar-day.today {
+  border: 2rpx solid var(--color-primary);
+}
+
+.calendar-day.future .day-number {
+  color: var(--color-text-disabled);
+}
+
+.check-dot {
+  width: 8rpx;
+  height: 8rpx;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  margin-top: 4rpx;
+}

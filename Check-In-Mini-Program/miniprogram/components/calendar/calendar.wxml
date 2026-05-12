@@ -1,0 +1,27 @@
+<!--components/calendar/calendar.wxml-->
+<view class="calendar">
+  <!-- 星期头 -->
+  <view class="weekday-header">
+    <text class="weekday-item" wx:for="{{weekdays}}" wx:key="*this">{{item}}</text>
+  </view>
+
+  <!-- 日历网格 -->
+  <view class="calendar-grid">
+    <!-- 空白占位 -->
+    <view
+      wx:for="{{emptyDays}}"
+      wx:key="index"
+      class="calendar-day empty"
+    ></view>
+
+    <!-- 日期格子 -->
+    <view
+      wx:for="{{days}}"
+      wx:key="date"
+      class="calendar-day {{item.isToday ? 'today' : ''}} {{item.isCheckedIn ? 'checked' : ''}} {{item.isFuture ? 'future' : ''}}"
+    >
+      <text class="day-number">{{item.day}}</text>
+      <view wx:if="{{item.isCheckedIn}}" class="check-dot"></view>
+    </view>
+  </view>
+</view>

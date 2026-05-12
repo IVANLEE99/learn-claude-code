@@ -1,0 +1,49 @@
+/*components/check-button/check-button.wxss*/
+@import "../../styles/variables.wxss";
+
+.check-btn {
+  width: 240rpx;
+  height: 240rpx;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-md);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.check-btn.checked {
+  background: var(--color-primary-light);
+}
+
+.check-btn-hover {
+  transform: scale(0.95);
+}
+
+.check-btn.animating {
+  animation: bounce 300ms var(--ease-out);
+}
+
+@keyframes bounce {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+.check-icon {
+  width: 64rpx;
+  height: 64rpx;
+  margin-bottom: var(--spacing-1);
+}
+
+.check-text {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: #ffffff;
+}
+
+.check-btn.checked .check-text {
+  color: var(--color-primary);
+}

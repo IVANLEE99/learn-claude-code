@@ -1,0 +1,14 @@
+<!--components/check-button/check-button.wxml-->
+<view
+  class="check-btn {{checked ? 'checked' : ''}} {{animating ? 'animating' : ''}}"
+  bindtap="onTap"
+  hover-class="check-btn-hover"
+>
+  <image
+    wx:if="{{checked}}"
+    class="check-icon"
+    src="/assets/icon-check.png"
+    mode="aspectFit"
+  />
+  <text class="check-text">{{checked ? '已打卡' : '打卡'}}</text>
+</view>

@@ -1,0 +1,172 @@
+/* pages/index/index.wxss */
+@import "../../styles/variables.wxss";
+
+.page {
+  min-height: 100vh;
+  background: var(--color-bg-page);
+  padding: var(--page-padding);
+  box-sizing: border-box;
+}
+
+/* 加载态 */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 80vh;
+}
+
+.loading-spinner {
+  width: 60rpx;
+  height: 60rpx;
+  border: 4rpx solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  margin-top: var(--spacing-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* 连续打卡天数 */
+.streak-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-8) 0 var(--spacing-6);
+}
+
+.streak-number {
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-highlight);
+  line-height: 1.2;
+}
+
+.streak-label {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  margin-top: var(--spacing-1);
+}
+
+/* 打卡按钮 */
+.checkin-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-6) 0;
+}
+
+.checkin-btn {
+  width: 240rpx;
+  height: 240rpx;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-md);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.checkin-btn.checked {
+  background: var(--color-primary-light);
+}
+
+.checkin-btn-hover {
+  transform: scale(0.95);
+}
+
+.checkin-icon {
+  width: 64rpx;
+  height: 64rpx;
+  margin-bottom: var(--spacing-1);
+}
+
+.checkin-text {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: #ffffff;
+}
+
+.checkin-btn.checked .checkin-text {
+  color: var(--color-primary);
+}
+
+.checkin-date {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-top: var(--spacing-4);
+}
+
+/* 统计卡片 */
+.stats-card {
+  margin-top: var(--spacing-6);
+}
+
+.stats-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  display: block;
+  margin-bottom: var(--spacing-4);
+}
+
+.stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+}
+
+.stats-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.stats-value {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-primary);
+}
+
+.stats-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-top: var(--spacing-1);
+}
+
+.stats-divider {
+  width: 2rpx;
+  height: 60rpx;
+  background: var(--color-border);
+}
+
+/* 历史最高记录 */
+.record-card {
+  margin-top: var(--spacing-3);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.record-label {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.record-value {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-highlight);
+}
