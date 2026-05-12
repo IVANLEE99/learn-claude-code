@@ -1,0 +1,188 @@
+/* ============================================
+   Todo App - CSS 变量（设计系统）
+   版本：1.0
+   日期：2026-05-11
+   基于：DESIGN_SYSTEM.md v1.0
+   ============================================ */
+
+:root {
+  /* ---- 品牌色 ---- */
+  --color-brand-primary: #4A90D9;
+  --color-brand-primary-light: #E8F0FE;
+  --color-brand-primary-dark: #2E6DB4;
+
+  /* ---- 功能色 ---- */
+  --color-success: #27AE60;
+  --color-success-light: #E8F8EF;
+  --color-warning: #F39C12;
+  --color-warning-light: #FEF5E7;
+  --color-danger: #E74C3C;
+  --color-danger-light: #FDEDEC;
+  --color-info: #3498DB;
+
+  /* ---- 中性色 - 文本 ---- */
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #666666;
+  --color-text-tertiary: #999999;
+  --color-text-inverse: #FFFFFF;
+
+  /* ---- 中性色 - 背景 ---- */
+  --color-bg-page: #F5F5F5;
+  --color-bg-card: #FFFFFF;
+  --color-bg-elevated: #FFFFFF;
+  --color-bg-hover: #F0F0F0;
+
+  /* ---- 中性色 - 边框 ---- */
+  --color-border: #E0E0E0;
+  --color-border-light: #F0F0F0;
+  --color-divider: #EEEEEE;
+
+  /* ---- 优先级色 ---- */
+  --color-priority-high: #E74C3C;
+  --color-priority-medium: #F39C12;
+  --color-priority-low: #3498DB;
+
+  /* ---- 字体 ---- */
+  --font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+
+  /* ---- 字号 ---- */
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-md: 18px;
+  --font-size-lg: 20px;
+  --font-size-xl: 24px;
+
+  /* ---- 行高 ---- */
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-loose: 1.75;
+
+  /* ---- 字重 ---- */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 700;
+
+  /* ---- 间距 ---- */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-base: 16px;
+  --spacing-lg: 20px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+  --spacing-3xl: 48px;
+
+  /* ---- 圆角 ---- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* ---- 阴影 ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --shadow-focus: 0 0 0 3px rgba(74, 144, 217, 0.3);
+
+  /* ---- 尺寸 ---- */
+  --size-icon-sm: 16px;
+  --size-icon-md: 20px;
+  --size-icon-lg: 24px;
+  --size-clickable: 44px;
+  --size-header: 56px;
+  --size-sidebar: 280px;
+  --size-todo-item: 72px;
+  --size-avatar: 36px;
+
+  /* ---- 动画 ---- */
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);
+
+  /* ---- Z-index ---- */
+  --z-normal: 1;
+  --z-sticky: 10;
+  --z-drawer: 100;
+  --z-overlay: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+}
+
+/* ---- 暗色模式 ---- */
+[data-theme="dark"] {
+  /* ---- 品牌色 ---- */
+  --color-brand-primary: #5BA0E9;
+  --color-brand-primary-light: #1A3A5C;
+  --color-brand-primary-dark: #3D7FC4;
+
+  /* ---- 功能色 ---- */
+  --color-success: #2ECC71;
+  --color-success-light: #1A3D27;
+  --color-warning: #F1C40F;
+  --color-warning-light: #3D3010;
+  --color-danger: #EC7063;
+  --color-danger-light: #3D1A17;
+  --color-info: #5DADE2;
+
+  /* ---- 中性色 - 文本 ---- */
+  --color-text-primary: #E8E8E8;
+  --color-text-secondary: #A0A0A0;
+  --color-text-tertiary: #6B6B6B;
+  --color-text-inverse: #1A1A1A;
+
+  /* ---- 中性色 - 背景 ---- */
+  --color-bg-page: #121212;
+  --color-bg-card: #1E1E1E;
+  --color-bg-elevated: #2A2A2A;
+  --color-bg-hover: #333333;
+
+  /* ---- 中性色 - 边框 ---- */
+  --color-border: #3A3A3A;
+  --color-border-light: #2E2E2E;
+  --color-divider: #2C2C2C;
+
+  /* ---- 阴影（暗色模式加深） ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-focus: 0 0 0 3px rgba(91, 160, 233, 0.4);
+}
+
+/* ---- 自动暗色模式（跟随系统） ---- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-brand-primary: #5BA0E9;
+    --color-brand-primary-light: #1A3A5C;
+    --color-brand-primary-dark: #3D7FC4;
+
+    --color-success: #2ECC71;
+    --color-success-light: #1A3D27;
+    --color-warning: #F1C40F;
+    --color-warning-light: #3D3010;
+    --color-danger: #EC7063;
+    --color-danger-light: #3D1A17;
+    --color-info: #5DADE2;
+
+    --color-text-primary: #E8E8E8;
+    --color-text-secondary: #A0A0A0;
+    --color-text-tertiary: #6B6B6B;
+    --color-text-inverse: #1A1A1A;
+
+    --color-bg-page: #121212;
+    --color-bg-card: #1E1E1E;
+    --color-bg-elevated: #2A2A2A;
+    --color-bg-hover: #333333;
+
+    --color-border: #3A3A3A;
+    --color-border-light: #2E2E2E;
+    --color-divider: #2C2C2C;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+    --shadow-focus: 0 0 0 3px rgba(91, 160, 233, 0.4);
+  }
+}
