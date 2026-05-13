@@ -71,7 +71,19 @@
 所有验收条件均已满足，判决 READY。项目可以提审上线。
 
 ### 上线前建议
-1. 补充 TabBar 图标资源（当前为占位文件）
-2. 补充默认头像图片
-3. 在微信公众平台配置 AppID 和 AppSecret
-4. 配置生产环境 API 地址（config/env.js 的 production 配置）
+1. ~~补充 TabBar 图标资源（当前为占位文件）~~ ✓ 已完成（2026-05-13）
+2. ~~补充默认头像图片~~ ✓ 已完成（2026-05-13）
+3. 在微信公众平台配置 AppID 和 AppSecret（需手动配置）
+4. 配置生产环境 API 地址（config/env.js 的 production 配置）（需手动配置）
+
+### 图标资源清单（2026-05-13 更新）
+
+| 图标 | 文件名 | 尺寸 | 用途 |
+|------|--------|------|------|
+| 打卡（未选中） | tab-check.png | 81x81px | TabBar 图标 |
+| 打卡（选中） | tab-check-active.png | 81x81px | TabBar 图标 |
+| 记录（未选中） | tab-history.png | 81x81px | TabBar 图标 |
+| 记录（选中） | tab-history-active.png | 81x81px | TabBar 图标 |
+| 我的（未选中） | tab-profile.png | 81x81px | TabBar 图标 |
+| 我的（选中） | tab-profile-active.png | 81x81px | TabBar 图标 |
+| 默认头像 | default-avatar.png | 200x200px | 用户头像占位 |
