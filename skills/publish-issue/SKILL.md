@@ -51,22 +51,52 @@ curl -s -H "Authorization: token <TOKEN>" \
   "https://api.github.com/repos/<OWNER>/<REPO>/labels"
 ```
 
-将标签列表展示给用户：
+将 **所有标签** 展示为独立选项，支持多选：
 
 ```
-可用标签：
-1. Claude Code
-2. mcp
-3. bug
-4. enhancement
-...
+选择标签（可多选，输入 Other 添加自定义标签）：
 
-请选择标签（输入编号，多个用逗号分隔，直接回车默认选择 Claude Code）：
+ [x] Claude Code ⭐（推荐）
+ [ ] mcp
+ [ ] bug
+ [ ] enhancement
+ [ ] documentation
+ [ ] docker
+ [ ] git
+ [ ] github
+ [ ] k8s
+ [ ] Kubernetes
+ [ ] mac
+ [ ] node
+ [ ] npm
+ [ ] about
+ [ ] AI
+ [ ] Ai Prompt(Ai 提示词)
+ [ ] CC Switch
+ [ ] Charles
+ [ ] codex
+ [ ] duplicate
+ [ ] Fetch
+ [ ] Gemini CLI
+ [ ] good first issue
+ [ ] help wanted
+ [ ] html2pdf.js
+ [ ] invalid
+ [ ] Navicat Premium
+ [ ] open
+ [ ] OpenClaw
+ [ ] OpenCode
+ [+ ] 自定义标签（输入 Other 添加新标签）
+
+已选中：Claude Code
 ```
 
-- 用户输入编号 → 对应标签
-- 用户直接回车 → 默认选择 `Claude Code`
-- 如果默认标签不存在 → 新建标签添加
+交互规则：
+- **每个标签是一个独立选项**，全部列出
+- 标记 ⭐ 的为推荐标签（默认预选）
+- **多选**：可同时选择多个标签
+- **自定义标签**：选择"自定义标签"选项后输入新标签名，会自动创建
+- **回车**：确认当前选择并继续
 
 ### 第 4 步：读取 Markdown 内容
 
