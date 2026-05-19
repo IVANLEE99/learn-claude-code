@@ -1,9 +1,10 @@
 ## 任务
-详细阅读https://mp.weixin.qq.com/s/FeNQTXQ1gbHeBLONSCp8pA中的
-企业服务团队corporate-services
-帮我对应写一个企业服务团队corporate-services agent
+使用浏览器打开 自己读取详细阅读https://mp.weixin.qq.com/s/FeNQTXQ1gbHeBLONSCp8pA中的
+自媒体团队
+selfmedia-team
+帮我对应写一个自媒体团队selfmedia-team agent
 
-### ❌企业服务团队
+### ✅企业服务团队
 corporate-services
 1注册公司
 
@@ -28,7 +29,7 @@ standard-team
 miniprogram-team
 3落产品
 
-### ❌自媒体团队
+### ✅自媒体团队
 selfmedia-team
 4让人找到你
 
