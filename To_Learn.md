@@ -1,7 +1,7 @@
 ## 任务
 详细阅读https://mp.weixin.qq.com/s/FeNQTXQ1gbHeBLONSCp8pA中的
 企业服务团队corporate-services
-帮我对应写一个企业服务团队corporate-services 
+帮我对应写一个企业服务团队corporate-services agent
 
 ### ❌企业服务团队
 corporate-services
@@ -88,3 +88,8 @@ https://weread.qq.com/r/weread-skills
    为了破除这个局限,扩展认知我该继续读什么书?
 
 帮我生成一张哔哩哔哩的视频封面图
+
+
+经营范围：
+
+一般项目：软件开发；人工智能应用软件开发；人工智能通用应用系统；网络与信息安全软件开发；信息技术咨询服务；数据处理和存储支持服务；数字内容制作服务（不含出版发行）；企业管理咨询；社会经济咨询服务；专业设计服务；计算机软硬件及辅助设备零售；互联网销售（除销售需要许可的商品）(除依法须经批准的项目外，凭营业执照依法自主开展经营活动)。
