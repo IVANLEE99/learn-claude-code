@@ -48,73 +48,179 @@ print(d['mcpServers']['github']['env']['GITHUB_PERSONAL_ACCESS_TOKEN'])
 
 ```bash
 curl -s -H "Authorization: token <TOKEN>" \
-  "https://api.github.com/repos/<OWNER>/<REPO>/labels"
+  "https://api.github.com/repos/<OWNER>/<REPO>/labels" | python3 -c "
+import sys, json
+labels = json.load(sys.stdin)
+for i, l in enumerate(labels, 1):
+    print(f'{i}. {l[\"name\"]}')
+"
 ```
 
-将 **所有标签** 展示为独立选项，支持多选：
+将标签列表展示给用户选择（使用 AskUserQuestion 工具）。
 
-```
-选择标签（可多选，输入 Other 添加自定义标签）：
+- 用户选择 → 对应标签
+- 默认推荐选择 `Claude Code` + `mcp`
+- 如果标签不存在 → 跳过，不新建
 
- [x] Claude Code ⭐（推荐）
- [ ] mcp
- [ ] bug
- [ ] enhancement
- [ ] documentation
- [ ] docker
- [ ] git
- [ ] github
- [ ] k8s
- [ ] Kubernetes
- [ ] mac
- [ ] node
- [ ] npm
- [ ] about
- [ ] AI
- [ ] Ai Prompt(Ai 提示词)
- [ ] CC Switch
- [ ] Charles
- [ ] codex
- [ ] duplicate
- [ ] Fetch
- [ ] Gemini CLI
- [ ] good first issue
- [ ] help wanted
- [ ] html2pdf.js
- [ ] invalid
- [ ] Navicat Premium
- [ ] open
- [ ] OpenClaw
- [ ] OpenCode
- [+ ] 自定义标签（输入 Other 添加新标签）
-
-已选中：Claude Code
-```
-
-交互规则：
-- **每个标签是一个独立选项**，全部列出
-- 标记 ⭐ 的为推荐标签（默认预选）
-- **多选**：可同时选择多个标签
-- **自定义标签**：选择"自定义标签"选项后输入新标签名，会自动创建
-- **回车**：确认当前选择并继续
-
-### 第 4 步：读取 Markdown 内容
+### 第 4 步：读取 Markdown 内容并上传图片
 
 读取用户提供的 Markdown 文件或内容：
 1. 提取第一个 `#` 标题作为 Issue 标题
-2. 剩余内容作为 Issue body
+2. 扫描所有本地图片引用（`![...](...png/jpg/jpeg/gif/webp)`）
+3. 上传本地图片到 GitHub 仓库，替换为 raw URL
+
+**图片上传流程：**
+
+对每个本地图片引用，执行以下操作：
+
+```python
+import base64, hashlib, re, json, subprocess
+
+# 1. 读取本地图片文件
+with open(image_path, 'rb') as f:
+    content = f.read()
+
+# 2. 计算 blob SHA
+blob_sha = hashlib.sha1(b'blob ' + str(len(content)).encode() + b'\n' + content).hexdigest()
+
+# 3. 通过 GitHub API 创建 blob
+blob_data = json.dumps({
+    'encoding': 'base64',
+    'content': base64.b64encode(content).decode()
+})
+# POST https://api.github.com/repos/{owner}/{repo}/git/blobs
+
+# 4. 获取仓库默认分支的 tree SHA
+# GET https://api.github.com/repos/{owner}/{repo}/git/refs/heads/main
+
+# 5. 创建新 tree（包含图片文件）
+# POST https://api.github.com/repos/{owner}/{repo}/git/trees
+
+# 6. 创建 commit
+# POST https://api.github.com/repos/{owner}/{repo}/git/commits
+
+# 7. 更新 refs/heads/main 指向新 commit
+# PATCH https://api.github.com/repos/{owner}/{repo}/git/refs/heads/main
+
+# 8. 替换 markdown 中的图片引用为 raw URL
+# ![alt](https://github.com/{owner}/{repo}/raw/main/{image_path})
+```
+
+**使用 Python 脚本批量处理：**
+
+```bash
+python3 << 'PYEOF'
+import base64, hashlib, json, re, sys, urllib.request
+
+OWNER = "<OWNER>"
+REPO = "<REPO>"
+TOKEN = "<TOKEN>"
+MARKDOWN_FILE = "<FILE_PATH>"
+DEFAULT_BRANCH = "main"
+
+def github_api(method, path, data=None):
+    url = f"https://api.github.com{path}"
+    req = urllib.request.Request(url, method=method)
+    req.add_header("Authorization", f"token {TOKEN}")
+    req.add_header("Content-Type", "application/json")
+    if data:
+        req.data = json.dumps(data).encode()
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read())
+
+# 读取 markdown
+with open(MARKDOWN_FILE) as f:
+    content = f.read()
+
+# 提取标题
+lines = content.split('\n')
+title = lines[0].lstrip('# ').strip()
+body_lines = lines[1:]
+
+# 查找本地图片引用
+img_pattern = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
+local_exts = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')
+
+for match in img_pattern.finditer('\n'.join(body_lines)):
+    alt, src = match.group(1), match.group(2)
+    if any(src.lower().endswith(ext) for ext in local_exts) and not src.startswith('http'):
+        # 读取图片
+        with open(src, 'rb') as f:
+            img_content = f.read()
+        
+        # 创建 blob
+        blob_sha = hashlib.sha1(
+            b'blob ' + str(len(img_content)).encode() + b'\n' + img_content
+        ).hexdigest()
+        
+        blob = github_api("POST", f"/repos/{OWNER}/{REPO}/git/blobs", {
+            "encoding": "base64",
+            "content": base64.b64encode(img_content).decode()
+        })
+        
+        # 获取当前 tree
+        ref = github_api("GET", f"/repos/{OWNER}/{REPO}/git/refs/heads/{DEFAULT_BRANCH}")
+        base_tree = ref["object"]["sha"]
+        
+        # 创建新 tree
+        tree = github_api("POST", f"/repos/{OWNER}/{REPO}/git/trees", {
+            "base_tree": base_tree,
+            "tree": [{"path": src, "mode": "100644", "type": "blob", "sha": blob["sha"]}]
+        })
+        
+        # 创建 commit
+        commit = github_api("POST", f"/repos/{OWNER}/{REPO}/git/commits", {
+            "message": f"Add image: {src}",
+            "tree": tree["sha"],
+            "parents": [base_tree]
+        })
+        
+        # 更新 ref
+        github_api("PATCH", f"/repos/{OWNER}/{REPO}/git/refs/heads/{DEFAULT_BRANCH}", {
+            "sha": commit["sha"]
+        })
+        
+        # 替换为 raw URL
+        raw_url = f"https://github.com/{OWNER}/{REPO}/raw/main/{src}"
+        body_content = '\n'.join(body_lines)
+        body_content = body_content.replace(src, raw_url)
+        body_lines = body_content.split('\n')
+
+# 输出结果
+print(json.dumps({"title": title, "body": '\n'.join(body_lines)}))
+PYEOF
+```
 
 ### 第 5 步：创建 Issue
 
-使用 GitHub API 创建 Issue（详见 [create-issue-api.md](references/create-issue-api.md)）
+使用 Python 脚本创建 Issue（避免 JSON 转义问题）：
+
+```bash
+curl -s -X POST "https://api.github.com/repos/<OWNER>/<REPO>/issues" \
+  -H "Authorization: token <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "$(python3 -c "
+import json
+body = open('<FILE_PATH>').read()
+lines = body.split('\n')
+# Skip title line and image references
+content_lines = [l for l in lines[1:] if '![' not in l]
+content = '\n'.join(content_lines)
+print(json.dumps({
+    'title': '<TITLE>',
+    'body': content,
+    'labels': [<LABELS>]
+}))
+")"
+```
 
 ### 第 6 步：输出结果
 
 返回 Issue 编号和链接：
 ```
 Issue 已创建：
-- #41 GitHub MCP Server 配置指南
-- https://github.com/IVANLEE99/IVANLEE99.github.io/issues/41
+- #53 知乎搜索 MCP 接入指南
+- https://github.com/IVANLEE99/IVANLEE99.github.io/issues/53
 - Labels: Claude Code, mcp
 ```
 
