@@ -2,1345 +2,1408 @@
   {
     "text": "大家好，",
     "startMs": 0,
-    "endMs": 885,
+    "endMs": 741,
     "timestampMs": 0,
     "confidence": 1.0
   },
   {
     "text": "今天分享五个我亲测有效的AI效率工具。",
-    "startMs": 885,
-    "endMs": 5086,
-    "timestampMs": 885,
+    "startMs": 741,
+    "endMs": 5184,
+    "timestampMs": 741,
     "confidence": 1.0
   },
   {
     "text": "最近总有人问我，",
-    "startMs": 5086,
-    "endMs": 6855,
-    "timestampMs": 5086,
+    "startMs": 5184,
+    "endMs": 6912,
+    "timestampMs": 5184,
     "confidence": 1.0
   },
   {
     "text": "你一个人怎么搞定这么多事？",
-    "startMs": 6855,
-    "endMs": 9730,
-    "timestampMs": 6855,
+    "startMs": 6912,
+    "endMs": 9874,
+    "timestampMs": 6912,
     "confidence": 1.0
   },
   {
     "text": "答案很简单，",
-    "startMs": 9730,
-    "endMs": 11057,
-    "timestampMs": 9730,
+    "startMs": 9874,
+    "endMs": 11108,
+    "timestampMs": 9874,
     "confidence": 1.0
   },
   {
     "text": "用对工具。",
-    "startMs": 11057,
-    "endMs": 12163,
-    "timestampMs": 11057,
+    "startMs": 11108,
+    "endMs": 12096,
+    "timestampMs": 11108,
     "confidence": 1.0
   },
   {
     "text": "这五个工具，",
-    "startMs": 12163,
-    "endMs": 13489,
-    "timestampMs": 12163,
+    "startMs": 12096,
+    "endMs": 13330,
+    "timestampMs": 12096,
     "confidence": 1.0
   },
   {
     "text": "每一个都是我日常高频使用的，",
-    "startMs": 13489,
-    "endMs": 16585,
-    "timestampMs": 13489,
+    "startMs": 13330,
+    "endMs": 16539,
+    "timestampMs": 13330,
     "confidence": 1.0
   },
   {
     "text": "不是广告，",
-    "startMs": 16585,
-    "endMs": 17691,
-    "timestampMs": 16585,
+    "startMs": 16539,
+    "endMs": 17526,
+    "timestampMs": 16539,
     "confidence": 1.0
   },
   {
     "text": "纯粹觉得好用才推荐。",
-    "startMs": 17691,
-    "endMs": 19902,
-    "timestampMs": 17691,
+    "startMs": 17526,
+    "endMs": 19748,
+    "timestampMs": 17526,
     "confidence": 1.0
   },
   {
     "text": "接下来我会逐一演示，",
-    "startMs": 19902,
-    "endMs": 22114,
-    "timestampMs": 19902,
+    "startMs": 19748,
+    "endMs": 21970,
+    "timestampMs": 19748,
     "confidence": 1.0
   },
   {
     "text": "告诉大家每个工具适合什么场景，",
-    "startMs": 22114,
-    "endMs": 25431,
-    "timestampMs": 22114,
+    "startMs": 21970,
+    "endMs": 25426,
+    "timestampMs": 21970,
     "confidence": 1.0
   },
   {
     "text": "效率能提升多少。",
-    "startMs": 25431,
-    "endMs": 27200,
-    "timestampMs": 25431,
+    "startMs": 25426,
+    "endMs": 27154,
+    "timestampMs": 25426,
     "confidence": 1.0
   },
   {
     "text": "第一个是Claude Code，",
-    "startMs": 26700,
-    "endMs": 30141,
-    "timestampMs": 26700,
+    "startMs": 26654,
+    "endMs": 30087,
+    "timestampMs": 26654,
     "confidence": 1.0
   },
   {
     "text": "一个AI编程助手。",
-    "startMs": 30141,
-    "endMs": 32077,
-    "timestampMs": 30141,
+    "startMs": 30087,
+    "endMs": 32049,
+    "timestampMs": 30087,
     "confidence": 1.0
   },
   {
     "text": "它最大的特点是能理解你代码的意图，",
-    "startMs": 32077,
-    "endMs": 35734,
-    "timestampMs": 32077,
+    "startMs": 32049,
+    "endMs": 35973,
+    "timestampMs": 32049,
     "confidence": 1.0
   },
   {
     "text": "不只是简单的语法补全。",
-    "startMs": 35734,
-    "endMs": 38100,
-    "timestampMs": 35734,
+    "startMs": 35973,
+    "endMs": 38425,
+    "timestampMs": 35973,
     "confidence": 1.0
   },
   {
     "text": "主要功能有四个。",
-    "startMs": 38100,
-    "endMs": 39820,
-    "timestampMs": 38100,
+    "startMs": 38425,
+    "endMs": 40142,
+    "timestampMs": 38425,
     "confidence": 1.0
   },
   {
     "text": "第一，",
-    "startMs": 39820,
-    "endMs": 40466,
-    "timestampMs": 39820,
+    "startMs": 40142,
+    "endMs": 40633,
+    "timestampMs": 40142,
     "confidence": 1.0
   },
   {
     "text": "代码生成，",
-    "startMs": 40466,
-    "endMs": 41541,
-    "timestampMs": 40466,
+    "startMs": 40633,
+    "endMs": 41614,
+    "timestampMs": 40633,
     "confidence": 1.0
   },
   {
     "text": "你描述需求，",
-    "startMs": 41541,
-    "endMs": 42832,
-    "timestampMs": 41541,
+    "startMs": 41614,
+    "endMs": 42840,
+    "timestampMs": 41614,
     "confidence": 1.0
   },
   {
     "text": "它直接生成完整代码。",
-    "startMs": 42832,
-    "endMs": 44982,
-    "timestampMs": 42832,
+    "startMs": 42840,
+    "endMs": 45047,
+    "timestampMs": 42840,
     "confidence": 1.0
   },
   {
     "text": "第二，",
-    "startMs": 44982,
-    "endMs": 45628,
-    "timestampMs": 44982,
+    "startMs": 45047,
+    "endMs": 45537,
+    "timestampMs": 45047,
     "confidence": 1.0
   },
   {
     "text": "代码解释，",
-    "startMs": 45628,
-    "endMs": 46703,
-    "timestampMs": 45628,
+    "startMs": 45537,
+    "endMs": 46518,
+    "timestampMs": 45537,
     "confidence": 1.0
   },
   {
     "text": "看不懂的代码，",
-    "startMs": 46703,
-    "endMs": 48209,
-    "timestampMs": 46703,
+    "startMs": 46518,
+    "endMs": 47990,
+    "timestampMs": 46518,
     "confidence": 1.0
   },
   {
     "text": "让它解释给你听。",
-    "startMs": 48209,
-    "endMs": 49929,
-    "timestampMs": 48209,
+    "startMs": 47990,
+    "endMs": 49707,
+    "timestampMs": 47990,
     "confidence": 1.0
   },
   {
     "text": "第三，",
-    "startMs": 49929,
-    "endMs": 50575,
-    "timestampMs": 49929,
+    "startMs": 49707,
+    "endMs": 50197,
+    "timestampMs": 49707,
     "confidence": 1.0
   },
   {
     "text": "Bug调试，",
-    "startMs": 50575,
-    "endMs": 51865,
-    "timestampMs": 50575,
+    "startMs": 50197,
+    "endMs": 51423,
+    "timestampMs": 50197,
     "confidence": 1.0
   },
   {
     "text": "报错信息直接贴进去，",
-    "startMs": 51865,
-    "endMs": 54016,
-    "timestampMs": 51865,
+    "startMs": 51423,
+    "endMs": 53631,
+    "timestampMs": 51423,
     "confidence": 1.0
   },
   {
     "text": "帮你分析原因。",
-    "startMs": 54016,
-    "endMs": 55522,
-    "timestampMs": 54016,
+    "startMs": 53631,
+    "endMs": 55102,
+    "timestampMs": 53631,
     "confidence": 1.0
   },
   {
     "text": "第四，",
-    "startMs": 55522,
-    "endMs": 56167,
-    "timestampMs": 55522,
+    "startMs": 55102,
+    "endMs": 55593,
+    "timestampMs": 55102,
     "confidence": 1.0
   },
   {
     "text": "重构优化，",
-    "startMs": 56167,
-    "endMs": 57242,
-    "timestampMs": 56167,
+    "startMs": 55593,
+    "endMs": 56574,
+    "timestampMs": 55593,
     "confidence": 1.0
   },
   {
     "text": "代码写完让它优化，",
-    "startMs": 57242,
-    "endMs": 59178,
-    "timestampMs": 57242,
+    "startMs": 56574,
+    "endMs": 58536,
+    "timestampMs": 56574,
     "confidence": 1.0
   },
   {
     "text": "通常能提升百分之二十质量。",
-    "startMs": 59178,
-    "endMs": 61974,
-    "timestampMs": 59178,
+    "startMs": 58536,
+    "endMs": 61478,
+    "timestampMs": 58536,
     "confidence": 1.0
   },
   {
     "text": "适合什么场景呢？",
-    "startMs": 61974,
-    "endMs": 63695,
-    "timestampMs": 61974,
+    "startMs": 61478,
+    "endMs": 63195,
+    "timestampMs": 61478,
     "confidence": 1.0
   },
   {
     "text": "写重复性代码时，",
-    "startMs": 63695,
-    "endMs": 65416,
-    "timestampMs": 63695,
+    "startMs": 63195,
+    "endMs": 64912,
+    "timestampMs": 63195,
     "confidence": 1.0
   },
   {
     "text": "直接描述需求生成。",
-    "startMs": 65416,
-    "endMs": 67352,
-    "timestampMs": 65416,
+    "startMs": 64912,
+    "endMs": 66874,
+    "timestampMs": 64912,
     "confidence": 1.0
   },
   {
     "text": "接手老项目时，",
-    "startMs": 67352,
-    "endMs": 68857,
-    "timestampMs": 67352,
+    "startMs": 66874,
+    "endMs": 68345,
+    "timestampMs": 66874,
     "confidence": 1.0
   },
   {
     "text": "让它解释复杂逻辑。",
-    "startMs": 68857,
-    "endMs": 70793,
-    "timestampMs": 68857,
+    "startMs": 68345,
+    "endMs": 70307,
+    "timestampMs": 68345,
     "confidence": 1.0
   },
   {
     "text": "调试Bug时，",
-    "startMs": 70793,
-    "endMs": 72299,
-    "timestampMs": 70793,
+    "startMs": 70307,
+    "endMs": 71779,
+    "timestampMs": 70307,
     "confidence": 1.0
   },
   {
     "text": "快速定位问题原因。",
-    "startMs": 72299,
-    "endMs": 74234,
-    "timestampMs": 72299,
+    "startMs": 71779,
+    "endMs": 73741,
+    "timestampMs": 71779,
     "confidence": 1.0
   },
   {
     "text": "我用了三个月，",
-    "startMs": 74234,
-    "endMs": 75740,
-    "timestampMs": 74234,
+    "startMs": 73741,
+    "endMs": 75212,
+    "timestampMs": 73741,
     "confidence": 1.0
   },
   {
     "text": "最明显的感受是写代码的时间减少了百分之四十。",
-    "startMs": 75740,
-    "endMs": 80472,
-    "timestampMs": 75740,
+    "startMs": 75212,
+    "endMs": 80362,
+    "timestampMs": 75212,
     "confidence": 1.0
   },
   {
     "text": "以前要查文档，",
-    "startMs": 80472,
-    "endMs": 81978,
-    "timestampMs": 80472,
+    "startMs": 80362,
+    "endMs": 81834,
+    "timestampMs": 80362,
     "confidence": 1.0
   },
   {
     "text": "搜Stack Overflow的问题，",
-    "startMs": 81978,
-    "endMs": 86064,
-    "timestampMs": 81978,
+    "startMs": 81834,
+    "endMs": 86003,
+    "timestampMs": 81834,
     "confidence": 1.0
   },
   {
     "text": "现在直接问它就行。",
-    "startMs": 86064,
-    "endMs": 88000,
-    "timestampMs": 86064,
+    "startMs": 86003,
+    "endMs": 87965,
+    "timestampMs": 86003,
     "confidence": 1.0
   },
   {
     "text": "第二个是Cursor，",
-    "startMs": 87500,
-    "endMs": 89867,
-    "timestampMs": 87500,
+    "startMs": 87465,
+    "endMs": 89923,
+    "timestampMs": 87465,
     "confidence": 1.0
   },
   {
     "text": "一个把AI深度集成到编辑器里的VS Code替代品。",
-    "startMs": 89867,
-    "endMs": 95461,
-    "timestampMs": 89867,
+    "startMs": 89923,
+    "endMs": 95821,
+    "timestampMs": 89923,
     "confidence": 1.0
   },
   {
     "text": "它的核心功能。",
-    "startMs": 95461,
-    "endMs": 96967,
-    "timestampMs": 95461,
+    "startMs": 95821,
+    "endMs": 97295,
+    "timestampMs": 95821,
     "confidence": 1.0
   },
   {
     "text": "第一，",
-    "startMs": 96967,
-    "endMs": 97612,
-    "timestampMs": 96967,
+    "startMs": 97295,
+    "endMs": 97787,
+    "timestampMs": 97295,
     "confidence": 1.0
   },
   {
     "text": "智能补全，",
-    "startMs": 97612,
-    "endMs": 98688,
-    "timestampMs": 97612,
+    "startMs": 97787,
+    "endMs": 98770,
+    "timestampMs": 97787,
     "confidence": 1.0
   },
   {
     "text": "不是简单的语法补全，",
-    "startMs": 98688,
-    "endMs": 100839,
-    "timestampMs": 98688,
+    "startMs": 98770,
+    "endMs": 100982,
+    "timestampMs": 98770,
     "confidence": 1.0
   },
   {
     "text": "而是理解上下文的智能建议。",
-    "startMs": 100839,
-    "endMs": 103636,
-    "timestampMs": 100839,
+    "startMs": 100982,
+    "endMs": 103931,
+    "timestampMs": 100982,
     "confidence": 1.0
   },
   {
     "text": "第二，",
-    "startMs": 103636,
-    "endMs": 104282,
-    "timestampMs": 103636,
+    "startMs": 103931,
+    "endMs": 104423,
+    "timestampMs": 103931,
     "confidence": 1.0
   },
   {
     "text": "代码重构，",
-    "startMs": 104282,
-    "endMs": 105358,
-    "timestampMs": 104282,
+    "startMs": 104423,
+    "endMs": 105406,
+    "timestampMs": 104423,
     "confidence": 1.0
   },
   {
     "text": "选中代码，",
-    "startMs": 105358,
-    "endMs": 106433,
-    "timestampMs": 105358,
+    "startMs": 105406,
+    "endMs": 106389,
+    "timestampMs": 105406,
     "confidence": 1.0
   },
   {
     "text": "描述你想怎么改，",
-    "startMs": 106433,
-    "endMs": 108155,
-    "timestampMs": 106433,
+    "startMs": 106389,
+    "endMs": 108109,
+    "timestampMs": 106389,
     "confidence": 1.0
   },
   {
     "text": "它帮你重构。",
-    "startMs": 108155,
-    "endMs": 109445,
-    "timestampMs": 108155,
+    "startMs": 108109,
+    "endMs": 109338,
+    "timestampMs": 108109,
     "confidence": 1.0
   },
   {
     "text": "第三，",
-    "startMs": 109445,
-    "endMs": 110091,
-    "timestampMs": 109445,
+    "startMs": 109338,
+    "endMs": 109829,
+    "timestampMs": 109338,
     "confidence": 1.0
   },
   {
     "text": "多文件编辑，",
-    "startMs": 110091,
-    "endMs": 111382,
-    "timestampMs": 110091,
+    "startMs": 109829,
+    "endMs": 111058,
+    "timestampMs": 109829,
     "confidence": 1.0
   },
   {
     "text": "一次对话，",
-    "startMs": 111382,
-    "endMs": 112458,
-    "timestampMs": 111382,
+    "startMs": 111058,
+    "endMs": 112041,
+    "timestampMs": 111058,
     "confidence": 1.0
   },
   {
     "text": "同时修改多个相关文件。",
-    "startMs": 112458,
-    "endMs": 114824,
-    "timestampMs": 112458,
+    "startMs": 112041,
+    "endMs": 114499,
+    "timestampMs": 112041,
     "confidence": 1.0
   },
   {
     "text": "第四，",
-    "startMs": 114824,
-    "endMs": 115470,
-    "timestampMs": 114824,
+    "startMs": 114499,
+    "endMs": 114990,
+    "timestampMs": 114499,
     "confidence": 1.0
   },
   {
     "text": "内联编辑，",
-    "startMs": 115470,
-    "endMs": 116545,
-    "timestampMs": 115470,
+    "startMs": 114990,
+    "endMs": 115973,
+    "timestampMs": 114990,
     "confidence": 1.0
   },
   {
     "text": "选中代码，",
-    "startMs": 116545,
-    "endMs": 117621,
-    "timestampMs": 116545,
+    "startMs": 115973,
+    "endMs": 116956,
+    "timestampMs": 115973,
     "confidence": 1.0
   },
   {
     "text": "直接用自然语言描述修改需求。",
-    "startMs": 117621,
-    "endMs": 120633,
-    "timestampMs": 117621,
+    "startMs": 116956,
+    "endMs": 120151,
+    "timestampMs": 116956,
     "confidence": 1.0
   },
   {
     "text": "适合什么场景呢？",
-    "startMs": 120633,
-    "endMs": 122355,
-    "timestampMs": 120633,
+    "startMs": 120151,
+    "endMs": 121872,
+    "timestampMs": 120151,
     "confidence": 1.0
   },
   {
     "text": "重构代码时，",
-    "startMs": 122355,
-    "endMs": 123645,
-    "timestampMs": 122355,
+    "startMs": 121872,
+    "endMs": 123100,
+    "timestampMs": 121872,
     "confidence": 1.0
   },
   {
     "text": "让它帮忙批量修改。",
-    "startMs": 123645,
-    "endMs": 125582,
-    "timestampMs": 123645,
+    "startMs": 123100,
+    "endMs": 125066,
+    "timestampMs": 123100,
     "confidence": 1.0
   },
   {
     "text": "写新功能时，",
-    "startMs": 125582,
-    "endMs": 126873,
-    "timestampMs": 125582,
+    "startMs": 125066,
+    "endMs": 126295,
+    "timestampMs": 125066,
     "confidence": 1.0
   },
   {
     "text": "利用智能补全加速。",
-    "startMs": 126873,
-    "endMs": 128809,
-    "timestampMs": 126873,
+    "startMs": 126295,
+    "endMs": 128261,
+    "timestampMs": 126295,
     "confidence": 1.0
   },
   {
     "text": "代码review时，",
-    "startMs": 128809,
-    "endMs": 130961,
-    "timestampMs": 128809,
+    "startMs": 128261,
+    "endMs": 130473,
+    "timestampMs": 128261,
     "confidence": 1.0
   },
   {
     "text": "让它帮忙检查问题。",
-    "startMs": 130961,
-    "endMs": 132897,
-    "timestampMs": 130961,
+    "startMs": 130473,
+    "endMs": 132439,
+    "timestampMs": 130473,
     "confidence": 1.0
   },
   {
     "text": "我从VS Code切换到Cursor后，",
-    "startMs": 132897,
-    "endMs": 137200,
-    "timestampMs": 132897,
+    "startMs": 132439,
+    "endMs": 136863,
+    "timestampMs": 132439,
     "confidence": 1.0
   },
   {
     "text": "编码速度提升了百分之三十。",
-    "startMs": 137200,
-    "endMs": 139997,
-    "timestampMs": 137200,
+    "startMs": 136863,
+    "endMs": 139812,
+    "timestampMs": 136863,
     "confidence": 1.0
   },
   {
     "text": "特别是重构代码的时候，",
-    "startMs": 139997,
-    "endMs": 142364,
-    "timestampMs": 139997,
+    "startMs": 139812,
+    "endMs": 142270,
+    "timestampMs": 139812,
     "confidence": 1.0
   },
   {
     "text": "效率提升非常明显。",
-    "startMs": 142364,
-    "endMs": 144300,
-    "timestampMs": 142364,
+    "startMs": 142270,
+    "endMs": 144236,
+    "timestampMs": 142270,
     "confidence": 1.0
   },
   {
     "text": "第三个是GitHub Copilot，",
-    "startMs": 143800,
-    "endMs": 148115,
-    "timestampMs": 143800,
+    "startMs": 143736,
+    "endMs": 148169,
+    "timestampMs": 143736,
     "confidence": 1.0
   },
   {
     "text": "这是我用得最多的工具，",
-    "startMs": 148115,
-    "endMs": 150614,
-    "timestampMs": 148115,
+    "startMs": 148169,
+    "endMs": 150776,
+    "timestampMs": 148169,
     "confidence": 1.0
   },
   {
     "text": "已经离不开了。",
-    "startMs": 150614,
-    "endMs": 152204,
-    "timestampMs": 150614,
+    "startMs": 150776,
+    "endMs": 152341,
+    "timestampMs": 150776,
     "confidence": 1.0
   },
   {
     "text": "它的核心功能。",
-    "startMs": 152204,
-    "endMs": 153794,
-    "timestampMs": 152204,
+    "startMs": 152341,
+    "endMs": 153905,
+    "timestampMs": 152341,
     "confidence": 1.0
   },
   {
     "text": "第一，",
-    "startMs": 153794,
-    "endMs": 154475,
-    "timestampMs": 153794,
+    "startMs": 153905,
+    "endMs": 154427,
+    "timestampMs": 153905,
     "confidence": 1.0
   },
   {
     "text": "实时补全，",
-    "startMs": 154475,
-    "endMs": 155611,
-    "timestampMs": 154475,
+    "startMs": 154427,
+    "endMs": 155470,
+    "timestampMs": 154427,
     "confidence": 1.0
   },
   {
     "text": "写代码时自动给出建议，",
-    "startMs": 155611,
-    "endMs": 158109,
-    "timestampMs": 155611,
+    "startMs": 155470,
+    "endMs": 158077,
+    "timestampMs": 155470,
     "confidence": 1.0
   },
   {
     "text": "按Tab接受。",
-    "startMs": 158109,
-    "endMs": 159699,
-    "timestampMs": 158109,
+    "startMs": 158077,
+    "endMs": 159642,
+    "timestampMs": 158077,
     "confidence": 1.0
   },
   {
     "text": "第二，",
-    "startMs": 159699,
-    "endMs": 160380,
-    "timestampMs": 159699,
+    "startMs": 159642,
+    "endMs": 160164,
+    "timestampMs": 159642,
     "confidence": 1.0
   },
   {
     "text": "函数生成，",
-    "startMs": 160380,
-    "endMs": 161516,
-    "timestampMs": 160380,
+    "startMs": 160164,
+    "endMs": 161207,
+    "timestampMs": 160164,
     "confidence": 1.0
   },
   {
     "text": "写好函数名和注释，",
-    "startMs": 161516,
-    "endMs": 163560,
-    "timestampMs": 161516,
+    "startMs": 161207,
+    "endMs": 163293,
+    "timestampMs": 161207,
     "confidence": 1.0
   },
   {
     "text": "自动生成实现。",
-    "startMs": 163560,
-    "endMs": 165150,
-    "timestampMs": 163560,
+    "startMs": 163293,
+    "endMs": 164857,
+    "timestampMs": 163293,
     "confidence": 1.0
   },
   {
     "text": "第三，",
-    "startMs": 165150,
-    "endMs": 165831,
-    "timestampMs": 165150,
+    "startMs": 164857,
+    "endMs": 165379,
+    "timestampMs": 164857,
     "confidence": 1.0
   },
   {
     "text": "测试生成，",
-    "startMs": 165831,
-    "endMs": 166967,
-    "timestampMs": 165831,
+    "startMs": 165379,
+    "endMs": 166422,
+    "timestampMs": 165379,
     "confidence": 1.0
   },
   {
     "text": "写好函数，",
-    "startMs": 166967,
-    "endMs": 168102,
-    "timestampMs": 166967,
+    "startMs": 166422,
+    "endMs": 167465,
+    "timestampMs": 166422,
     "confidence": 1.0
   },
   {
     "text": "让它帮忙生成单元测试。",
-    "startMs": 168102,
-    "endMs": 170601,
-    "timestampMs": 168102,
+    "startMs": 167465,
+    "endMs": 170072,
+    "timestampMs": 167465,
     "confidence": 1.0
   },
   {
     "text": "第四，",
-    "startMs": 170601,
-    "endMs": 171282,
-    "timestampMs": 170601,
+    "startMs": 170072,
+    "endMs": 170594,
+    "timestampMs": 170072,
     "confidence": 1.0
   },
   {
     "text": "文档生成，",
-    "startMs": 171282,
-    "endMs": 172418,
-    "timestampMs": 171282,
+    "startMs": 170594,
+    "endMs": 171637,
+    "timestampMs": 170594,
     "confidence": 1.0
   },
   {
     "text": "代码写完，",
-    "startMs": 172418,
-    "endMs": 173553,
-    "timestampMs": 172418,
+    "startMs": 171637,
+    "endMs": 172680,
+    "timestampMs": 171637,
     "confidence": 1.0
   },
   {
     "text": "自动生成注释和文档。",
-    "startMs": 173553,
-    "endMs": 175825,
-    "timestampMs": 173553,
+    "startMs": 172680,
+    "endMs": 175027,
+    "timestampMs": 172680,
     "confidence": 1.0
   },
   {
     "text": "适合什么场景呢？",
-    "startMs": 175825,
-    "endMs": 177642,
-    "timestampMs": 175825,
+    "startMs": 175027,
+    "endMs": 176852,
+    "timestampMs": 175027,
     "confidence": 1.0
   },
   {
     "text": "写重复模式的代码时，",
-    "startMs": 177642,
-    "endMs": 179913,
-    "timestampMs": 177642,
+    "startMs": 176852,
+    "endMs": 179199,
+    "timestampMs": 176852,
     "confidence": 1.0
   },
   {
     "text": "自动补全超快。",
-    "startMs": 179913,
-    "endMs": 181503,
-    "timestampMs": 179913,
+    "startMs": 179199,
+    "endMs": 180763,
+    "timestampMs": 179199,
     "confidence": 1.0
   },
   {
     "text": "写单元测试时，",
-    "startMs": 181503,
-    "endMs": 183093,
-    "timestampMs": 181503,
+    "startMs": 180763,
+    "endMs": 182328,
+    "timestampMs": 180763,
     "confidence": 1.0
   },
   {
     "text": "让它帮忙生成测试用例。",
-    "startMs": 183093,
-    "endMs": 185591,
-    "timestampMs": 183093,
+    "startMs": 182328,
+    "endMs": 184935,
+    "timestampMs": 182328,
     "confidence": 1.0
   },
   {
     "text": "写文档时，",
-    "startMs": 185591,
-    "endMs": 186727,
-    "timestampMs": 185591,
+    "startMs": 184935,
+    "endMs": 185978,
+    "timestampMs": 184935,
     "confidence": 1.0
   },
   {
     "text": "自动生成规范的注释。",
-    "startMs": 186727,
-    "endMs": 188998,
-    "timestampMs": 186727,
+    "startMs": 185978,
+    "endMs": 188325,
+    "timestampMs": 185978,
     "confidence": 1.0
   },
   {
     "text": "这是我每天都在用的工具，",
-    "startMs": 188998,
-    "endMs": 191723,
-    "timestampMs": 188998,
+    "startMs": 188325,
+    "endMs": 191194,
+    "timestampMs": 188325,
     "confidence": 1.0
   },
   {
     "text": "每天至少节省两小时。",
-    "startMs": 191723,
-    "endMs": 193995,
-    "timestampMs": 191723,
+    "startMs": 191194,
+    "endMs": 193540,
+    "timestampMs": 191194,
     "confidence": 1.0
   },
   {
     "text": "特别是写CRUD代码和单元测试的时候，",
-    "startMs": 193995,
-    "endMs": 198310,
-    "timestampMs": 193995,
+    "startMs": 193540,
+    "endMs": 198234,
+    "timestampMs": 193540,
     "confidence": 1.0
   },
   {
     "text": "效率提升巨大。",
-    "startMs": 198310,
-    "endMs": 199900,
-    "timestampMs": 198310,
+    "startMs": 198234,
+    "endMs": 199799,
+    "timestampMs": 198234,
     "confidence": 1.0
   },
   {
     "text": "第四个是v0.dev，",
-    "startMs": 199400,
-    "endMs": 201909,
-    "timestampMs": 199400,
+    "startMs": 199299,
+    "endMs": 201644,
+    "timestampMs": 199299,
     "confidence": 1.0
   },
   {
     "text": "前端开发者的福音。",
-    "startMs": 201909,
-    "endMs": 203962,
-    "timestampMs": 201909,
+    "startMs": 201644,
+    "endMs": 203729,
+    "timestampMs": 201644,
     "confidence": 1.0
   },
   {
     "text": "它的核心功能。",
-    "startMs": 203962,
-    "endMs": 205559,
-    "timestampMs": 203962,
+    "startMs": 203729,
+    "endMs": 205293,
+    "timestampMs": 203729,
     "confidence": 1.0
   },
   {
     "text": "第一，",
-    "startMs": 205559,
-    "endMs": 206244,
-    "timestampMs": 205559,
+    "startMs": 205293,
+    "endMs": 205814,
+    "timestampMs": 205293,
     "confidence": 1.0
   },
   {
     "text": "组件生成，",
-    "startMs": 206244,
-    "endMs": 207384,
-    "timestampMs": 206244,
+    "startMs": 205814,
+    "endMs": 206857,
+    "timestampMs": 205814,
     "confidence": 1.0
   },
   {
     "text": "描述UI需求，",
-    "startMs": 207384,
-    "endMs": 208981,
-    "timestampMs": 207384,
+    "startMs": 206857,
+    "endMs": 208420,
+    "timestampMs": 206857,
     "confidence": 1.0
   },
   {
     "text": "直接生成React或Vue组件。",
-    "startMs": 208981,
-    "endMs": 212631,
-    "timestampMs": 208981,
+    "startMs": 208420,
+    "endMs": 212330,
+    "timestampMs": 208420,
     "confidence": 1.0
   },
   {
     "text": "第二，",
-    "startMs": 212631,
-    "endMs": 213316,
-    "timestampMs": 212631,
+    "startMs": 212330,
+    "endMs": 212851,
+    "timestampMs": 212330,
     "confidence": 1.0
   },
   {
     "text": "样式生成，",
-    "startMs": 213316,
-    "endMs": 214456,
-    "timestampMs": 213316,
+    "startMs": 212851,
+    "endMs": 213893,
+    "timestampMs": 212851,
     "confidence": 1.0
   },
   {
     "text": "自动添加Tailwind CSS样式。",
-    "startMs": 214456,
-    "endMs": 218791,
-    "timestampMs": 214456,
+    "startMs": 213893,
+    "endMs": 218324,
+    "timestampMs": 213893,
     "confidence": 1.0
   },
   {
     "text": "第三，",
-    "startMs": 218791,
-    "endMs": 219475,
-    "timestampMs": 218791,
+    "startMs": 218324,
+    "endMs": 218845,
+    "timestampMs": 218324,
     "confidence": 1.0
   },
   {
     "text": "响应式设计，",
-    "startMs": 219475,
-    "endMs": 220844,
-    "timestampMs": 219475,
+    "startMs": 218845,
+    "endMs": 220148,
+    "timestampMs": 218845,
     "confidence": 1.0
   },
   {
     "text": "生成的组件自带响应式适配。",
-    "startMs": 220844,
-    "endMs": 223809,
-    "timestampMs": 220844,
+    "startMs": 220148,
+    "endMs": 223276,
+    "timestampMs": 220148,
     "confidence": 1.0
   },
   {
     "text": "第四，",
-    "startMs": 223809,
-    "endMs": 224494,
-    "timestampMs": 223809,
+    "startMs": 223276,
+    "endMs": 223797,
+    "timestampMs": 223276,
     "confidence": 1.0
   },
   {
     "text": "实时预览，",
-    "startMs": 224494,
-    "endMs": 225634,
-    "timestampMs": 224494,
+    "startMs": 223797,
+    "endMs": 224839,
+    "timestampMs": 223797,
     "confidence": 1.0
   },
   {
     "text": "生成后可以直接预览效果。",
-    "startMs": 225634,
-    "endMs": 228372,
-    "timestampMs": 225634,
+    "startMs": 224839,
+    "endMs": 227706,
+    "timestampMs": 224839,
     "confidence": 1.0
   },
   {
     "text": "适合什么场景呢？",
-    "startMs": 228372,
-    "endMs": 230197,
-    "timestampMs": 228372,
+    "startMs": 227706,
+    "endMs": 229531,
+    "timestampMs": 227706,
     "confidence": 1.0
   },
   {
     "text": "快速搭建页面原型时，",
-    "startMs": 230197,
-    "endMs": 232478,
-    "timestampMs": 230197,
+    "startMs": 229531,
+    "endMs": 231876,
+    "timestampMs": 229531,
     "confidence": 1.0
   },
   {
     "text": "几分钟搞定。",
-    "startMs": 232478,
-    "endMs": 233847,
-    "timestampMs": 232478,
+    "startMs": 231876,
+    "endMs": 233179,
+    "timestampMs": 231876,
     "confidence": 1.0
   },
   {
     "text": "写UI组件时，",
-    "startMs": 233847,
-    "endMs": 235444,
-    "timestampMs": 233847,
+    "startMs": 233179,
+    "endMs": 234743,
+    "timestampMs": 233179,
     "confidence": 1.0
   },
   {
     "text": "生成基础代码再微调。",
-    "startMs": 235444,
-    "endMs": 237725,
-    "timestampMs": 235444,
+    "startMs": 234743,
+    "endMs": 237089,
+    "timestampMs": 234743,
     "confidence": 1.0
   },
   {
     "text": "学习前端时，",
-    "startMs": 237725,
-    "endMs": 239094,
-    "timestampMs": 237725,
+    "startMs": 237089,
+    "endMs": 238392,
+    "timestampMs": 237089,
     "confidence": 1.0
   },
   {
     "text": "看看AI怎么写组件。",
-    "startMs": 239094,
-    "endMs": 241375,
-    "timestampMs": 239094,
+    "startMs": 238392,
+    "endMs": 240737,
+    "timestampMs": 238392,
     "confidence": 1.0
   },
   {
     "text": "以前写一个复杂的表单组件要半天，",
-    "startMs": 241375,
-    "endMs": 245025,
-    "timestampMs": 241375,
+    "startMs": 240737,
+    "endMs": 244647,
+    "timestampMs": 240737,
     "confidence": 1.0
   },
   {
     "text": "现在十分钟搞定。",
-    "startMs": 245025,
-    "endMs": 246850,
-    "timestampMs": 245025,
+    "startMs": 244647,
+    "endMs": 246471,
+    "timestampMs": 244647,
     "confidence": 1.0
   },
   {
     "text": "特别适合快速验证想法和搭建原型。",
-    "startMs": 246850,
-    "endMs": 250500,
-    "timestampMs": 246850,
+    "startMs": 246471,
+    "endMs": 250380,
+    "timestampMs": 246471,
     "confidence": 1.0
   },
   {
     "text": "第五个是bolt.new，",
-    "startMs": 250000,
-    "endMs": 253021,
-    "timestampMs": 250000,
+    "startMs": 249880,
+    "endMs": 252875,
+    "timestampMs": 249880,
     "confidence": 1.0
   },
   {
     "text": "AI全栈开发工具。",
-    "startMs": 253021,
-    "endMs": 255113,
-    "timestampMs": 253021,
+    "startMs": 252875,
+    "endMs": 255053,
+    "timestampMs": 252875,
     "confidence": 1.0
   },
   {
     "text": "它的核心功能。",
-    "startMs": 255113,
-    "endMs": 256739,
-    "timestampMs": 255113,
+    "startMs": 255053,
+    "endMs": 256687,
+    "timestampMs": 255053,
     "confidence": 1.0
   },
   {
     "text": "第一，",
-    "startMs": 256739,
-    "endMs": 257437,
-    "timestampMs": 256739,
+    "startMs": 256687,
+    "endMs": 257231,
+    "timestampMs": 256687,
     "confidence": 1.0
   },
   {
     "text": "全栈生成，",
-    "startMs": 257437,
-    "endMs": 258599,
-    "timestampMs": 257437,
+    "startMs": 257231,
+    "endMs": 258320,
+    "timestampMs": 257231,
     "confidence": 1.0
   },
   {
-    "text": "前端、后端、数据库，",
-    "startMs": 258599,
-    "endMs": 260923,
-    "timestampMs": 258599,
+    "text": "前端、",
+    "startMs": 258320,
+    "endMs": 258865,
+    "timestampMs": 258320,
+    "confidence": 1.0
+  },
+  {
+    "text": "后端、",
+    "startMs": 258865,
+    "endMs": 259409,
+    "timestampMs": 258865,
+    "confidence": 1.0
+  },
+  {
+    "text": "数据库，",
+    "startMs": 259409,
+    "endMs": 260226,
+    "timestampMs": 259409,
     "confidence": 1.0
   },
   {
     "text": "一键生成。",
-    "startMs": 260923,
-    "endMs": 262085,
-    "timestampMs": 260923,
+    "startMs": 260226,
+    "endMs": 261315,
+    "timestampMs": 260226,
     "confidence": 1.0
   },
   {
     "text": "第二，",
-    "startMs": 262085,
-    "endMs": 262782,
-    "timestampMs": 262085,
+    "startMs": 261315,
+    "endMs": 261859,
+    "timestampMs": 261315,
     "confidence": 1.0
   },
   {
     "text": "实时预览，",
-    "startMs": 262782,
-    "endMs": 263944,
-    "timestampMs": 262782,
+    "startMs": 261859,
+    "endMs": 262948,
+    "timestampMs": 261859,
     "confidence": 1.0
   },
   {
     "text": "生成后直接在线预览。",
-    "startMs": 263944,
-    "endMs": 266268,
-    "timestampMs": 263944,
+    "startMs": 262948,
+    "endMs": 265399,
+    "timestampMs": 262948,
     "confidence": 1.0
   },
   {
     "text": "第三，",
-    "startMs": 266268,
-    "endMs": 266965,
-    "timestampMs": 266268,
+    "startMs": 265399,
+    "endMs": 265943,
+    "timestampMs": 265399,
     "confidence": 1.0
   },
   {
     "text": "迭代修改，",
-    "startMs": 266965,
-    "endMs": 268127,
-    "timestampMs": 266965,
+    "startMs": 265943,
+    "endMs": 267032,
+    "timestampMs": 265943,
     "confidence": 1.0
   },
   {
     "text": "对话式修改，",
-    "startMs": 268127,
-    "endMs": 269521,
-    "timestampMs": 268127,
+    "startMs": 267032,
+    "endMs": 268393,
+    "timestampMs": 267032,
     "confidence": 1.0
   },
   {
     "text": "逐步完善。",
-    "startMs": 269521,
-    "endMs": 270683,
-    "timestampMs": 269521,
+    "startMs": 268393,
+    "endMs": 269482,
+    "timestampMs": 268393,
     "confidence": 1.0
   },
   {
     "text": "第四，",
-    "startMs": 270683,
-    "endMs": 271380,
-    "timestampMs": 270683,
+    "startMs": 269482,
+    "endMs": 270027,
+    "timestampMs": 269482,
     "confidence": 1.0
   },
   {
     "text": "一键部署，",
-    "startMs": 271380,
-    "endMs": 272542,
-    "timestampMs": 271380,
+    "startMs": 270027,
+    "endMs": 271116,
+    "timestampMs": 270027,
     "confidence": 1.0
   },
   {
     "text": "生成后直接部署上线。",
-    "startMs": 272542,
-    "endMs": 274866,
-    "timestampMs": 272542,
+    "startMs": 271116,
+    "endMs": 273566,
+    "timestampMs": 271116,
     "confidence": 1.0
   },
   {
     "text": "适合什么场景呢？",
-    "startMs": 274866,
-    "endMs": 276725,
-    "timestampMs": 274866,
+    "startMs": 273566,
+    "endMs": 275472,
+    "timestampMs": 273566,
     "confidence": 1.0
   },
   {
     "text": "快速搭建MVP时，",
-    "startMs": 276725,
-    "endMs": 278817,
-    "timestampMs": 276725,
+    "startMs": 275472,
+    "endMs": 277650,
+    "timestampMs": 275472,
     "confidence": 1.0
   },
   {
     "text": "几分钟搞定原型。",
-    "startMs": 278817,
-    "endMs": 280676,
-    "timestampMs": 278817,
+    "startMs": 277650,
+    "endMs": 279556,
+    "timestampMs": 277650,
     "confidence": 1.0
   },
   {
     "text": "做个人项目时，",
-    "startMs": 280676,
-    "endMs": 282303,
-    "timestampMs": 280676,
+    "startMs": 279556,
+    "endMs": 281189,
+    "timestampMs": 279556,
     "confidence": 1.0
   },
   {
     "text": "省去搭建环境的时间。",
-    "startMs": 282303,
-    "endMs": 284627,
-    "timestampMs": 282303,
+    "startMs": 281189,
+    "endMs": 283639,
+    "timestampMs": 281189,
     "confidence": 1.0
   },
   {
     "text": "学习全栈开发时，",
-    "startMs": 284627,
-    "endMs": 286486,
-    "timestampMs": 284627,
+    "startMs": 283639,
+    "endMs": 285545,
+    "timestampMs": 283639,
     "confidence": 1.0
   },
   {
     "text": "看看完整项目结构。",
-    "startMs": 286486,
-    "endMs": 288577,
-    "timestampMs": 286486,
+    "startMs": 285545,
+    "endMs": 287723,
+    "timestampMs": 285545,
     "confidence": 1.0
   },
   {
     "text": "我用它做了两个小项目，",
-    "startMs": 288577,
-    "endMs": 291134,
-    "timestampMs": 288577,
+    "startMs": 287723,
+    "endMs": 290446,
+    "timestampMs": 287723,
     "confidence": 1.0
   },
   {
     "text": "从想法到上线只用了一小时。",
-    "startMs": 291134,
-    "endMs": 294155,
-    "timestampMs": 291134,
+    "startMs": 290446,
+    "endMs": 293713,
+    "timestampMs": 290446,
     "confidence": 1.0
   },
   {
     "text": "虽然不适合复杂项目，",
-    "startMs": 294155,
-    "endMs": 296479,
-    "timestampMs": 294155,
+    "startMs": 293713,
+    "endMs": 296163,
+    "timestampMs": 293713,
     "confidence": 1.0
   },
   {
     "text": "但做MVP和原型简直神器。",
-    "startMs": 296479,
-    "endMs": 299500,
-    "timestampMs": 296479,
+    "startMs": 296163,
+    "endMs": 299430,
+    "timestampMs": 296163,
     "confidence": 1.0
   },
   {
     "text": "好，",
-    "startMs": 299000,
-    "endMs": 299430,
-    "timestampMs": 299000,
+    "startMs": 298930,
+    "endMs": 299179,
+    "timestampMs": 298930,
     "confidence": 1.0
   },
   {
     "text": "我们来总结一下这五个工具。",
-    "startMs": 299430,
-    "endMs": 302222,
-    "timestampMs": 299430,
+    "startMs": 299179,
+    "endMs": 302169,
+    "timestampMs": 299179,
     "confidence": 1.0
   },
   {
     "text": "Claude Code，",
-    "startMs": 302222,
-    "endMs": 304799,
-    "timestampMs": 302222,
+    "startMs": 302169,
+    "endMs": 304660,
+    "timestampMs": 302169,
     "confidence": 1.0
   },
   {
-    "text": "适合代码生成、调试、重构，",
-    "startMs": 304799,
-    "endMs": 307592,
-    "timestampMs": 304799,
+    "text": "适合代码生成、",
+    "startMs": 304660,
+    "endMs": 306155,
+    "timestampMs": 304660,
+    "confidence": 1.0
+  },
+  {
+    "text": "调试、",
+    "startMs": 306155,
+    "endMs": 306653,
+    "timestampMs": 306155,
+    "confidence": 1.0
+  },
+  {
+    "text": "重构，",
+    "startMs": 306653,
+    "endMs": 307152,
+    "timestampMs": 306653,
     "confidence": 1.0
   },
   {
     "text": "效率提升百分之四十。",
-    "startMs": 307592,
-    "endMs": 309740,
-    "timestampMs": 307592,
+    "startMs": 307152,
+    "endMs": 309394,
+    "timestampMs": 307152,
     "confidence": 1.0
   },
   {
     "text": "Cursor，",
-    "startMs": 309740,
-    "endMs": 311243,
-    "timestampMs": 309740,
+    "startMs": 309394,
+    "endMs": 310889,
+    "timestampMs": 309394,
     "confidence": 1.0
   },
   {
-    "text": "适合日常编码、重构，",
-    "startMs": 311243,
-    "endMs": 313391,
-    "timestampMs": 311243,
+    "text": "适合日常编码、",
+    "startMs": 310889,
+    "endMs": 312384,
+    "timestampMs": 310889,
+    "confidence": 1.0
+  },
+  {
+    "text": "重构，",
+    "startMs": 312384,
+    "endMs": 312882,
+    "timestampMs": 312384,
     "confidence": 1.0
   },
   {
     "text": "效率提升百分之三十。",
-    "startMs": 313391,
-    "endMs": 315539,
-    "timestampMs": 313391,
+    "startMs": 312882,
+    "endMs": 315124,
+    "timestampMs": 312882,
     "confidence": 1.0
   },
   {
     "text": "GitHub Copilot，",
-    "startMs": 315539,
-    "endMs": 318761,
-    "timestampMs": 315539,
+    "startMs": 315124,
+    "endMs": 318363,
+    "timestampMs": 315124,
     "confidence": 1.0
   },
   {
-    "text": "适合代码补全、测试生成，",
-    "startMs": 318761,
-    "endMs": 321338,
-    "timestampMs": 318761,
+    "text": "适合代码补全、",
+    "startMs": 318363,
+    "endMs": 319858,
+    "timestampMs": 318363,
+    "confidence": 1.0
+  },
+  {
+    "text": "测试生成，",
+    "startMs": 319858,
+    "endMs": 320855,
+    "timestampMs": 319858,
     "confidence": 1.0
   },
   {
     "text": "效率提升百分之五十。",
-    "startMs": 321338,
-    "endMs": 323486,
-    "timestampMs": 321338,
+    "startMs": 320855,
+    "endMs": 323097,
+    "timestampMs": 320855,
     "confidence": 1.0
   },
   {
     "text": "v0.dev，",
-    "startMs": 323486,
-    "endMs": 324990,
-    "timestampMs": 323486,
+    "startMs": 323097,
+    "endMs": 324343,
+    "timestampMs": 323097,
     "confidence": 1.0
   },
   {
-    "text": "适合UI组件、页面原型，",
-    "startMs": 324990,
-    "endMs": 327567,
-    "timestampMs": 324990,
+    "text": "适合UI组件、",
+    "startMs": 324343,
+    "endMs": 325838,
+    "timestampMs": 324343,
+    "confidence": 1.0
+  },
+  {
+    "text": "页面原型，",
+    "startMs": 325838,
+    "endMs": 326834,
+    "timestampMs": 325838,
     "confidence": 1.0
   },
   {
     "text": "效率提升百分之七十。",
-    "startMs": 327567,
-    "endMs": 329715,
-    "timestampMs": 327567,
+    "startMs": 326834,
+    "endMs": 329077,
+    "timestampMs": 326834,
     "confidence": 1.0
   },
   {
     "text": "bolt.new，",
-    "startMs": 329715,
-    "endMs": 331648,
-    "timestampMs": 329715,
+    "startMs": 329077,
+    "endMs": 330821,
+    "timestampMs": 329077,
     "confidence": 1.0
   },
   {
-    "text": "适合MVP、原型、小项目，",
-    "startMs": 331648,
-    "endMs": 334441,
-    "timestampMs": 331648,
+    "text": "适合MVP、",
+    "startMs": 330821,
+    "endMs": 332066,
+    "timestampMs": 330821,
+    "confidence": 1.0
+  },
+  {
+    "text": "原型、",
+    "startMs": 332066,
+    "endMs": 332565,
+    "timestampMs": 332066,
+    "confidence": 1.0
+  },
+  {
+    "text": "小项目，",
+    "startMs": 332565,
+    "endMs": 333312,
+    "timestampMs": 332565,
     "confidence": 1.0
   },
   {
     "text": "效率提升百分之八十。",
-    "startMs": 334441,
-    "endMs": 336588,
-    "timestampMs": 334441,
+    "startMs": 333312,
+    "endMs": 335554,
+    "timestampMs": 333312,
     "confidence": 1.0
   },
   {
     "text": "我的建议是，",
-    "startMs": 336588,
-    "endMs": 337877,
-    "timestampMs": 336588,
+    "startMs": 335554,
+    "endMs": 336800,
+    "timestampMs": 335554,
     "confidence": 1.0
   },
   {
     "text": "先从GitHub Copilot开始，",
-    "startMs": 337877,
-    "endMs": 341958,
-    "timestampMs": 337877,
+    "startMs": 336800,
+    "endMs": 341036,
+    "timestampMs": 336800,
     "confidence": 1.0
   },
   {
     "text": "这是基础。",
-    "startMs": 341958,
-    "endMs": 343032,
-    "timestampMs": 341958,
+    "startMs": 341036,
+    "endMs": 342032,
+    "timestampMs": 341036,
     "confidence": 1.0
   },
   {
     "text": "然后试试Cursor，",
-    "startMs": 343032,
-    "endMs": 345395,
-    "timestampMs": 343032,
+    "startMs": 342032,
+    "endMs": 344524,
+    "timestampMs": 342032,
     "confidence": 1.0
   },
   {
     "text": "替换VS Code。",
-    "startMs": 345395,
-    "endMs": 347543,
-    "timestampMs": 345395,
+    "startMs": 344524,
+    "endMs": 346517,
+    "timestampMs": 344524,
     "confidence": 1.0
   },
   {
     "text": "根据需要选择其他工具。",
-    "startMs": 347543,
-    "endMs": 349905,
-    "timestampMs": 347543,
+    "startMs": 346517,
+    "endMs": 349008,
+    "timestampMs": 346517,
     "confidence": 1.0
   },
   {
     "text": "最后送大家一句话，",
-    "startMs": 349905,
-    "endMs": 351839,
-    "timestampMs": 349905,
+    "startMs": 349008,
+    "endMs": 351001,
+    "timestampMs": 349008,
     "confidence": 1.0
   },
   {
     "text": "工具不会让你变成高手，",
-    "startMs": 351839,
-    "endMs": 354201,
-    "timestampMs": 351839,
+    "startMs": 351001,
+    "endMs": 353493,
+    "timestampMs": 351001,
     "confidence": 1.0
   },
   {
     "text": "但能让你有更多时间思考真正重要的事。",
-    "startMs": 354201,
-    "endMs": 358068,
-    "timestampMs": 354201,
+    "startMs": 353493,
+    "endMs": 357728,
+    "timestampMs": 353493,
     "confidence": 1.0
   },
   {
     "text": "如果觉得有用，",
-    "startMs": 358068,
-    "endMs": 359571,
-    "timestampMs": 358068,
+    "startMs": 357728,
+    "endMs": 359223,
+    "timestampMs": 357728,
     "confidence": 1.0
   },
   {
     "text": "别忘了三连支持一下！",
-    "startMs": 359571,
-    "endMs": 361719,
-    "timestampMs": 359571,
+    "startMs": 359223,
+    "endMs": 361466,
+    "timestampMs": 359223,
     "confidence": 1.0
   },
   {
     "text": "有问题欢迎在评论区交流。",
-    "startMs": 361719,
-    "endMs": 364296,
-    "timestampMs": 361719,
+    "startMs": 361466,
+    "endMs": 364206,
+    "timestampMs": 361466,
     "confidence": 1.0
   },
   {
     "text": "我们下期再见！",
-    "startMs": 364296,
-    "endMs": 365800,
-    "timestampMs": 364296,
+    "startMs": 364206,
+    "endMs": 365701,
+    "timestampMs": 364206,
     "confidence": 1.0
   }
 ]

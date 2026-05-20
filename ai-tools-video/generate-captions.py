@@ -1,32 +1,41 @@
 #!/usr/bin/env python3
-"""Generate captions JSON from script text, timed to audio durations."""
+"""Generate captions JSON with precise timing matched to TTS audio."""
 import json
 import os
 import re
 
 OUTPUT_DIR = os.path.expanduser("~/Documents/learn-claude-code/ai-tools-video/public")
 
-# Audio durations in seconds (from previous generation)
+# Actual audio durations from durations.json
 AUDIO_DURATIONS = {
-    "scene1_opening": 27.2,
-    "scene2_claude_code": 61.3,
-    "scene3_cursor": 56.8,
-    "scene4_copilot": 56.1,
-    "scene5_v0": 51.1,
-    "scene6_bolt": 49.5,
-    "scene7_summary": 66.8,
+    "scene1_opening": 27.153515,
+    "scene2_claude_code": 61.311519,
+    "scene3_cursor": 56.770839,
+    "scene4_copilot": 56.06263,
+    "scene5_v0": 51.08195,
+    "scene6_bolt": 49.549433,
+    "scene7_summary": 66.771111,
 }
 
-# Scene start times (cumulative, accounting for transitions)
-SCENE_OFFSETS = {
-    "scene1_opening": 0,
-    "scene2_claude_code": 27.2 - 0.5,  # minus transition overlap
-    "scene3_cursor": 27.2 - 0.5 + 61.3 - 0.5,
-    "scene4_copilot": 27.2 - 0.5 + 61.3 - 0.5 + 56.8 - 0.5,
-    "scene5_v0": 27.2 - 0.5 + 61.3 - 0.5 + 56.8 - 0.5 + 56.1 - 0.5,
-    "scene6_bolt": 27.2 - 0.5 + 61.3 - 0.5 + 56.8 - 0.5 + 56.1 - 0.5 + 51.1 - 0.5,
-    "scene7_summary": 27.2 - 0.5 + 61.3 - 0.5 + 56.8 - 0.5 + 56.1 - 0.5 + 51.1 - 0.5 + 49.5 - 0.5,
-}
+# Scene start times (cumulative with transitions)
+# TransitionSeries: scene N starts at sum of previous durations - (N-1) transitions
+TRANSITION_FRAMES = 15  # 0.5s at 30fps
+FPS = 30
+TRANSITION_SEC = TRANSITION_FRAMES / FPS
+
+def calc_scene_offsets():
+    offsets = {}
+    cumulative = 0.0
+    for i, scene_id in enumerate(AUDIO_DURATIONS.keys()):
+        if i == 0:
+            offsets[scene_id] = 0.0
+        else:
+            # Previous scene ends, transition overlaps
+            cumulative += AUDIO_DURATIONS[list(AUDIO_DURATIONS.keys())[i-1]] - TRANSITION_SEC
+            offsets[scene_id] = cumulative
+    return offsets
+
+SCENE_OFFSETS = calc_scene_offsets()
 
 SCENES = [
     {
@@ -59,54 +68,60 @@ SCENES = [
     },
 ]
 
-def split_into_sentences(text):
-    """Split text into sentences by Chinese punctuation."""
-    # Split by sentence-ending punctuation
-    parts = re.split(r'([。！？，；])', text)
-    sentences = []
+
+def count_chars(text):
+    """Count meaningful characters (Chinese + English + numbers)."""
+    return len(re.sub(r'[^\u4e00-\u9fff\w]', '', text))
+
+
+def split_into_phrases(text):
+    """Split text into short phrases by punctuation marks."""
+    parts = re.split(r'([。！？，；：、])', text)
+    phrases = []
     i = 0
     while i < len(parts):
-        sentence = parts[i]
-        # Attach punctuation to the sentence
-        if i + 1 < len(parts) and parts[i + 1] in '。！？，；':
-            sentence += parts[i + 1]
+        phrase = parts[i]
+        if i + 1 < len(parts) and parts[i + 1] in '。！？，；：、':
+            phrase += parts[i + 1]
             i += 2
         else:
             i += 1
-        if sentence.strip():
-            sentences.append(sentence)
-    return sentences
+        if phrase.strip():
+            phrases.append(phrase)
+    return phrases
+
 
 def generate_captions():
     all_captions = []
-    caption_id = 0
 
     for scene in SCENES:
         scene_id = scene["id"]
-        duration = AUDIO_DURATIONS[scene_id]
+        total_duration = AUDIO_DURATIONS[scene_id]
         offset = SCENE_OFFSETS[scene_id]
-        sentences = split_into_sentences(scene["text"])
+        phrases = split_into_phrases(scene["text"])
+
+        # Calculate character weights for each phrase
+        char_counts = [count_chars(p) for p in phrases]
+        total_chars = sum(char_counts)
 
         # Distribute time proportionally by character count
-        total_chars = sum(len(s) for s in sentences)
         current_time = 0.0
 
-        for sentence in sentences:
-            char_ratio = len(sentence) / total_chars
-            sentence_duration = duration * char_ratio
+        for phrase, char_count in zip(phrases, char_counts):
+            char_ratio = char_count / total_chars
+            phrase_duration = total_duration * char_ratio
             start_ms = (offset + current_time) * 1000
-            end_ms = (offset + current_time + sentence_duration) * 1000
+            end_ms = (offset + current_time + phrase_duration) * 1000
 
             all_captions.append({
-                "text": sentence,
+                "text": phrase,
                 "startMs": round(start_ms),
                 "endMs": round(end_ms),
                 "timestampMs": round(start_ms),
                 "confidence": 1.0,
             })
 
-            current_time += sentence_duration
-            caption_id += 1
+            current_time += phrase_duration
 
     # Save captions
     output_path = os.path.join(OUTPUT_DIR, "captions.json")
@@ -114,7 +129,16 @@ def generate_captions():
         json.dump(all_captions, f, ensure_ascii=False, indent=2)
 
     print(f"Generated {len(all_captions)} captions")
-    print(f"Saved to: {output_path}")
+    print(f"\nScene offsets (seconds):")
+    for scene_id, offset in SCENE_OFFSETS.items():
+        print(f"  {scene_id}: {offset:.2f}s")
+
+    print(f"\nFirst 5 captions:")
+    for cap in all_captions[:5]:
+        print(f"  [{cap['startMs']}-{cap['endMs']}ms] {cap['text']}")
+
+    print(f"\nSaved to: {output_path}")
+
 
 if __name__ == "__main__":
     generate_captions()

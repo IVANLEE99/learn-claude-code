@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   AbsoluteFill,
   staticFile,
@@ -9,16 +9,18 @@ import {
   interpolate,
   Easing,
 } from 'remotion';
-import { createTikTokStyleCaptions } from '@remotion/captions';
 import { loadFont } from '@remotion/google-fonts/NotoSansSC';
-import type { Caption } from '@remotion/captions';
 
 const { fontFamily } = loadFont();
 
-const SWITCH_CAPTIONS_EVERY_MS = 3000; // Show ~3 seconds of text at a time
+interface CaptionItem {
+  text: string;
+  startMs: number;
+  endMs: number;
+}
 
 export const Subtitles: React.FC = () => {
-  const [captions, setCaptions] = useState<Caption[] | null>(null);
+  const [captions, setCaptions] = useState<CaptionItem[] | null>(null);
   const { delayRender, continueRender, cancelRender } = useDelayRender();
   const [handle] = useState(() => delayRender());
   const { fps } = useVideoConfig();
@@ -38,37 +40,22 @@ export const Subtitles: React.FC = () => {
     fetchCaptions();
   }, [fetchCaptions]);
 
-  const pages = useMemo(() => {
-    if (!captions) return [];
-    const { pages } = createTikTokStyleCaptions({
-      captions,
-      combineTokensWithinMilliseconds: SWITCH_CAPTIONS_EVERY_MS,
-    });
-    return pages;
-  }, [captions]);
-
   if (!captions) return null;
 
   return (
     <AbsoluteFill>
-      {pages.map((page, index) => {
-        const nextPage = pages[index + 1] ?? null;
-        const startFrame = (page.startMs / 1000) * fps;
-        const endFrame = Math.min(
-          nextPage ? (nextPage.startMs / 1000) * fps : Infinity,
-          startFrame + (SWITCH_CAPTIONS_EVERY_MS / 1000) * fps,
-        );
-        const durationInFrames = Math.max(0, endFrame - startFrame);
-
-        if (durationInFrames <= 0) return null;
+      {captions.map((caption, index) => {
+        const startFrame = Math.round((caption.startMs / 1000) * fps);
+        const endFrame = Math.round((caption.endMs / 1000) * fps);
+        const durationInFrames = Math.max(1, endFrame - startFrame);
 
         return (
           <Sequence
             key={index}
-            from={Math.round(startFrame)}
-            durationInFrames={Math.round(durationInFrames)}
+            from={startFrame}
+            durationInFrames={durationInFrames}
           >
-            <CaptionPage page={page} />
+            <SubtitleLine text={caption.text} />
           </Sequence>
         );
       })}
@@ -76,23 +63,23 @@ export const Subtitles: React.FC = () => {
   );
 };
 
-const HIGHLIGHT_COLOR = '#7C3AED';
-
-const CaptionPage: React.FC<{
-  page: { startMs: number; tokens: Array<{ text: string; fromMs: number; toMs: number }> };
-}> = ({ page }) => {
+const SubtitleLine: React.FC<{ text: string }> = ({ text }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const totalFrames = useVideoConfig().durationInFrames;
 
-  const currentTimeMs = (frame / fps) * 1000;
-  const absoluteTimeMs = page.startMs + currentTimeMs;
-
-  // Fade in animation
-  const opacity = interpolate(frame, [0, 8], [0, 1], {
+  // Fade in over 4 frames, fade out over 4 frames
+  const fadeIn = interpolate(frame, [0, 4], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
-    easing: Easing.bezier(0.16, 1, 0.3, 1),
+    easing: Easing.out(Easing.cubic),
   });
+  const fadeOut = interpolate(frame, [totalFrames - 4, totalFrames], [1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+    easing: Easing.in(Easing.cubic),
+  });
+  const opacity = Math.min(fadeIn, fadeOut);
 
   return (
     <AbsoluteFill
@@ -106,38 +93,23 @@ const CaptionPage: React.FC<{
         style={{
           background: 'rgba(0, 0, 0, 0.75)',
           borderRadius: 12,
-          padding: '12px 28px',
-          maxWidth: '80%',
+          padding: '10px 24px',
+          maxWidth: '85%',
           opacity,
         }}
       >
         <div
           style={{
-            fontSize: 38,
+            fontSize: 40,
             fontWeight: 'bold',
             fontFamily,
             color: '#FFFFFF',
             textAlign: 'center',
-            lineHeight: 1.5,
+            lineHeight: 1.4,
             textShadow: '0 2px 8px rgba(0,0,0,0.8)',
-            whiteSpace: 'pre-wrap',
           }}
         >
-          {page.tokens.map((token, i) => {
-            const isActive =
-              token.fromMs <= absoluteTimeMs && token.toMs > absoluteTimeMs;
-            return (
-              <span
-                key={`${token.fromMs}-${i}`}
-                style={{
-                  color: isActive ? HIGHLIGHT_COLOR : '#FFFFFF',
-                  transition: 'color 0.1s',
-                }}
-              >
-                {token.text}
-              </span>
-            );
-          })}
+          {text}
         </div>
       </div>
     </AbsoluteFill>
