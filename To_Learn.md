@@ -1,8 +1,9 @@
 ## 任务
 使用浏览器打开 自己读取详细阅读https://mp.weixin.qq.com/s/FeNQTXQ1gbHeBLONSCp8pA中的
-自媒体团队
-selfmedia-team
-帮我对应写一个自媒体团队selfmedia-team agent
+商业闭环团队
+commerce-team
+5把流量变钱
+帮我对应写一个商业闭环团队commerce-team agent
 
 ### ✅企业服务团队
 corporate-services
@@ -32,6 +33,24 @@ miniprogram-team
 ### ✅自媒体团队
 selfmedia-team
 4让人找到你
+
+# Claude Code + Fish Speech Skill（AI 视频工厂）
+
+## 1. Skill 名称
+AI Video Factory
+
+---
+
+## 2. 目标
+
+自动化生成短视频内容流水线：
+
+- Claude Code 生成脚本
+- Fish Speech 生成语音
+- FFmpeg 合成视频
+- Whisper 生成字幕
+- 自动发布平台
+
 
 ### ❌商业闭环团队
 commerce-team
@@ -101,3 +120,13 @@ https://weread.qq.com/r/weread-skills
 ⼈⼯智能技术⽇报
 2026-05-18 | 发布于 2026-05-19 早播 | 新帖 69 篇 |  #⼈⼯智能 标签 +
 前沿快讯分
+
+
+今日 GitHub 增长日报
+今日风向标：2026-05-20，北京时间核对。主线非常清晰：AI Agent 技能库、个人 AI 助手、本地推
+理、反检测浏览器、OSINT/空间感知工具集中爆发。
+本期项目顺序以 GitHub Trending daily 当前页面为准；
+
+
+
+人工智能线下实践
