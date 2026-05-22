@@ -130,3 +130,11 @@ https://weread.qq.com/r/weread-skills
 
 
 人工智能线下实践
+
+
+https://github.com/anthropics/claude-plugins-official
+
+
+微软 Azure TTS
+
+https://github.com/openai/whisper
