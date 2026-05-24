@@ -1,0 +1,21 @@
+{
+  "name": "learn-claude-code",
+  "version": "1.0.0",
+  "description": "> 下面是对 `/help` 常见内容的中文整理，便于快速查阅。",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IVANLEE99/learn-claude-code.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/IVANLEE99/learn-claude-code/issues"
+  },
+  "homepage": "https://github.com/IVANLEE99/learn-claude-code#readme"
+}
