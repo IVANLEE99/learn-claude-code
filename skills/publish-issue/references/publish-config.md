@@ -14,7 +14,12 @@
 
 ## Token
 
-从 `~/.claude/settings.json` 的 `mcpServers.github.env.GITHUB_PERSONAL_ACCESS_TOKEN` 读取。
+按以下顺序尝试读取：
+1. `~/.claude/settings.json` 的 `mcpServers.github.env.GITHUB_PERSONAL_ACCESS_TOKEN`
+2. `~/.claude/settings.local.json` 的相同路径
+3. 环境变量 `GITHUB_PERSONAL_ACCESS_TOKEN`
+
+如果都失败，提示用户手动输入。
 
 ## 权限
 
