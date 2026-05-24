@@ -1,5 +1,7 @@
 # Claude Code Skill 详解：video-maker
 
+> **版本**: 2.0.0 | **更新日期**: 2026-05-24 | **主要变更**: 集成 mimo-tts 替换 macOS say
+
 ## 一、Skill 是什么
 
 Skill（技能）是 Claude Code 的扩展机制，允许用户定义可复用的专业能力。它比 Command（命令）更强大：
@@ -15,14 +17,16 @@ Skill（技能）是 Claude Code 的扩展机制，允许用户定义可复用�
 
 ---
 
-## 二、video-maker Skill 说明
+## 二、video-maker Skill 说明（v2.0.0）
+
+> **v2.0.0 更新**：将 macOS `say` TTS 替换为 `mimo-tts` skill，支持多种音色和风格控制。
 
 ### 功能
 
 基于 Remotion 的视频生成工具，支持：
 - 从文本脚本自动生成视频
 - 调用 `gen-img` skill 生成 AI 场景图片
-- 使用 macOS TTS（`say` 命令）生成中文配音
+- 调用 `mimo-tts` skill 生成中文配音（支持多种音色和风格）
 - 自动生成与音频同步的字幕（TikTok 风格）
 - 使用 TransitionSeries 实现场景转场
 - 输出 1920x1080 H.264 视频
@@ -48,7 +52,7 @@ Claude 检测到关键词 "制作视频" → 激活 video-maker skill
 │  Phase 1: 资源准备                                    │
 │  ├── 解析脚本 → 拆分为多个场景                         │
 │  ├── 调用 gen-img skill → 生成每场景的 AI 图片         │
-│  └── 调用 macOS say → 生成每场景的配音 MP3             │
+│  └── 调用 mimo-tts skill → 生成每场景的配音 WAV        │
 ├─────────────────────────────────────────────────────┤
 │  Phase 2: 字幕生成                                    │
 │  ├── 读取音频时长 → durations.json                    │
@@ -81,7 +85,7 @@ Claude 检测到关键词 "制作视频" → 激活 video-maker skill
 |------|------|------|
 | 视频框架 | Remotion | React 生态，组件化，易于扩展 |
 | 图片生成 | gen-img (GPT-Image-2) | 已有 skill，质量高 |
-| 配音 | macOS `say` | 免费，中文支持好（Meijia 语音） |
+| 配音 | mimo-tts (MiMo V2.5) | 多音色、多风格、支持克隆 |
 | 字幕 | 自定义 JSON | 精确控制时间轴 |
 | 转场 | @remotion/transitions | 声明式，支持 fade/slide |
 
@@ -117,7 +121,7 @@ mkdir -p ~/.claude/skills/video-maker/scripts
 
 | 决策 | 选择 | 原因 |
 |------|------|------|
-| 配音方案 | macOS `say` | 免费、无需 API、中文语音质量好 |
+| 配音方案 | mimo-tts | 多音色、多风格、支持音色克隆 |
 | 字幕格式 | JSON + Sequence | 精确到毫秒的逐句同步 |
 | 转场时长 | 15 帧 (0.5s) | 平滑但不拖沓 |
 | 视频编码 | H.264 CRF 18 | 兼容性好，质量高 |
@@ -130,20 +134,38 @@ mkdir -p ~/.claude/skills/video-maker/scripts
 ```python
 # 核心逻辑：
 # 1. 读取脚本文本，按场景拆分
-# 2. 调用 macOS say -v Meijia 生成 AIFF
-# 3. 用 ffmpeg 转换为 MP3
-# 4. 用 ffprobe 获取时长
-# 5. 输出 durations.json
+# 2. 调用 mimo-tts skill 生成 WAV
+# 3. 用 ffprobe 获取时长
+# 4. 输出 durations.json
 ```
 
-**语音选择：**
+**mimo-tts 调用方式：**
+```bash
+bash ~/.claude/skills/mimo-tts/scripts/mimo-tts.sh \
+  --text "<场景旁白>" \
+  --voice "冰糖" \
+  --style "温柔" \
+  --output "scene1.wav"
+```
 
-| 语音 | 语言 | 性别 | 特点 |
-|------|------|------|------|
-| Meijia | 中文 | 女 | 自然流畅，推荐 |
-| Ting-Ting | 中文 | 女 | 语速较慢 |
-| Samantha | 英文 | 女 | 英文场景 |
-| Alex | 英文 | 男 | 英文场景 |
+**音色选择（mimo-tts）：**
+
+| 音色 | 性别 | 特点 | 适用场景 |
+|------|------|------|----------|
+| 冰糖 | 女 | 甜美女声 | 温馨、活泼内容 |
+| 茉莉 | 女 | 清新女声 | 清新、自然内容 |
+| 苏打 | 男 | 清爽男声 | 科技、商务内容 |
+| 白桦 | 男 | 沉稳男声 | 严肃、专业内容 |
+| 曼波 | 克隆 | 个性化音色 | 特殊需求 |
+
+**风格选择：**
+
+| 风格 | 适用场景 |
+|------|----------|
+| 温柔 | 情感类、故事类内容 |
+| 活泼 | 娱乐类、教育类内容 |
+| 深沉 醇厚 | 纪录片、文学类内容 |
+| 开心 | 轻松愉快的内容 |
 
 ### 第 5 步：编写字幕生成脚本
 
@@ -203,7 +225,7 @@ mkdir -p ~/.claude/skills/video-maker/scripts
 |--------|------|
 | 7 场景视频生成 | 成功 |
 | AI 图片生成（gen-img） | 7 张 1536x1024 PNG |
-| TTS 配音（Meijia） | 7 段 MP3，总时长 368.7s |
+| TTS 配音（mimo-tts） | 7 段 WAV，总时长 368.7s |
 | 字幕同步 | 201 条，逐句匹配 |
 | 最终渲染 | 1920x1080，6.1 分钟，179.9MB |
 
@@ -211,13 +233,14 @@ mkdir -p ~/.claude/skills/video-maker/scripts
 
 ## 四、对话中的相关讨论
 
-### Q: 为什么用 macOS `say` 而不是 edge-tts 或其他 TTS？
+### Q: 为什么用 mimo-tts 而不是 macOS say 或其他 TTS？
 
-**A**: 
-- **macOS `say`**：系统内置，无需安装，无需 API Key，中文 Meijia 语音质量好
+**A**:
+- **mimo-tts**：支持多种音色和风格，支持音色克隆，语音质量高
+- **macOS `say`**：系统内置但音色有限，不支持风格控制
 - **edge-tts**：曾尝试但遇到 403 错误（被微软封禁）
-- **OpenAI TTS**：需要额外 API 费用
-- 对于个人项目，macOS `say` 是最简单可靠的选择
+- **OpenAI TTS**：需要额外 API 费用，中文音色较少
+- mimo-tts 提供最佳的中文语音合成体验
 
 ### Q: 字幕如何与音频精确同步？
 
@@ -294,6 +317,8 @@ Skill 已备份至本项目 `skills/video-maker/` 目录，完整文件请查看
 | generate-voiceover.py | TTS 配音生成脚本 | [查看](video-maker/scripts/generate-voiceover.py) |
 | generate-captions.py | 字幕 JSON 生成脚本 | [查看](video-maker/scripts/generate-captions.py) |
 | render-video.sh | 视频渲染脚本 | [查看](video-maker/scripts/render-video.sh) |
+| mimo-tts Skill | 语音合成 Skill（依赖） | [查看](mimo-tts/SKILL.md) |
+| gen-img Skill | AI 图片生成 Skill（依赖） | 外部 Skill |
 
 ---
 
@@ -320,9 +345,12 @@ Claude: [自动激活 → 英文流程]
 # 1. 初始化项目
 bash ~/.claude/skills/video-maker/scripts/init-project.sh my-video
 
-# 2. 生成配音
-python3 ~/.claude/skills/video-maker/scripts/generate-voiceover.py \
-  script.txt my-video/public/voiceover/ Meijia
+# 2. 生成配音（使用 mimo-tts）
+bash ~/.claude/skills/mimo-tts/scripts/mimo-tts.sh \
+  --text "场景旁白文本" \
+  --voice "冰糖" \
+  --style "温柔" \
+  --output my-video/public/voiceover/scene1.wav
 
 # 3. 生成字幕
 python3 ~/.claude/skills/video-maker/scripts/generate-captions.py \
@@ -370,7 +398,7 @@ Step 1: 解析脚本 → 7 个场景
         ↓
 Step 2: gen-img 生成 7 张场景图片 (并行)
         ↓
-Step 3: macOS say 生成 7 段配音
+Step 3: mimo-tts 生成 7 段配音
         ↓
 Step 4: 生成 201 条字幕 (captions.json)
         ↓
@@ -390,10 +418,10 @@ ai-tools-video/public/
 │   ├── scene6_bolt.png         # bolt.new 场景
 │   └── scene7_summary.png      # 总结场景
 ├── voiceover/
-│   ├── scene1_opening.mp3      # 开场配音
-│   ├── scene2_claude_code.mp3  # ...配音
+│   ├── scene1_opening.wav      # 开场配音
+│   ├── scene2_claude_code.wav  # ...配音
 │   ├── ...
-│   ├── scene7_summary.mp3      # 总结配音
+│   ├── scene7_summary.wav      # 总结配音
 │   └── durations.json          # 音频时长
 └── captions.json               # 201 条字幕
 ```
@@ -424,11 +452,49 @@ npx remotion render AIToolsVideo out/ai-tools-video.mp4 --codec h264 --crf 18
 
 ---
 
-## 九、相关资源
+## 九、mimo-tts 集成说明
+
+### 为什么选择 mimo-tts
+
+| 特性 | mimo-tts | macOS say | edge-tts |
+|------|----------|-----------|----------|
+| 音色数量 | 5+ 预设 + 克隆 | 有限 | 有限 |
+| 风格控制 | 支持 | 不支持 | 不支持 |
+| 音色克隆 | 支持 | 不支持 | 不支持 |
+| 中文质量 | 高 | 中 | 高 |
+| API 依赖 | 需要 | 无 | 需要 |
+
+### mimo-tts 使用示例
+
+```bash
+# 使用预设音色
+bash ~/.claude/skills/mimo-tts/scripts/mimo-tts.sh \
+  --text "欢迎观看本视频" \
+  --voice "冰糖" \
+  --style "温柔" \
+  --output scene1.wav
+
+# 使用克隆音色
+bash ~/.claude/skills/mimo-tts/scripts/mimo-tts.sh \
+  --text "欢迎观看本视频" \
+  --clone ~/.claude/skills/mimo-tts/voices/曼波.mp3 \
+  --output scene1.wav
+
+# 使用保存的音色配置
+bash ~/.claude/skills/mimo-tts/scripts/mimo-tts.sh \
+  --text "欢迎观看本视频" \
+  --profile "曼波" \
+  --output scene1.wav
+```
+
+---
+
+## 十、相关资源
 
 - Claude Code 官方文档: https://docs.anthropic.com/en/docs/claude-code
 - Remotion 官方文档: https://www.remotion.dev/docs
 - @remotion/transitions: https://www.remotion.dev/docs/transitions
 - @remotion/captions: https://www.remotion.dev/docs/captions
 - Google Fonts (NotoSansSC): https://fonts.google.com/noto/specimen/Noto+Sans+SC
-- macOS say 命令: `man say`
+- mimo-tts Skill: `~/.claude/skills/mimo-tts/`
+- gen-img Skill: `~/.claude/skills/gen-img/`

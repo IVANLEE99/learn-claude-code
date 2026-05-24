@@ -1,51 +1,55 @@
 ---
 name: video-maker
-description: Generate videos from scripts using AI images, TTS voiceover, and Remotion. Trigger when user says "create video", "generate video", "make video", "制作视频", "生成视频", "剪辑视频", or wants to convert a script/text into a video.
-version: 1.0.0
+description: 基于脚本生成视频，支持 AI 图片、MiMo TTS 配音和 Remotion 渲染。当用户说"制作视频"、"生成视频"、"剪辑视频"、"文字转视频"、"create video"、"generate video" 时触发。
+version: 2.0.0
 ---
 
-# video-maker — AI Video Creation Skill
+# video-maker — AI 视频生成 Skill
 
-Create videos from text scripts with AI-generated images, TTS voiceover, and subtitles using Remotion.
+基于文本脚本自动生成视频，使用 AI 生成图片、MiMo TTS 配音和 Remotion 渲染。
 
-## Trigger Conditions
+## 触发条件
 
-Activate when user requests:
-- Create / generate / make a video from script
-- "制作视频", "生成视频", "剪辑视频", "文字转视频"
-- Any request to produce video content from text/script
+当用户提到以下关键词时，自动触发：
+- 制作视频 / 生成视频 / 剪辑视频 / 文字转视频
+- create video / generate video / make video
+- 任何需要从文本/脚本生成视频的请求
 
-## Prerequisites
+## 前置条件
 
-- **Remotion project**: Must be initialized in the working directory
-- **gen-img skill**: For AI image generation (`~/.claude/skills/gen-img/`)
-- **macOS**: Uses `say` command for TTS (Chinese voice: Meijia)
-- **ffmpeg**: For audio format conversion
+- **Remotion 项目**：必须在工作目录中初始化
+- **gen-img skill**：用于 AI 图片生成（`~/.claude/skills/gen-img/`）
+- **mimo-tts skill**：用于语音合成（`~/.claude/skills/mimo-tts/`）
+- **Node.js 18+**：Remotion 运行环境
+- **ffmpeg**：音频格式转换（可选）
 
-## Environment Variables
+## 环境变量
 
-None required. Uses system TTS and gen-img skill.
+使用以下 skill 的配置，无需额外配置：
+- gen-img: `GEN_IMG_API_URL`, `GEN_IMG_API_KEY`
+- mimo-tts: `MIMO_TTS_API_URL`, `MIMO_TTS_API_KEY`
 
-## Execution Steps
+## 执行步骤
 
-### Step 1: Parse User Request
+### 第 1 步：解析用户请求
 
-Extract from the user's message:
-- **script** (required): The video script text or file path
-- **output** (optional): Output video path, default `out/video.mp4`
-- **resolution** (optional): Video resolution, default `1920x1080`
-- **fps** (optional): Frame rate, default `30`
-- **voice** (optional): TTS voice, default `Meijia` (Chinese female)
+从用户消息中提取：
+- **script**（必填）：视频脚本文本或文件路径
+- **output**（可选）：输出视频路径，默认 `out/video.mp4`
+- **resolution**（可选）：视频分辨率，默认 `1920x1080`
+- **fps**（可选）：帧率，默认 `30`
+- **voice**（可选）：TTS 音色，默认 `冰糖`（中文女声）
+- **style**（可选）：TTS 风格，默认无
 
-### Step 2: Create Remotion Project
+### 第 2 步：创建 Remotion 项目
 
-If no Remotion project exists, initialize one:
+如果不存在 Remotion 项目，初始化一个：
 
 ```bash
-# Create project directory
+# 创建项目目录
 mkdir -p video-project/src video-project/public/images video-project/public/voiceover
 
-# Initialize package.json
+# 初始化 package.json
 cat > video-project/package.json << 'EOF'
 {
   "name": "ai-video",
@@ -72,52 +76,61 @@ cat > video-project/package.json << 'EOF'
 }
 EOF
 
-# Install dependencies
+# 安装依赖
 cd video-project && npm install
 ```
 
-### Step 3: Generate Scene Images
+### 第 3 步：生成场景图片
 
-For each scene in the script, generate an image using gen-img skill:
+使用 gen-img skill 为每个场景生成图片：
 
 ```bash
-# Use gen-img skill to generate images
-bash ~/.claude/skills/gen-img/scripts/gen-img.sh "<SCENE_PROMPT>" "video-project/public/images/sceneN.png" "1536x1024" "auto" 1 "png"
+# 使用 gen-img skill 生成图片
+bash ~/.claude/skills/gen-img/scripts/gen-img.sh "<场景描述>" "video-project/public/images/sceneN.png" "1536x1024" "auto" 1 "png"
 ```
 
-**Image prompt guidelines:**
-- Describe the scene visually (not the text content)
-- Include style keywords: "cinematic", "professional", "modern"
-- Specify aspect ratio: 16:9 for landscape video
-- Use consistent style across all scenes
+**图片提示词建议：**
+- 视觉化描述场景（而非文本内容）
+- 包含风格关键词："cinematic", "professional", "modern"
+- 指定宽高比：16:9 用于横屏视频
+- 所有场景保持一致的风格
 
-### Step 4: Generate Voiceover
+### 第 4 步：生成配音
 
-Use macOS TTS to generate voiceover for each scene:
+使用 mimo-tts skill 为每个场景生成配音：
+
+```bash
+# 使用 mimo-tts skill 生成配音
+bash ~/.claude/skills/mimo-tts/scripts/mimo-tts.sh \
+  --text "<场景旁白文本>" \
+  --voice "冰糖" \
+  --style "温柔 活泼" \
+  --output "video-project/public/voiceover/sceneN.wav"
+```
+
+**批量生成配音脚本：**
 
 ```python
 #!/usr/bin/env python3
-"""Generate voiceover audio using macOS say command."""
+"""使用 mimo-tts 生成视频配音"""
 import subprocess
 import json
 import os
 
-def generate_voiceover(text, output_path, voice="Meijia"):
-    """Generate voiceover using macOS say command."""
-    # Generate AIFF
-    aiff_path = output_path.replace('.mp3', '.aiff')
-    subprocess.run(["say", "-v", voice, "-o", aiff_path, text], check=True)
+def generate_voiceover(text, output_path, voice="冰糖", style=""):
+    """使用 mimo-tts 生成配音"""
+    cmd = [
+        "bash", os.path.expanduser("~/.claude/skills/mimo-tts/scripts/mimo-tts.sh"),
+        "--text", text,
+        "--voice", voice,
+        "--output", output_path
+    ]
+    if style:
+        cmd.extend(["--style", style])
     
-    # Convert to MP3 using ffmpeg
-    subprocess.run([
-        "ffmpeg", "-i", aiff_path, "-codec:a", "libmp3lame", "-qscale:a", "2",
-        output_path, "-y"
-    ], check=True, capture_output=True)
+    subprocess.run(cmd, check=True)
     
-    # Remove AIFF
-    os.remove(aiff_path)
-    
-    # Get duration
+    # 获取音频时长
     result = subprocess.run([
         "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
         "-of", "csv=p=0", output_path
@@ -125,41 +138,55 @@ def generate_voiceover(text, output_path, voice="Meijia"):
     
     return float(result.stdout.strip())
 
-# Example usage
+# 场景列表
 scenes = [
-    {"id": "scene1", "text": "Scene 1 narration text..."},
-    {"id": "scene2", "text": "Scene 2 narration text..."},
+    {"id": "scene1", "text": "场景 1 旁白文本..."},
+    {"id": "scene2", "text": "场景 2 旁白文本..."},
 ]
 
+# 生成配音
 durations = {}
 for scene in scenes:
-    output_path = f"video-project/public/voiceover/{scene['id']}.mp3"
+    output_path = f"video-project/public/voiceover/{scene['id']}.wav"
     duration = generate_voiceover(scene["text"], output_path)
     durations[scene["id"]] = duration
     print(f"{scene['id']}: {duration:.2f}s")
 
-# Save durations
+# 保存时长信息
 with open("video-project/public/voiceover/durations.json", "w") as f:
     json.dump(durations, f, indent=2)
 ```
 
-### Step 5: Generate Captions
+**音色选择建议：**
+- 冰糖：甜美女声，适合温馨、活泼的内容
+- 茉莉：清新女声，适合清新、自然的内容
+- 苏打：清爽男声，适合科技、商务内容
+- 白桦：沉稳男声，适合严肃、专业内容
+- 曼波（克隆音色）：个性化音色
 
-Create captions.json with timing matched to audio:
+**风格选择建议：**
+- 温柔：适合情感类、故事类内容
+- 活泼：适合娱乐类、教育类内容
+- 深沉 醇厚：适合纪录片、文学类内容
+- 开心：适合轻松愉快的内容
+
+### 第 5 步：生成字幕
+
+创建与音频同步的 captions.json：
 
 ```python
 #!/usr/bin/env python3
-"""Generate captions JSON with precise timing."""
+"""生成带精确时间轴的字幕 JSON"""
 import json
 import os
 import re
 
 def count_chars(text):
-    """Count meaningful characters."""
-    return len(re.sub(r'[^\u4e00-\u9fff\w]', '', text))
+    """统计有效字符数"""
+    return len(re.sub(r'[^一-鿿\w]', '', text))
 
 def split_into_phrases(text):
-    """Split text by punctuation."""
+    """按标点拆分文本为短句"""
     parts = re.split(r'([。！？，；：、])', text)
     phrases = []
     i = 0
@@ -175,10 +202,10 @@ def split_into_phrases(text):
     return phrases
 
 def generate_captions(scenes, durations, output_path):
-    """Generate captions with timing proportional to character count."""
+    """按字符比例分配时间生成字幕"""
     all_captions = []
     offset = 0.0
-    transition_sec = 0.5  # 15 frames at 30fps
+    transition_sec = 0.5  # 30fps 下 15 帧
     
     for scene in scenes:
         scene_id = scene["id"]
@@ -210,9 +237,9 @@ def generate_captions(scenes, durations, output_path):
     return len(all_captions)
 ```
 
-### Step 6: Create Remotion Components
+### 第 6 步：创建 Remotion 组件
 
-Generate the necessary Remotion files:
+生成必要的 Remotion 文件：
 
 #### Root.tsx
 ```tsx
@@ -220,8 +247,8 @@ import { Composition } from 'remotion';
 import { MainComposition } from './Composition';
 
 const FPS = 30;
-// Calculate total duration from audio durations
-const DURATION_IN_FRAMES = 10974; // Sum of all scene durations
+// 从音频时长计算总时长
+const DURATION_IN_FRAMES = 10974; // 所有场景时长之和
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -246,23 +273,23 @@ import { fade } from '@remotion/transitions/fade';
 import { SceneWithAudio } from './components/SceneWithAudio';
 import { Subtitles } from './components/Subtitles';
 
-const TRANSITION_DURATION = 15; // 0.5s at 30fps
+const TRANSITION_DURATION = 15; // 30fps 下 0.5 秒
 
 export const MainComposition: React.FC = () => {
   return (
     <AbsoluteFill>
       <TransitionSeries>
-        {/* Add scenes with transitions */}
+        {/* 添加场景和转场 */}
         <TransitionSeries.Sequence durationInFrames={SCENE_DURATIONS.scene1}>
-          <SceneWithAudio audioFile="scene1.mp3">
-            {/* Scene component */}
+          <SceneWithAudio audioFile="scene1.wav">
+            {/* 场景组件 */}
           </SceneWithAudio>
         </TransitionSeries.Sequence>
         <TransitionSeries.Transition
           presentation={fade()}
           timing={linearTiming({ durationInFrames: TRANSITION_DURATION })}
         />
-        {/* More scenes... */}
+        {/* 更多场景... */}
       </TransitionSeries>
       <Subtitles />
     </AbsoluteFill>
@@ -408,51 +435,51 @@ const SubtitleLine: React.FC<{ text: string }> = ({ text }) => {
 };
 ```
 
-### Step 7: Render Video
+### 第 7 步：渲染视频
 
-Execute the final render:
+执行最终渲染：
 
 ```bash
 cd video-project && npx remotion render AIVideo out/video.mp4 --codec h264 --crf 18
 ```
 
-**Render options:**
-- `--codec h264`: H.264 video codec (widely compatible)
-- `--crf 18`: Constant Rate Factor (lower = better quality, 18-28 recommended)
-- `--codec prores`: For ProRes output (professional editing)
+**渲染选项：**
+- `--codec h264`：H.264 视频编码（兼容性最好）
+- `--crf 18`：恒定质量因子（越低质量越好，推荐 18-28）
+- `--codec prores`：ProRes 输出（专业编辑用）
 
-### Step 8: Output Result
+### 第 8 步：输出结果
 
-Report:
-- Output video path
-- Video duration and resolution
-- File size
-- Number of scenes and captions
+报告：
+- 输出视频路径
+- 视频时长和分辨率
+- 文件大小
+- 场景数量和字幕数量
 
-## Script Structure
+## 脚本结构
 
-A typical video script should follow this format:
+典型的视频脚本格式：
 
 ```
-# Video Title
+# 视频标题
 
-## Scene 1: Opening
-Narration text for scene 1...
+## 场景 1：开场
+场景 1 的旁白文本...
 
-## Scene 2: Main Content
-Narration text for scene 2...
+## 场景 2：主体内容
+场景 2 的旁白文本...
 
-## Scene 3: Closing
-Narration text for scene 3...
+## 场景 3：结尾
+场景 3 的旁白文本...
 ```
 
-**Best practices:**
-- Keep each scene 20-60 seconds
-- Use clear punctuation for natural pauses
-- Separate scenes with clear headings
-- Total video length: 1-5 minutes recommended
+**最佳实践：**
+- 每个场景保持 20-60 秒
+- 使用清晰的标点符号实现自然停顿
+- 用清晰的标题分隔场景
+- 建议总视频时长 1-5 分钟
 
-## File Structure
+## 文件结构
 
 ```
 video-project/
@@ -470,42 +497,112 @@ video-project/
 │   │   ├── scene1.png
 │   │   └── scene2.png
 │   ├── voiceover/
-│   │   ├── scene1.mp3
-│   │   ├── scene2.mp3
+│   │   ├── scene1.wav
+│   │   ├── scene2.wav
 │   │   └── durations.json
 │   └── captions.json
 └── out/
     └── video.mp4
 ```
 
-## Error Handling
+## 错误处理
 
-- **TTS fails**: Check if voice is installed (`say -v '?'` lists available voices)
-- **Image generation fails**: Verify gen-img skill is installed and API keys are set
-- **Render fails**: Check Remotion version compatibility and Node.js version
-- **Audio sync issues**: Verify durations.json matches actual audio files
+- **TTS 失败**：检查 mimo-tts skill 是否安装，API Key 是否配置
+- **图片生成失败**：检查 gen-img skill 是否安装，API Key 是否配置
+- **渲染失败**：检查 Remotion 版本兼容性和 Node.js 版本
+- **音频同步问题**：验证 durations.json 与实际音频文件匹配
 
-## Customization
+## 自定义
 
-### Scene Transitions
-- Fade: `<TransitionSeries.Transition presentation={fade()} />`
-- Slide: `<TransitionSeries.Transition presentation={slide({ direction: 'from-right' })} />`
-- Custom: Create custom presentation functions
+### 场景转场
+- 淡入淡出：`<TransitionSeries.Transition presentation={fade()} />`
+- 滑动：`<TransitionSeries.Transition presentation={slide({ direction: 'from-right' })} />`
+- 自定义：创建自定义 presentation 函数
 
-### Subtitle Style
-- Font: Change `loadFont()` parameters
-- Position: Modify `paddingBottom` in Subtitles.tsx
-- Colors: Update `background` and `color` styles
-- Animation: Adjust `interpolate` timing
+### 字幕样式
+- 字体：修改 `loadFont()` 参数
+- 位置：修改 Subtitles.tsx 中的 `paddingBottom`
+- 颜色：更新 `background` 和 `color` 样式
+- 动画：调整 `interpolate` 时间
 
-### Voice Options
-- Chinese: `Meijia` (female), `Ting-Ting` (female)
-- English: `Samantha`, `Alex`
-- List all: `say -v '?'`
+### 音色选项
+- 冰糖：中文女声，甜美
+- 茉莉：中文女声，清新
+- 苏打：中文男声，清爽
+- 白桦：中文男声，沉稳
+- 曼波：克隆音色，个性化
 
-## Notes
+### 风格选项
+- 基础情绪：开心、悲伤、愤怒、平静
+- 整体语调：温柔、活泼、严肃、深沉
+- 音色定位：磁性、醇厚、清亮、甜美
+- 方言：粤语、四川话、东北话
 
-- Remotion requires Node.js 18+
-- Chinese fonts load from Google Fonts (requires internet)
-- Images are cached by Remotion during render
-- Render time depends on duration and complexity (typically 2-5x realtime)
+## 使用示例
+
+### 示例 1：简单视频
+
+```bash
+# 1. 准备脚本
+cat > script.md << 'EOF'
+# 产品介绍视频
+
+## 场景 1：开场
+欢迎来到我们的产品介绍。
+
+## 场景 2：功能展示
+这是我们的核心功能。
+
+## 场景 3：结尾
+感谢观看，欢迎体验。
+EOF
+
+# 2. 生成视频
+# Claude 会自动执行：
+# - 解析脚本
+# - 生成图片
+# - 生成配音（使用 mimo-tts）
+# - 生成字幕
+# - 渲染视频
+```
+
+### 示例 2：使用克隆音色
+
+```
+用户: 用曼波的声音制作一个产品介绍视频
+Claude: [激活 video-maker skill]
+        [解析脚本]
+        [生成图片]
+        [使用 --profile 曼波 生成配音]
+        [生成字幕]
+        [渲染视频]
+        输出: 视频已生成，使用曼波音色
+```
+
+### 示例 3：自定义风格
+
+```
+用户: 制作一个温柔风格的视频，使用冰糖音色
+Claude: [激活 video-maker skill]
+        [解析脚本]
+        [生成图片]
+        [使用 --voice 冰糖 --style 温柔 生成配音]
+        [生成字幕]
+        [渲染视频]
+        输出: 视频已生成，使用冰糖音色，温柔风格
+```
+
+## 注意事项
+
+- Remotion 需要 Node.js 18+
+- 中文字体从 Google Fonts 加载（需要网络）
+- 图片在渲染时会被 Remotion 缓存
+- 渲染时间取决于时长和复杂度（通常为实时的 2-5 倍）
+- mimo-tts 生成的音频为 WAV 格式，Remotion 支持直接使用
+
+## 相关资源
+
+- Remotion 官方文档: https://www.remotion.dev/
+- gen-img skill: `~/.claude/skills/gen-img/`
+- mimo-tts skill: `~/.claude/skills/mimo-tts/`
+- Claude Code 官方文档: https://docs.anthropic.com/en/docs/claude-code
