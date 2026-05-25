@@ -56,7 +56,7 @@ AI Video Factory
 commerce-team
 5把流量变钱
 
-### ❌战略团队
+### ✅战略团队
 strategy-team
 6把控方向
 
@@ -153,3 +153,6 @@ mimo tts
 
 
 ⼈⼯智能 技术⽇报
+
+
+便利店
