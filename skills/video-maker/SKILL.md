@@ -27,7 +27,7 @@ version: 2.0.0
 
 使用以下 skill 的配置，无需额外配置：
 - gen-img: `GEN_IMG_API_URL`, `GEN_IMG_API_KEY`
-- mimo-tts: `MIMO_TTS_API_URL`, `MIMO_TTS_API_KEY`
+- mimo-tts: 自动复用 `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`（含 xiaomimimo.com 时），或使用 `MIMO_TTS_API_URL` + `MIMO_TTS_API_KEY`
 
 ## 执行步骤
 

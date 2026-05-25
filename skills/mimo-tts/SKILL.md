@@ -20,10 +20,16 @@ Activate when user requests:
 
 在 `~/.claude/settings.json` 的 `env` 中配置：
 
+**自动模式（推荐）：** 如果已配置 `ANTHROPIC_BASE_URL` 且包含 `xiaomimimo.com`，会自动复用 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_AUTH_TOKEN`，无需额外配置。
+
+**专用配置：**
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MIMO_TTS_API_URL` | MiMo API Base URL | `https://token-plan-cn.xiaomimimo.com` |
 | `MIMO_TTS_API_KEY` | MiMo API Key | (required) |
+
+优先级：`ANTHROPIC_BASE_URL`（含 xiaomimimo.com）> `MIMO_TTS_API_URL`
 
 ## Models
 

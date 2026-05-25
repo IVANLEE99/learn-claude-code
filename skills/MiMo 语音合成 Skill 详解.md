@@ -53,7 +53,22 @@
 
 ## 3. 环境配置
 
-在 `~/.claude/settings.json` 的 `env` 中配置：
+### 自动模式（推荐）
+
+如果已在 `~/.claude/settings.json` 中配置了 `ANTHROPIC_BASE_URL` 且包含 `xiaomimimo.com`，会自动复用 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_AUTH_TOKEN`，无需额外配置。
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://xxx.xiaomimimo.com/v1",
+    "ANTHROPIC_AUTH_TOKEN": "your-token"
+  }
+}
+```
+
+### 专用配置
+
+如果 `ANTHROPIC_BASE_URL` 未配置或不包含 `xiaomimimo.com`，则使用以下专用变量：
 
 ```json
 {
@@ -68,6 +83,8 @@
 |------|------|--------|
 | `MIMO_TTS_API_URL` | MiMo API 基础 URL | `https://token-plan-cn.xiaomimimo.com` |
 | `MIMO_TTS_API_KEY` | API 密钥（必填） | — |
+
+**优先级：** `ANTHROPIC_BASE_URL`（含 xiaomimimo.com）> `MIMO_TTS_API_URL`
 
 > 当前限时免费，可在 [MiMo 控制台](https://platform.xiaomimimo.com/) 查看用量。
 

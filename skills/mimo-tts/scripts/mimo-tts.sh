@@ -202,20 +202,41 @@ if [ -z "$TEXT" ]; then
 fi
 
 # === 读取 API 配置 ===
+# 优先使用 ANTHROPIC_BASE_URL（如果包含 xiaomimimo.com）
+# 否则使用 MIMO_TTS_API_URL 和 MIMO_TTS_API_KEY
 CONFIG=$(python3 -c "
 import json, os
+
 settings_path = os.path.expanduser('~/.claude/settings.json')
 try:
     with open(settings_path) as f:
         s = json.load(f)
     env = s.get('env', {})
+except Exception:
+    env = {}
+
+# 优先检查 ANTHROPIC_BASE_URL 是否包含 xiaomimimo.com
+anthropic_url = env.get('ANTHROPIC_BASE_URL', os.environ.get('ANTHROPIC_BASE_URL', ''))
+anthropic_token = env.get('ANTHROPIC_AUTH_TOKEN', os.environ.get('ANTHROPIC_AUTH_TOKEN', ''))
+
+if 'xiaomimimo.com' in anthropic_url and anthropic_token:
+    # 使用 ANTHROPIC 配置，但需要将 base URL 转换为 TTS endpoint
+    # ANTHROPIC_BASE_URL 通常是 https://xxx.xiaomimimo.com/anthropic
+    # TTS API 需要 https://xxx.xiaomimimo.com/v1/chat/completions
+    url = anthropic_url.rstrip('/')
+    # 去掉 /anthropic、/v1 等路径后缀
+    for suffix in ['/anthropic', '/v1', '/anthropic/v1']:
+        if url.endswith(suffix):
+            url = url[:-len(suffix)]
+            break
+    print(f'{url}')
+    print(f'{anthropic_token}')
+else:
+    # 使用专用的 MIMO_TTS 配置
     url = env.get('MIMO_TTS_API_URL', 'https://token-plan-cn.xiaomimimo.com')
     key = env.get('MIMO_TTS_API_KEY', '')
     print(f'{url}')
     print(f'{key}')
-except Exception:
-    print('https://token-plan-cn.xiaomimimo.com')
-    print('')
 " 2>/dev/null)
 
 API_URL=$(echo "$CONFIG" | sed -n '1p')
@@ -246,8 +267,11 @@ fi
 OUTPUT_DIR=$(dirname "$OUTPUT")
 mkdir -p "$OUTPUT_DIR"
 
-# === 构建请求体 ===
-REQUEST_BODY=$(python3 -c "
+# === 构建请求体并写入临时文件 ===
+REQUEST_BODY_FILE=$(mktemp /tmp/mimo-tts-request-XXXXXX.json)
+trap "rm -f '$REQUEST_BODY_FILE'" EXIT
+
+python3 -c "
 import json, sys, base64, os
 
 text = sys.argv[1]
@@ -258,6 +282,7 @@ clone_audio = sys.argv[5]
 voice_desc = sys.argv[6]
 model = sys.argv[7]
 profile = sys.argv[8]
+output_file = sys.argv[9]
 
 # 构建 assistant content（目标文本）
 content = text
@@ -293,8 +318,9 @@ body = {
     ],
     'audio': audio
 }
-print(json.dumps(body, ensure_ascii=False))
-" "$TEXT" "$VOICE" "$STYLE" "$SINGING" "$CLONE_AUDIO" "$VOICE_DESC" "$MODEL" "$PROFILE")
+with open(output_file, 'w') as f:
+    json.dump(body, f, ensure_ascii=False)
+" "$TEXT" "$VOICE" "$STYLE" "$SINGING" "$CLONE_AUDIO" "$VOICE_DESC" "$MODEL" "$PROFILE" "$REQUEST_BODY_FILE"
 
 # === 调用 API ===
 echo "正在合成语音..."
@@ -309,7 +335,7 @@ echo "  文本: ${TEXT:0:60}$([ ${#TEXT} -gt 60 ] && echo '...')"
 RESPONSE=$(curl -s --max-time 120 "${API_URL}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "api-key: ${API_KEY}" \
-    -d "$REQUEST_BODY")
+    -d "@${REQUEST_BODY_FILE}")
 
 # === 检查响应 ===
 if [ -z "$RESPONSE" ]; then
