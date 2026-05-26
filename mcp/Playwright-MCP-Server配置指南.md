@@ -2,7 +2,7 @@
 
 ## 简介
 
-Playwright MCP Server 是 Anthropic 官方提供的浏览器自动化 MCP 服务器，基于 Playwright（支持 Chromium、Firefox、WebKit），让 Claude Code 可以直接操控浏览器——导航网页、截图、点击、填表、执行 JavaScript 等。
+Playwright MCP Server 是基于 Playwright（支持 Chromium、Firefox、WebKit）的浏览器自动化 MCP 服务器，让 Claude Code 可以直接操控浏览器——导航网页、截图、点击、填表、执行 JavaScript 等。npm 包为 `@playwright/mcp`，由 Microsoft 维护。
 
 ## 前置条件
 
@@ -34,7 +34,7 @@ Playwright MCP Server 是 Anthropic 官方提供的浏览器自动化 MCP 服务
       "command": "npx",
       "args": [
         "-y",
-        "@anthropic-ai/mcp-server-playwright"
+        "@playwright/mcp"
       ]
     }
   }
@@ -52,7 +52,7 @@ Playwright MCP Server 是 Anthropic 官方提供的浏览器自动化 MCP 服务
       "command": "npx",
       "args": [
         "-y",
-        "@anthropic-ai/mcp-server-playwright"
+        "@playwright/mcp"
       ]
     }
   }
@@ -99,6 +99,6 @@ Playwright MCP Server 是 Anthropic 官方提供的浏览器自动化 MCP 服务
 
 ## 相关资源
 
-- [Playwright MCP Server 源码](https://github.com/anthropics/mcp-server-playwright)
+- [Playwright MCP Server 源码](https://github.com/microsoft/playwright-mcp)
 - [Playwright 官方文档](https://playwright.dev/)
 - [MCP 协议](https://modelcontextprotocol.io)

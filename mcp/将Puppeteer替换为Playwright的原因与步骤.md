@@ -26,7 +26,7 @@
 
 ### 4. MCP 生态
 
-- `@anthropic-ai/mcp-server-playwright` 是官方推荐的替代方案
+- `@playwright/mcp` 是官方推荐的 Playwright MCP 包
 - Playwright MCP Server 提供了与 Puppeteer 版本对等的功能，且持续更新
 - 更好的 TypeScript 支持和类型定义
 
@@ -70,7 +70,7 @@ cat .claude/mcp.json
       "command": "npx",
       "args": [
         "-y",
-        "@anthropic-ai/mcp-server-playwright"
+        "@playwright/mcp"
       ]
     }
   }
@@ -86,7 +86,7 @@ cat .claude/mcp.json
       "command": "npx",
       "args": [
         "-y",
-        "@anthropic-ai/mcp-server-playwright"
+        "@playwright/mcp"
       ]
     }
   }
@@ -134,6 +134,6 @@ claude
 
 ## 相关资源
 
-- [Playwright MCP Server 源码](https://github.com/anthropics/mcp-server-playwright)
+- [Playwright MCP Server 源码](https://github.com/microsoft/playwright-mcp)
 - [Playwright 官方文档](https://playwright.dev/)
 - [MCP 协议](https://modelcontextprotocol.io)
