@@ -373,7 +373,7 @@ cp captions/captions.json video-project/public/captions.json
 调用 video-maker skill 合成最终视频：
 
 ```bash
-cd video-project && npx remotion render AINewsVideo out/今日羊报AI_YYYY-MM-DD.mp4 --codec h264 --crf 18
+cd video-project && npx remotion render AINewsVideo "out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" --codec h264 --crf 18
 ```
 
 **输出**:
@@ -400,19 +400,19 @@ cd video-project && npx remotion render AINewsVideo out/今日羊报AI_YYYY-MM-D
 
 ```json
 {
-  "title": "视频标题",
+  "title": "【今日羊报AI】{核心标题} | YYYY-MM-DD",
   "subtitle": "副标题（可选）",
   "description": "视频简介，2-3句话概括本期内容",
   "tags": ["标签1", "标签2", "..."],
   "publish_time": "建议发布时间",
   "platform": {
     "bilibili": {
-      "title": "B站标题（含关键词优化，70字以内）",
+      "title": "【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD",
       "tags": ["B站标签"],
       "description": "B站简介"
     },
     "douyin": {
-      "title": "抖音标题（15字以内，带情绪）",
+      "title": "{核心标题}（15字以内，带情绪）",
       "tags": ["抖音标签"]
     }
   }
@@ -420,9 +420,11 @@ cd video-project && npx remotion render AINewsVideo out/今日羊报AI_YYYY-MM-D
 ```
 
 **标题生成规则**:
-- 包含核心关键词（模型名、公司名）
-- 带情绪感（震惊、突破、炸了）
-- 70 字以内（B站）/ 15 字以内（抖音）
+- 格式: `【今日羊报AI】{核心标题} | YYYY-MM-DD`
+- 核心标题包含关键词（模型名、公司名）+ 情绪感（震惊、突破、炸了）
+- B站标题追加 `｜{N}条重磅AI新闻一次看完`
+- 示例: `【今日羊报AI】MiMo V2.5 降价99%！Token Plan暴涨55倍｜7条重磅AI新闻一次看完 | 2026-05-27`
+- 抖音标题保持简短（15字以内），不带前缀
 
 **简介生成规则**:
 - 2-3 句话概括本期 3-5 条核心新闻
@@ -448,7 +450,7 @@ cp news-pipeline/prompts/*.json news-pipeline/YYYY-MM-DD/prompts/
 cp news-pipeline/images/scene*.png news-pipeline/YYYY-MM-DD/images/
 cp news-pipeline/voiceover/scene*.wav news-pipeline/YYYY-MM-DD/voiceover/
 cp news-pipeline/captions/captions.json news-pipeline/YYYY-MM-DD/captions/
-cp news-pipeline/video-project/out/今日羊报AI_YYYY-MM-DD.mp4 news-pipeline/YYYY-MM-DD/video/
+cp news-pipeline/video-project/out/【今日羊报AI】*.mp4 news-pipeline/YYYY-MM-DD/video/
 cp news-pipeline/YYYY-MM-DD/cover.png news-pipeline/YYYY-MM-DD/
 cp news-pipeline/YYYY-MM-DD/publish.json news-pipeline/YYYY-MM-DD/
 ```
@@ -461,11 +463,11 @@ cp news-pipeline/YYYY-MM-DD/publish.json news-pipeline/YYYY-MM-DD/
 ✅ 本期视频制作完成！
 
 📅 日期: YYYY-MM-DD
-🎬 视频: news-pipeline/YYYY-MM-DD/video/今日羊报AI_YYYY-MM-DD.mp4
+🎬 视频: news-pipeline/YYYY-MM-DD/video/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4
 🖼️ 封面: news-pipeline/YYYY-MM-DD/cover.png
 📋 发布信息: news-pipeline/YYYY-MM-DD/publish.json
 
-📝 标题: {title}
+📝 标题: 【今日羊报AI】{核心标题} | YYYY-MM-DD
 🏷️ 标签: {tags}
 📄 简介: {description}
 ```
