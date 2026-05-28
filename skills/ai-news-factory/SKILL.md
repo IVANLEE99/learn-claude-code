@@ -249,6 +249,79 @@ bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
 - 每句时长按字数比例分配
 - 段落间加 0.3s 间隔
 
+### Phase 7.5: 音画同步优化（借鉴 pyVideoTrans）
+
+**在生成字幕后、渲染前，进行音画同步优化，确保字幕与配音精确对齐。**
+
+#### 7.5.1 精确音频时长获取
+
+使用 `ffprobe` 获取每个配音文件的精确时长：
+
+```bash
+# 获取单个音频时长
+ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 voiceover/scene1.wav
+
+# 批量获取所有音频时长
+for i in 1 2 3 4 5; do
+  duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 voiceover/scene$i.wav)
+  echo "scene$i: ${duration}s"
+done
+```
+
+**关键点**:
+- 时长精确到毫秒（如 8.800000）
+- 不能使用估算值，必须用 ffprobe 实际测量
+- 将时长记录到对应关系表中
+
+#### 7.5.2 时间差补偿机制
+
+当字幕时长与音频时长不匹配时，进行补偿：
+
+| 情况 | 处理方式 |
+|------|----------|
+| 音频时长 > 字幕时长 | 延长场景时长，匹配音频 |
+| 音频时长 < 字幕时长 | 在场景末尾添加静音填充 |
+| 字幕间隙 > 0.3s | 压缩间隙，使节奏更紧凑 |
+
+**补偿脚本**:
+```python
+import subprocess
+
+def get_audio_duration(audio_path):
+    """获取音频精确时长（秒）"""
+    result = subprocess.run([
+        'ffprobe', '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        audio_path
+    ], capture_output=True, text=True)
+    return float(result.stdout.strip())
+
+def calculate_scene_durations(audio_files):
+    """计算每个场景的实际时长"""
+    durations = []
+    for audio in audio_files:
+        if audio:
+            durations.append(get_audio_duration(audio))
+        else:
+            durations.append(1.0)  # 无音频场景默认 1s
+    return durations
+```
+
+#### 7.5.3 字幕间隙静音去除
+
+去除字幕之间的静音区间，使视频节奏更紧凑：
+
+```bash
+# 使用 ffmpeg 去除静音
+ffmpeg -i input.wav -af "silenceremove=start_periods=1:start_silence=0.1:start_threshold=-50dB" output.wav
+```
+
+**优化策略**:
+- 字幕间隙 > 0.5s 时，压缩到 0.2-0.3s
+- 保持段落间的自然停顿（0.3s）
+- 去除句首句尾的多余静音
+
 ### Phase 8: 渲染前校验（必须执行）
 
 **在渲染视频前，必须完成以下校验步骤，确保图片-音频-字幕三者完全对齐。**
