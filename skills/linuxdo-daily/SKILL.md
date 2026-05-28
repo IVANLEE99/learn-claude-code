@@ -1,12 +1,12 @@
 ---
 name: linuxdo-daily
-description: linux.do AI日报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报 → PDF Builder 生成 PDF。触发词：日报、linuxdo日报、AI日报、技术日报、抓取linuxdo
-version: 2.0.0
+description: linux.do AI日报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、linuxdo日报、AI日报、技术日报、抓取linuxdo
+version: 2.1.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
-从 linux.do 自动抓取 AI 相关帖子，通过 5 个专用 Agent 协作生成每日技术日报。
+从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报。
 
 ## 数据源
 
@@ -26,12 +26,13 @@ version: 2.0.0
 
 ```
 data/
-├── daily/{date}.json        # 每日抓取原始数据（合并后）
-├── posts/{id}.json          # 单帖详情（含 scrape_history）
-├── reports/{date}.md        # 生成的 Markdown 日报
-├── reports/{date}.pdf       # 生成的 PDF 日报
-├── reports/{date}.typ       # Typst 源文件
-└── cookies.json             # 浏览器 cookies（需登录时用）
+├── daily/{date}.json          # 每日抓取原始数据（合并后）
+├── posts/{id}.json            # 单帖详情（含 scrape_history）
+├── reports/{date}.md          # 生成的 Markdown 日报
+├── reports/{date}_press.md    # 生成的专业新闻稿
+├── reports/{date}.pdf         # 生成的 PDF 日报
+├── reports/{date}.typ         # Typst 源文件
+└── cookies.json               # 浏览器 cookies（需登录时用）
 ```
 
 ## 多 Agent 协作流程
@@ -84,7 +85,14 @@ data/
 │  └──────────────┬───────────────┘                               │
 │                 ▼                                                │
 │  ┌──────────────────────────────┐                               │
-│  │  Agent 5: PDF Builder        │                               │
+│  │  Agent 5: Press Writer       │                               │
+│  │  - 读取日报 + 社区帖子        │                               │
+│  │  - 生成专业 AI 科技新闻稿     │                               │
+│  │  → 输出: data/reports/{date}_press.md│                       │
+│  └──────────────┬───────────────┘                               │
+│                 ▼                                                │
+│  ┌──────────────────────────────┐                               │
+│  │  Agent 6: PDF Builder        │                               │
 │  │  - Markdown → Typst 源码      │                               │
 │  │  - Typst 编译 → PDF           │                               │
 │  │  → 输出: data/reports/{date}.pdf│                             │
@@ -282,11 +290,65 @@ for each post in 待抓取队列（最多50帖）:
 
 ---
 
-## Agent 5: PDF Builder（PDF 生成器）
+## Agent 5: Press Writer（新闻稿撰写器）
+
+**职责**：基于日报内容和社区帖子，生成专业 AI 科技新闻稿。风格对标 Bloomberg Tech / The Verge，信息密度高，无论坛口语。
+
+### 5.1 新闻稿结构
+
+```markdown
+# {标题}
+
+{导语 — 一句话概括核心事件，包含关键数据}
+
+## 正文
+
+{2-4 段深度报道，包含：
+- 事件背景与时间线
+- 关键数据与定价细节
+- 行业影响分析
+- 引用社区真实观点（去口语化）}
+
+## 趋势分析
+
+{1-2 段趋势研判，将单一事件放入行业大背景中分析}
+
+## 社区反应
+
+{精选 3-5 条有代表性的社区观点，保留真实态度但去除口语化表达}
+
+## 风险与争议
+
+{潜在风险、争议点、尚未验证的信息}
+```
+
+### 5.2 写作风格要求
+
+- **对标媒体**：Bloomberg Tech、The Verge、TechCrunch
+- **语言风格**：专业科技新闻体，简洁有力，信息密度高
+- **禁止**：论坛口语（"佬"、"蹬"、"薅"）、emoji、感叹号堆砌
+- **保留**：社区真实观点和争议，但用新闻语言重新表述
+- **数据优先**：每个论点必须有数据支撑（浏览量、回复数、价格、额度等）
+- **少 AI 味**：避免"值得注意的是"、"总而言之"等 AI 常用套话
+
+### 5.3 内容来源
+
+从以下数据生成新闻稿：
+- Agent 4 生成的日报 Markdown（`data/reports/{date}.md`）
+- Agent 3 的趋势分析
+- 原始帖子数据（`data/posts/*.json`）中的社区讨论
+
+### 5.4 输出
+
+保存到 `data/reports/{date}_press.md`。
+
+---
+
+## Agent 6: PDF Builder（PDF 生成器）
 
 **职责**：将 Markdown 日报转换为 PDF 文件，使用 Typst 排版。
 
-### 5.1 Markdown → Typst
+### 6.1 Markdown → Typst
 
 将 Markdown 内容转换为 Typst 格式：
 
@@ -305,7 +367,7 @@ for each post in 待抓取队列（最多50帖）:
 // ...
 ```
 
-### 5.2 Typst 编译
+### 6.2 Typst 编译
 
 使用 Typst CLI 编译为 PDF：
 
@@ -313,7 +375,7 @@ for each post in 待抓取队列（最多50帖）:
 typst compile data/reports/{date}.typ data/reports/{date}.pdf
 ```
 
-### 5.3 Typst 安装检查
+### 6.3 Typst 安装检查
 
 如果 Typst 未安装，提示用户安装：
 
@@ -328,7 +390,7 @@ cargo install typst-cli
 # https://github.com/typst/typst/releases
 ```
 
-### 5.4 输出
+### 6.4 输出
 
 - `data/reports/{date}.typ` — Typst 源文件
 - `data/reports/{date}.pdf` — 最终 PDF 文件

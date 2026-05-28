@@ -99,61 +99,10 @@ Hook：{开场钩子，5秒内抓住注意力}
 
 ### Phase 4: 图片 Prompt 生成
 
-为每个分镜生成 gen-img 兼容的图片 Prompt。
+使用填空即用模板为每个分镜生成图片 Prompt，输出到 `news-pipeline/prompts/image-prompts-YYYY-MM-DD.json`。
 
 **视频品牌**: 「今日羊报 AI」
 **副标题**: 「AI 新闻」
-
-#### 核心方法：把新闻翻译成视觉画面
-
-新闻通常是抽象逻辑，图像模型需要具体视觉元素。必须充当"美术指导"，把文字逻辑翻译成视觉画面。
-
-#### 第一步：拆解新闻为可画元素
-
-拿到新闻后，用四个问题拆解：
-- **谁/什么**（主体：人物、物体、场景）
-- **在哪里**（环境/地点）
-- **在做什么**（动作/事件核心）
-- **整体氛围/情绪**（严肃、喜庆、紧张、温暖）
-
-#### 第二步：选择视觉表现策略
-
-| 新闻类型 | 策略 | 说明 |
-|----------|------|------|
-| 科技/产品 | 社论插画风 | 用具象物体代表抽象概念 |
-| 财经/数据 | 隐喻风 + 数据具象化 | 图表、金币等视觉元素 |
-| 社会/突发 | 纪实写实风 | 直接描绘新闻现场 |
-
-#### 第三步：Prompt 万能公式
-
-```
-[主体与环境] + [关键动作或事件] + [细节烘托] + [构图/镜头] + [风格/画质] — [不要什么]
-```
-
-#### 不同新闻类型的关键词
-
-| 新闻类型 | 额外关键词 |
-|----------|-----------|
-| 科技/产品 | minimalist studio lighting, product photography, sharp focus, futuristic |
-| 财经/数据 | conceptual editorial illustration, rising graphs, stock exchange background |
-| 灾难/突发 | breaking news, emergency responders, blurred background urgency, raw and emotional |
-| 时政/会议 | official press conference, formal attire, podium with flags, serious atmosphere |
-| 暖闻/人情味 | warm color palette, genuine smile, soft natural light, close-up connection |
-
-#### 避坑指南
-
-1. **先说明任务**: Prompt 第一句告诉它要做什么（如 An editorial illustration... 或 A realistic news photo...）
-2. **用英文写**: 图像模型底层标签大多是英文，专业词汇如 Editorial illustration、Photojournalism 质感更好
-3. **避免抽象比喻**: 不要写"经济腾飞像雄鹰"，要画"城市高楼间阳光穿透、数据图表上升"
-4. **不要让 AI 做算术或排版**: 不要试图画"500亿"字样，画"两只穿西装的手在金色背景下握手"
-5. **用否定提示**: 加 —no text, no letters, no signature, no watermark 保证画面干净
-6. **关键词前置**: 越靠前权重越高，重要元素放开头
-
-#### 品牌规则
-
-- 图片中如需显示新闻台标、频道名称、编辑室标识等，统一使用「今日羊报 AI」
-- 图片中如需显示副标题，使用「AI 新闻」
-
 
 #### 填空即用模板
 
@@ -181,24 +130,26 @@ Avoid:
 [新闻核心地点] with [主要人物/物体], [他们在做的关键动作]. [标志性环境细节], [时间/天气/光线]. [情绪与氛围描述]. [新闻摄影/编辑插图风格], photorealistic, highly detailed, shot on [镜头焦段] — no text, no watermark.
 
 16:9 aspect ratio
-今日羊报 AI
-AI News 
+「今日羊报 AI」
+「AI 新闻」
 分两行显示在右上角,充当背景
 ```
 
-#### 填充示例（Claude Opus 4.8 发布新闻）
+#### 输出格式
 
-| 占位符 | 填充内容 |
-|--------|----------|
-| 新闻内容 | Claude Opus 4.8 预计明天发布，社区在代码中发现新模型痕迹，开发者社区热议 |
-| 新闻核心地点 | Developer workspace |
-| 主要人物/物体 | terminal screen |
-| 他们在做的关键动作 | displaying model version 4.8 and benchmark metrics |
-| 标志性环境细节 | code editor in background |
-| 时间/天气/光线 | Warm desk lamp lighting with monitor glow, late night coding atmosphere |
-| 情绪与氛围描述 | focused developer atmosphere |
-| 新闻摄影/编辑插图风格 | Editorial news photography style |
-| 镜头焦段 | 35mm lens |
+`image-prompts-YYYY-MM-DD.json` 结构：
+
+```json
+[
+  {
+    "scene": 1,
+    "news": "新闻标题",
+    "prompt": "填充后的完整 Prompt"
+  }
+]
+```
+
+#### 填充示例（Claude Opus 4.8 发布新闻）
 
 **填充后完整 Prompt**:
 ```
@@ -225,12 +176,10 @@ Avoid:
 Developer workspace with terminal screen displaying model version 4.8 and benchmark metrics, code editor in background. Warm desk lamp lighting with monitor glow, late night coding atmosphere. Editorial news photography style, photorealistic, highly detailed, shot on 35mm lens — no text, no watermark.
 
 16:9 aspect ratio
-今日羊报 AI
-AI News 
+「今日羊报 AI」
+「AI 新闻」
 分两行显示在右上角,充当背景
 ```
-
-**参考模板**: `templates/image-prompt-template.md`
 
 ### Phase 5: 图片生成
 
