@@ -6,7 +6,9 @@ version: 1.0.0
 
 # AI News Factory — 日报短视频自动生成
 
-将 AI 日报 Markdown 自动转化为 B站风格短视频，完整 Pipeline：日报 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成。
+将 AI 日报 Markdown 自动转化为 B站风格短视频，完整 Pipeline：日报 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → ASR → 字幕 → 视频合成。
+
+**核心原则：先 TTS 生成音频，再用 ASR 获取真实时间轴，最后生成精确对齐的字幕。**
 
 ## 触发条件
 
@@ -20,6 +22,7 @@ version: 1.0.0
 - **video-maker skill**: 视频合成 (`~/.claude/skills/video-maker/`)
 - **mimo-tts skill**: 语音合成 (`~/Documents/learn-claude-code/skills/mimo-tts/`)
 - **ffmpeg**: 音频格式转换
+- **faster-whisper**: ASR 识别（字幕时间轴对齐）`pip install faster-whisper`
 
 ## 执行流程
 
@@ -197,136 +200,283 @@ bash ~/.claude/skills/gen-img/scripts/gen-img.sh "<PROMPT>" "news-pipeline/image
 
 ### Phase 6: TTS 配音
 
-使用 mimo-tts skill 生成配音：
+**先生成 TTS 音频，再用 ASR 获取真实时间轴，最后生成精确对齐的字幕。**
+
+根据视频脚本逐场景生成配音：
 
 ```bash
 # 基础用法 - 使用预置音色
 bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
   --text "配音文本" \
-  --voice "冰糖" \
-  --output "news-pipeline/voiceover/scene1.wav"
-
-# 使用音色档案
-bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
-  --text "配音文本" \
-  --profile "曼波" \
+  --profile "阿根" \
   --output "news-pipeline/voiceover/scene1.wav"
 
 # 带风格控制
 bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
   --text "配音文本" \
-  --voice "冰糖" \
+  --profile "阿根" \
   --style "兴奋 新闻播报" \
   --output "news-pipeline/voiceover/scene1.wav"
 ```
 
-**可用预置音色**: mimo_default, 冰糖, 茉莉, 苏打, 白桦, Mia, Chloe, Milo, Dean
-
 **配音要求**:
-- 推荐音色: 冰糖（清亮女声，适合科技新闻）
-- 可用 `--style` 添加情绪标签（如 "兴奋"、"震惊"、"思考"）
-- 生成后用 `ffprobe` 获取时长用于字幕同步
-- 段落间自然停顿
+- 推荐音色: 阿根（音色档案）
+- 按场景生成音频文件（scene1.wav, scene2.wav, ...）
+- 每个场景的文本来自视频脚本对应段落
 
-### Phase 7: 字幕生成
-
-根据配音时长生成 `captions.json`：
-
-```json
-[
-  {
-    "text": "字幕文字",
-    "startMs": 0,
-    "endMs": 2500,
-    "timestampMs": 0,
-    "confidence": 1.0
-  }
-]
-```
-
-**字幕规则**:
-- 按标点符号分句
-- 每句时长按字数比例分配
-- 段落间加 0.3s 间隔
-
-### Phase 7.5: 音画同步优化（借鉴 pyVideoTrans）
-
-**在生成字幕后、渲染前，进行音画同步优化，确保字幕与配音精确对齐。**
-
-#### 7.5.1 精确音频时长获取
-
-使用 `ffprobe` 获取每个配音文件的精确时长：
+**Step 6.1**: 获取每个音频的精确时长
 
 ```bash
-# 获取单个音频时长
-ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 voiceover/scene1.wav
-
-# 批量获取所有音频时长
-for i in 1 2 3 4 5; do
-  duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 voiceover/scene$i.wav)
+for i in 1 2 3 4 5 6 7 8; do
+  duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 news-pipeline/voiceover/scene$i.wav 2>/dev/null)
   echo "scene$i: ${duration}s"
 done
 ```
 
-**关键点**:
-- 时长精确到毫秒（如 8.800000）
-- 不能使用估算值，必须用 ffprobe 实际测量
-- 将时长记录到对应关系表中
+### Phase 7: ASR 识别（借鉴 VideoCaptioner）
 
-#### 7.5.2 时间差补偿机制
+**用 ASR 识别 TTS 生成的配音，获取每个词的精确时间戳。**
 
-当字幕时长与音频时长不匹配时，进行补偿：
+#### 7.1 ASR 词级时间戳提取
 
-| 情况 | 处理方式 |
-|------|----------|
-| 音频时长 > 字幕时长 | 延长场景时长，匹配音频 |
-| 音频时长 < 字幕时长 | 在场景末尾添加静音填充 |
-| 字幕间隙 > 0.3s | 压缩间隙，使节奏更紧凑 |
-
-**补偿脚本**:
 ```python
-import subprocess
+from faster_whisper import WhisperModel
 
-def get_audio_duration(audio_path):
-    """获取音频精确时长（秒）"""
-    result = subprocess.run([
-        'ffprobe', '-v', 'error',
-        '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
-        audio_path
-    ], capture_output=True, text=True)
-    return float(result.stdout.strip())
+def asr_extract_words(audio_path: str) -> list:
+    """
+    用 Faster Whisper 提取词级时间戳
+    
+    原理（借鉴 VideoCaptioner）：
+    1. Faster Whisper 支持 word_timestamps=True
+    2. 直接输出每个词的开始/结束时间
+    3. 无需二次识别，精度高
+    """
+    model = WhisperModel("medium", device="cpu", compute_type="int8")
+    
+    segments, info = model.transcribe(
+        audio_path,
+        word_timestamps=True,  # 启用词级时间戳
+        language="zh",
+        vad_filter=True,       # 启用 VAD 过滤静音
+    )
+    
+    words = []
+    for segment in segments:
+        for word_info in segment.words:
+            words.append({
+                'word': word_info.word.strip(),
+                'start': word_info.start,  # 秒
+                'end': word_info.end,      # 秒
+                'probability': word_info.probability,
+            })
+    
+    return words
+```
 
-def calculate_scene_durations(audio_files):
-    """计算每个场景的实际时长"""
-    durations = []
-    for audio in audio_files:
-        if audio:
-            durations.append(get_audio_duration(audio))
+#### 7.2 LLM 语义断句（借鉴 VideoCaptioner）
+
+**用 LLM 将 ASR 输出的连续文本按语义分句**
+
+```python
+def llm_split_segments(full_text: str) -> list:
+    """
+    用 LLM 按语义自然分句
+    
+    优势：
+    1. 不拆分专有名词（如 "GPT-4"、"OpenAI"）
+    2. 数字和单位保持在一起（如 "100%"、"3.5秒"）
+    3. 按语义停顿分句，更符合阅读习惯
+    """
+    prompt = f"""
+请将以下文本按语义自然分句，每句不超过 15 个字符。
+
+规则：
+1. 按标点符号和语义停顿分句
+2. 每句保持完整语义
+3. 不拆分专有名词
+4. 数字和单位保持在一起
+5. 输出格式：每句一行
+
+原文：
+{full_text}
+"""
+    response = call_llm(prompt)
+    sentences = response.strip().split('\n')
+    return [s.strip() for s in sentences if s.strip()]
+```
+
+**备选：标点符号分句**（简单快速）
+
+```python
+import re
+
+def punctuation_split(text: str) -> list:
+    """按标点符号分句，每句不超过 15 字"""
+    raw_segments = re.split(r'[。！？；]', text)
+    
+    merged = []
+    buffer = ""
+    for seg in raw_segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        if len(buffer) + len(seg) < 15:
+            buffer += seg
         else:
-            durations.append(1.0)  # 无音频场景默认 1s
-    return durations
+            if buffer:
+                merged.append(buffer)
+            buffer = seg
+    if buffer:
+        merged.append(buffer)
+    
+    return merged
 ```
 
-#### 7.5.3 字幕间隙静音去除
+### Phase 8: 字幕生成（滑动窗口对齐）
 
-去除字幕之间的静音区间，使视频节奏更紧凑：
+**将 LLM 分句与 ASR 词级时间戳对齐，生成精确的字幕时间轴。**
 
-```bash
-# 使用 ffmpeg 去除静音
-ffmpeg -i input.wav -af "silenceremove=start_periods=1:start_silence=0.1:start_threshold=-50dB" output.wav
+#### 8.1 滑动窗口对齐算法
+
+```python
+def sliding_window_align(sentences: list, words: list) -> list:
+    """
+    滑动窗口对齐算法
+    
+    核心思想：
+    1. 在 ASR 输出的 words 中找到与字幕文本匹配的子序列
+    2. 用匹配到的词级时间戳作为字幕的 start/end 时间
+    """
+    captions = []
+    word_index = 0
+    
+    for sentence in sentences:
+        text = sentence.replace(' ', '')  # 去除空格
+        
+        # 在 words 中寻找匹配
+        best_start = word_index
+        best_length = 0
+        
+        for i in range(word_index, len(words)):
+            match_text = ""
+            j = i
+            
+            # 累积匹配文本
+            while j < len(words) and len(match_text) < len(text) + 5:
+                match_text += words[j]['word']
+                j += 1
+            
+            # 检查是否匹配
+            clean_match = match_text.replace(' ', '')
+            if text in clean_match or clean_match in text:
+                if j - i > best_length:
+                    best_length = j - i
+                    best_start = i
+        
+        # 用匹配到的时间戳创建字幕
+        if best_length > 0:
+            captions.append({
+                "text": sentence,
+                "startMs": int(words[best_start]['start'] * 1000),
+                "endMs": int(words[best_start + best_length - 1]['end'] * 1000),
+                "timestampMs": int(words[best_start]['start'] * 1000),
+                "confidence": 1.0
+            })
+            word_index = best_start + best_length
+        else:
+            # 回退：保持原估算时间（见 8.2）
+            pass
+    
+    return captions
 ```
 
-**优化策略**:
-- 字幕间隙 > 0.5s 时，压缩到 0.2-0.3s
-- 保持段落间的自然停顿（0.3s）
-- 去除句首句尾的多余静音
+#### 8.2 回退方案：字数比例估算
 
-### Phase 8: 渲染前校验（必须执行）
+当 ASR 对齐失败时，使用字数比例估算时间轴：
+
+```python
+def estimate_caption_timing(captions: list, scene_duration_ms: int) -> list:
+    """
+    按字数比例估算每句字幕的时长
+    
+    核心假设：
+    - 中文约 200ms/字（语速 300字/分钟）
+    - 每句最短 0.5 秒，最长 3 秒
+    - 句间间隔 0.3 秒
+    """
+    total_chars = sum(len(c['text']) for c in captions)
+    
+    if total_chars == 0:
+        return captions
+    
+    ms_per_char = (scene_duration_ms - 300 * len(captions)) / total_chars
+    
+    current_ms = 0
+    for cap in captions:
+        char_count = len(cap['text'])
+        duration_ms = int(char_count * ms_per_char)
+        duration_ms = max(500, min(3000, duration_ms))
+        
+        cap['startMs'] = current_ms
+        cap['endMs'] = current_ms + duration_ms
+        cap['timestampMs'] = current_ms
+        
+        current_ms += duration_ms + 300  # 句间 0.3s 间隔
+    
+    return captions
+```
+
+#### 8.3 完整字幕生成流程
+
+```python
+def generate_subtitles_for_scene(audio_path: str, scene_text: str, scene_duration_ms: int) -> list:
+    """
+    为单个场景生成字幕
+    
+    流程：TTS音频 → ASR词级时间戳 → LLM分句 → 滑动窗口对齐
+    """
+    # Step 1: ASR 提取词级时间戳
+    words = asr_extract_words(audio_path)
+    
+    # Step 2: LLM 语义断句
+    sentences = llm_split_segments(scene_text)
+    
+    # Step 3: 滑动窗口对齐
+    captions = sliding_window_align(sentences, words)
+    
+    # Step 4: 验证对齐结果
+    if not validate_alignment(captions, scene_duration_ms):
+        # 回退：用字数比例估算
+        captions = [{"text": s, "startMs": 0, "endMs": 0, "timestampMs": 0, "confidence": 1.0}
+                    for s in sentences]
+        captions = estimate_caption_timing(captions, scene_duration_ms)
+    
+    return captions
+
+
+def validate_alignment(captions: list, scene_duration_ms: int) -> bool:
+    """验证对齐结果是否合理"""
+    if not captions:
+        return False
+    
+    # 检查时间是否递增
+    for i in range(1, len(captions)):
+        if captions[i]['startMs'] < captions[i-1]['startMs']:
+            return False
+    
+    # 检查总时长是否合理（不超过场景时长的 120%）
+    total_ms = captions[-1]['endMs'] - captions[0]['startMs']
+    if total_ms > scene_duration_ms * 1.2:
+        return False
+    
+    return True
+```
+
+### Phase 9: 渲染前校验（必须执行）
 
 **在渲染视频前，必须完成以下校验步骤，确保图片-音频-字幕三者完全对齐。**
 
-#### Step 8.1: 梳理对应关系表
+#### Step 9.1: 梳理对应关系表
 
 列出所有场景的对应关系，输出表格确认：
 
@@ -344,7 +494,7 @@ ffmpeg -i input.wav -af "silenceremove=start_periods=1:start_silence=0.1:start_t
 - 字幕内容必须与音频内容一致，不能错位
 - 音频时长决定场景时长，不能用估算值
 
-#### Step 8.2: 更新 Composition.tsx
+#### Step 9.2: 更新 Composition.tsx
 
 根据对应关系表，重写 `video-project/src/Composition.tsx` 中的场景配置：
 
@@ -362,7 +512,7 @@ const sceneConfig = [
 - 简单的 `scene.id` 自动映射（容易错位）
 - 硬编码的时长数组（应从音频实际时长获取）
 
-#### Step 8.3: 更新 Root.tsx
+#### Step 9.3: 更新 Root.tsx
 
 更新总时长为所有场景时长之和：
 
@@ -370,15 +520,15 @@ const sceneConfig = [
 const TOTAL_DURATION_SEC = 场景1时长 + 场景2时长 + ... + 场景N时长;
 ```
 
-#### Step 8.4: 重新生成字幕
+#### Step 9.4: 验证字幕对齐
 
-根据 Step 8.1 的对应关系表，重新生成 `captions.json`：
+确保字幕时间轴与音频时长匹配：
 
-- 字幕的时间轴必须从 0 开始，按场景顺序累加
+- 字幕的总时长应与所有音频时长之和一致
 - 无音频的场景不生成字幕，但时间轴要跳过该场景的时长
-- 每句字幕的时长按字数比例分配
+- 每句字幕的 startMs/endMs 应在对应场景的时间范围内
 
-#### Step 8.5: 复制资源到 public 目录
+#### Step 9.5: 复制资源到 public 目录
 
 ```bash
 cp images/scene*.png video-project/public/images/
@@ -386,11 +536,11 @@ cp voiceover/scene*.wav video-project/public/voiceover/
 cp captions/captions.json video-project/public/captions.json
 ```
 
-#### Step 8.6: 确认渲染
+#### Step 9.6: 确认渲染
 
-**只有在以上所有步骤完成后，才能执行 Phase 9 渲染。**
+**只有在以上所有步骤完成后，才能执行 Phase 10 渲染。**
 
-### Phase 9: 视频合成
+### Phase 10: 视频合成
 
 调用 video-maker skill 合成最终视频：
 
@@ -403,18 +553,43 @@ cd video-project && npx remotion render AINewsVideo "out/【今日羊报AI】{�
 - 时长、分辨率
 - 文件大小
 
-### Phase 10: 封面与发布信息生成
+### Phase 11: 封面与发布信息生成
 
 视频渲染完成后，生成发布所需的全部素材，输出到 `news-pipeline/YYYY-MM-DD/` 目录。
 
 #### Step 10.1: 生成视频封面
 
-使用 gen-img 生成封面图（1536x1024，16:9）：
+使用 gen-img 生成封面图（1536x1024，16:9），**必须使用以下统一模板**：
 
-- 封面需包含当期日期
-- 体现本期核心新闻主题
-- 保持「今日羊报 AI」品牌风格
-- 输出到 `YYYY-MM-DD/cover.png`
+**封面模板 Prompt**：
+
+```
+A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，如终端界面、产品截图、数据图表等}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom left corner, display the date "{YYYY-MM-DD}" in large white bold text. The overall mood is professional and authoritative. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, 16:9 aspect ratio.
+```
+
+**模板要素**（必须包含）：
+| 要素 | 位置 | 说明 |
+|------|------|------|
+| 新闻主播 | 画面中央 | 男性，深色西装，白色衬衫，深色领带，双手交叉放桌面 |
+| 新闻台 | 底部 | 现代弧形设计，红色霓虹灯条 |
+| 多屏背景 | 主播身后 | 2x3 或 3x3 网格，展示本期新闻相关画面 |
+| 品牌文字 | 右上角 | 「今日羊报 AI」+「AI 新闻」，白色大字 |
+| 日期 | 左下角 | YYYY-MM-DD 格式，白色粗体 |
+| 灯光 | 全局 | 蓝色环境光 + 红色重点光，营造新闻演播室氛围 |
+
+**背景屏幕内容**（根据当期新闻定制）：
+- 左侧屏幕：终端/代码界面，展示技术细节
+- 中间屏幕：核心产品/公司 logo + 问号或警示符号
+- 右侧屏幕：相关产品/模型 logo 矩阵
+- 底部条：关键数据或警告信息
+
+**示例**（2026-05-29）：
+- 左屏：终端显示身份混淆调试日志（Qwen/DeepSeek 标识）
+- 中屏：Claude logo + 问号
+- 右屏：Qwen、DeepSeek、ChatGPT、Gemini、Llama、Kimi logo 矩阵
+- 底部：「身份混淆」放大镜图标
+
+输出到 `YYYY-MM-DD/cover.png`
 
 #### Step 10.2: 生成发布信息
 
@@ -550,13 +725,17 @@ Claude:
 4. 生成分镜表 → 用户确认
 5. 选择图片风格 → 生成图片 Prompt
 6. 调用 gen-img 生成图片 → 用户预览
-7. TTS 生成配音
-8. 生成字幕
-9. 渲染前校验：梳理对应关系 → 修正 Composition → 重新生成字幕 → 复制资源
-10. 调用 Remotion 渲染视频
-11. 生成封面 + 发布信息 (publish.json)
-12. 归档所有资源到 YYYY-MM-DD/ 目录
-13. 输出最终摘要
+7. TTS 生成配音（根据脚本逐场景生成音频）
+8. ASR 识别配音（faster-whisper 获取词级时间戳）
+9. 字幕生成：
+   a. LLM 语义断句（或标点符号分句）
+   b. 滑动窗口对齐到 ASR 时间戳
+   c. 验证对齐结果，失败时回退到字数比例估算
+10. 渲染前校验：梳理对应关系 → 修正 Composition → 复制资源
+11. 调用 Remotion 渲染视频
+12. 生成封面 + 发布信息 (publish.json)
+13. 归档所有资源到 YYYY-MM-DD/ 目录
+14. 输出最终摘要
 ```
 
 ## 注意事项
