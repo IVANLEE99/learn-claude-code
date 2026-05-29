@@ -274,209 +274,200 @@ def verify_asr(asr_text: str, script_text: str) -> dict:
 
 **如果 ASR 发现脚本与实际发音不一致**：以 ASR 转录文本为准更新字幕。
 
-### Phase 8: 字幕生成（字数比例估算）
+### Phase 8: 字幕生成（FunASR 逐句对齐）
 
-**按标点断句 + 字数比例估算时间轴。**
+**FunASR 字符级 ASR + 逐句对齐 + 无间隙填充。**
 
-> **为什么不用 faster-whisper 词级时间戳？** 实测 faster-whisper（tiny/small/medium）对中文 TTS 音频的词级对齐率低（<30%）。mimo-asr 转录精度高但不提供词级时间戳。因此采用字数比例估算（TTS 语速稳定，估算精度足够）。如需更高精度，可安装 faster-whisper 并使用 `medium` 模型。
+> **核心原则**：先 TTS 生成音频，再用 FunASR 提取字符级时间戳，逐小句在 ASR 输出中滑动窗口匹配。一处匹配失败不影响其他句子。
 
-#### 8.1 标点符号断句
+#### 8.1 语义拆句（8-15 字小句）
 
 ```python
-import re
-
-def split_sentences(full_text: str) -> list:
+def semantic_split(text: str, min_chars: int = 6, max_chars: int = 15) -> list:
     """
-    按标点符号断句，自动合并过短句、拆分过长句
-    
-    处理逻辑：
-    1. 按。！？；\n 分割
-    2. 合并 <5字 的短句到前一句
-    3. 拆分 >15字 的长句（在逗号处）
+    按语义拆成 8-15 字小句。
+
+    规则：
+    1. 优先在逗号、顿号、破折号处断开
+    2. 保持英文专有名词完整（Opus 4.8、Fast Mode、Claude Code）
+    3. 保持数字+单位完整（30美元、16个号）
+    4. 合并 <min_chars 的短句到前一句
     """
-    sentences = re.split(r"[。！？；\n]+", full_text)
-    sentences = [s.strip() for s in sentences if s.strip()]
+    # 先按句号/叹号/问号拆成大句
+    major_sentences = re.split(r"[。！？]+", text)
+    major_sentences = [s.strip() for s in major_sentences if s.strip()]
 
-    # 合并过短的句子（<5字）到前一句
-    merged = []
-    for s in sentences:
-        if merged and len(s) < 5:
-            merged[-1] = merged[-1] + "，" + s
-        else:
-            merged.append(s)
-
-    # 如果句子太长（>15字），尝试在逗号处拆分
     result = []
-    for s in merged:
-        if len(s) > 15:
-            parts = re.split(r"[，,]+", s)
-            temp = ""
-            for p in parts:
-                if temp and len(temp) + len(p) > 12:
-                    result.append(temp.strip())
-                    temp = p
-                else:
-                    temp = temp + "，" + p if temp else p
-            if temp:
-                result.append(temp.strip())
+    for major in major_sentences:
+        if len(major) <= max_chars:
+            result.append(major)
+            continue
+
+        # 按逗号/顿号/破折号拆分
+        parts = re.split(r"([，、——]+)", major)
+        segments = []
+        i = 0
+        while i < len(parts):
+            seg = parts[i]
+            if i + 1 < len(parts) and re.match(r"^[，、——]+$", parts[i + 1]):
+                seg = seg + parts[i + 1]
+                i += 2
+            else:
+                i += 1
+            if seg.strip():
+                segments.append(seg.strip())
+
+        # 合并过短的段
+        merged = []
+        buf = ""
+        for seg in segments:
+            if buf and len(buf) + len(seg) > max_chars:
+                merged.append(buf)
+                buf = seg
+            else:
+                buf = (buf + seg) if buf else seg
+        if buf:
+            merged.append(buf)
+
+        # 对仍然过长的段做二次拆分
+        for seg in merged:
+            if len(seg) <= max_chars:
+                result.append(seg)
+            else:
+                text_buf = seg
+                while len(text_buf) > max_chars:
+                    cut = _find_best_split(text_buf, max_chars)
+                    if cut <= 0:
+                        cut = max_chars
+                    result.append(text_buf[:cut].strip())
+                    text_buf = text_buf[cut:].strip()
+                if text_buf:
+                    result.append(text_buf)
+
+    # 合并相邻过短的句
+    final = []
+    for s in result:
+        if final and len(s) < min_chars and len(final[-1]) + len(s) <= max_chars:
+            final[-1] = final[-1] + s
         else:
-            result.append(s)
+            final.append(s)
 
-    return result
+    return final
 ```
 
-#### 8.2 字数比例估算时间轴
+#### 8.2 FunASR 字符级时间戳提取
 
 ```python
-def estimate_timing(sentences: list, scene_duration_ms: int) -> list:
-    """
-    按字数比例精确分配，覆盖整个音频时长
-    
-    关键参数：
-    - 开头缓冲: 200ms（给 TTS 启动时间）
-    - 句间间隔: 200ms
-    - 每句最短: 500ms，最长: 4000ms
-    - 最后一句延伸到 scene_duration - 100ms
-    """
-    total_chars = sum(len(s) for s in sentences)
-    if total_chars == 0:
-        return []
+from funasr import AutoModel
 
-    usable_ms = scene_duration_ms - 200  # 开头留 200ms 缓冲
-    ms_per_char = usable_ms / total_chars
+def asr_extract_chars(audio_path: str) -> list:
+    """用 FunASR paraformer-zh 提取字符级时间戳"""
+    model = AutoModel(model="paraformer-zh")
+    result = model.generate(input=audio_path, batch_size_s=300)
 
-    captions = []
-    current_ms = 200  # 从 0.2s 开始
+    chars = []
+    if result and len(result) > 0:
+        text = result[0].get("text", "")
+        timestamps = result[0].get("timestamp", [])
+        tokens = text.split(" ")
+        if len(tokens) == len(timestamps):
+            for token, ts in zip(tokens, timestamps):
+                if token.strip():
+                    chars.append({"char": token.strip(), "start": ts[0], "end": ts[1]})
+    return chars
+```
 
-    for i, sentence in enumerate(sentences):
-        char_count = len(sentence)
-        duration_ms = int(char_count * ms_per_char)
-        duration_ms = max(500, min(4000, duration_ms))
+#### 8.3 逐句滑动窗口对齐
 
-        # 最后一句延伸到音频结尾
-        if i == len(sentences) - 1:
-            end_ms = scene_duration_ms - 100  # 结尾留 100ms
-        else:
-            end_ms = current_ms + duration_ms
+```python
+def align_single_sentence(sentence: str, expanded: list, search_start: int) -> dict:
+    """在 expanded 字符序列中搜索 sentence 的最佳匹配位置"""
+    script_text = sentence.replace(" ", "")
+    best_start = -1
+    best_score = -1
+    best_end = -1
 
-        captions.append({
-            "text": sentence,
-            "startMs": current_ms,
-            "endMs": end_ms,
-        })
-        current_ms = end_ms + 200  # 句间 0.2s 间隔
+    search_end = min(len(expanded), search_start + len(script_text) * 4)
 
+    for i in range(search_start, search_end):
+        matched_chars = 0
+        si = 0
+        skip_count = 0
+        last_j = i
+
+        for j in range(i, len(expanded)):
+            if si >= len(script_text):
+                break
+            while si < len(script_text) and not script_text[si].isalnum():
+                si += 1
+            if si >= len(script_text):
+                break
+
+            if expanded[j]["char"].lower() == script_text[si].lower():
+                matched_chars += 1
+                si += 1
+                skip_count = 0
+                last_j = j + 1
+            elif not expanded[j]["char"].isalnum():
+                continue
+            elif skip_count < 5:
+                skip_count += 1
+            else:
+                break
+
+        if matched_chars > 0:
+            score = matched_chars / len(script_text)
+            if score > best_score and matched_chars >= len(script_text) * 0.25:
+                best_score = score
+                best_start = i
+                best_end = last_j
+
+        if best_score >= 0.7:
+            break
+
+    if best_score > 0.25 and best_start >= 0:
+        end_idx = min(best_end - 1, len(expanded) - 1)
+        return {"startMs": expanded[best_start]["start"], "endMs": expanded[end_idx]["end"]}
+    return None
+```
+
+#### 8.4 填充未匹配字幕 + 无间隙后处理
+
+```python
+def fill_unmatched(captions: list, scene_duration_ms: int) -> list:
+    """用前后锚点 + 字数比例填充未匹配字幕"""
+    # 前锚点：前一个已匹配字幕的 endMs
+    # 后锚点：后一个已匹配字幕的 startMs
+    # 在可用窗口内按字数比例分配
+    # 场景首尾用全场景字数比例覆盖
+    ...
+
+def ensure_no_gaps(captions: list, scene_duration_ms: int, max_gap_ms: int = 500) -> list:
+    """后处理：如果相邻字幕间隙 > 500ms，将前一句 endMs 延伸"""
+    for i in range(1, len(captions)):
+        gap = captions[i]["startMs"] - captions[i - 1]["endMs"]
+        if gap > max_gap_ms:
+            captions[i - 1]["endMs"] = captions[i]["startMs"] - 50
     return captions
 ```
 
-#### 8.3 完整字幕生成流程
+#### 8.5 完整流程
 
-```python
-def generate_subtitles_for_scene(scene_text: str, scene_duration_ms: int, asr_text: str = None) -> list:
-    """
-    为单个场景生成字幕
-
-    流程：脚本文本 → ASR 验证 → 标点断句 → 字数比例估算时间轴
-    """
-    # Step 1: 如果 ASR 转录与脚本不一致，以 ASR 为准
-    text = asr_text if asr_text else scene_text
-
-    # Step 2: 断句
-    sentences = split_sentences(text)
-
-    # Step 3: 估算时间
-    captions = estimate_timing(sentences, scene_duration_ms)
-
-    return captions
-
-
-def generate_all_captions(scenes: list) -> list:
-    """
-    为所有场景生成全局字幕（累加偏移）
-    
-    scenes: [{"scene": 1, "text": "...", "duration_sec": 9.92, "asr_text": "..."}, ...]
-    """
-    all_captions = []
-    cumulative_offset_ms = 0
-
-    for scene_config in scenes:
-        scene_duration_ms = int(scene_config["duration_sec"] * 1000)
-
-        # 断句 + 估算时间（优先使用 ASR 转录文本）
-        scene_captions = generate_subtitles_for_scene(
-            scene_config["text"], scene_duration_ms,
-            asr_text=scene_config.get("asr_text")
-        )
-
-        # 添加累计偏移
-        for cap in scene_captions:
-            all_captions.append({
-                "text": cap["text"],
-                "startMs": cap["startMs"] + cumulative_offset_ms,
-                "endMs": cap["endMs"] + cumulative_offset_ms,
-            })
-
-        cumulative_offset_ms += scene_duration_ms
-
-    return all_captions
+```
+脚本文本 → 语义拆句(8-15字) → FunASR提取字符级时间戳
+    → 逐句滑动窗口匹配 → 填充未匹配(前后锚点+字数比例)
+    → 无间隙后处理 → 累加偏移 → 输出 captions.json
 ```
 
-#### 8.4 可选：faster-whisper 词级精确对齐
+**与旧方案对比**：
 
-如需更高精度的字幕对齐（词级时间戳），可安装 faster-whisper 并使用 `medium` 模型：
-
-```bash
-pip install faster-whisper
-```
-
-```python
-from faster_whisper import WhisperModel
-
-def asr_extract_words(audio_path: str) -> list:
-    """用 Faster Whisper 提取词级时间戳（可选，需 medium+ 模型）"""
-    model = WhisperModel("medium", device="cpu", compute_type="int8")
-    segments, info = model.transcribe(
-        audio_path, word_timestamps=True, language="zh", vad_filter=True,
-    )
-    words = []
-    for segment in segments:
-        for word_info in segment.words:
-            words.append({
-                'word': word_info.word.strip(),
-                'start': word_info.start,
-                'end': word_info.end,
-            })
-    return words
-
-
-def sliding_window_align(sentences: list, words: list) -> list:
-    """滑动窗口对齐：在 ASR 词序列中找到与字幕匹配的子序列"""
-    captions = []
-    word_index = 0
-    for sentence in sentences:
-        text = sentence.replace(' ', '')
-        best_start = word_index
-        best_length = 0
-        for i in range(word_index, len(words)):
-            match_text = ""
-            j = i
-            while j < len(words) and len(match_text) < len(text) + 5:
-                match_text += words[j]['word']
-                j += 1
-            clean_match = match_text.replace(' ', '')
-            if text in clean_match or clean_match in text:
-                if j - i > best_length:
-                    best_length = j - i
-                    best_start = i
-        if best_length > 0:
-            captions.append({
-                "text": sentence,
-                "startMs": int(words[best_start]['start'] * 1000),
-                "endMs": int(words[best_start + best_length - 1]['end'] * 1000),
-            })
-            word_index = best_start + best_length
-    return captions
-```
+| 对比项 | 旧方案（字数比例估算） | 新方案（FunASR 逐句对齐） |
+|--------|----------------------|--------------------------|
+| 时间轴来源 | 字数比例公式 | FunASR 词级时间戳 |
+| 对齐粒度 | 整段 | 8-15字小句 |
+| 失败影响 | 整段空白 | 仅该句，自动填充 |
+| 间隙处理 | 无 | ensure_no_gaps 后处理 |
+| 专有名词 | 可能拆分 | 语义拆句保护 |
 
 ### Phase 9: 渲染前校验（必须执行）
 
