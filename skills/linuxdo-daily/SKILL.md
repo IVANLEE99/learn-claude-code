@@ -115,6 +115,22 @@ data/
 
 如果触发 Cloudflare 挑战页，通知用户进行人工验证。
 
+### 1.1b 滚动加载更多帖子
+
+打开列表页后，使用 `browser_run_code_unsafe` 滚动到底部 4 次，触发 Discourse 无限滚动加载：
+
+```js
+async (page) => {
+  for (let i = 0; i < 4; i++) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(2000);
+  }
+  return 'scrolled 4 times';
+}
+```
+
+每次滚动后等待 2 秒让帖子加载。滚动完成后，页面中应有约 100+ 条帖子。
+
 ### 1.2 提取帖子链接
 
 使用 `browser_evaluate` 提取列表中的帖子：
