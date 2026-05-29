@@ -22,6 +22,8 @@ version: 1.0.0
 - **video-maker skill**: 视频合成 (`~/.claude/skills/video-maker/`)
 - **mimo-tts skill**: 语音合成 (`~/Documents/learn-claude-code/skills/mimo-tts/`)
 - **ffmpeg**: 音频格式转换（获取音频时长）
+- **mimo-asr skill**: 语音识别 (`~/Documents/learn-claude-code/skills/mimo-asr/`)
+- **faster-whisper**（可选）: 词级时间戳 ASR，用于精确字幕对齐 `pip install faster-whisper`
 
 ## 执行流程
 
@@ -232,13 +234,53 @@ for i in 1 2 3 4 5 6 7 8; do
 done
 ```
 
-### Phase 7: 字幕生成（字数比例估算）
+### Phase 7: ASR 验证（mimo-asr）
 
-**直接按标点断句 + 字数比例估算时间轴，无需 ASR。**
+**用 ASR 识别 TTS 音频，验证转录结果与脚本文本是否一致。**
 
-> **为什么不用 ASR？** 实测 faster-whisper（tiny/small/medium）对中文 TTS 生成的音频识别精度差，词级时间戳对齐率低（<30%），不如纯字数比例估算可靠。TTS 语速稳定，字数比例估算反而更准确。
+#### 7.1 调用 mimo-asr 识别
 
-#### 7.1 标点符号断句
+```bash
+# 逐场景识别 TTS 音频
+for i in 1 2 3 4 5 6 7; do
+  bash ~/Documents/learn-claude-code/skills/mimo-asr/scripts/mimo-asr.sh \
+    --audio "news-pipeline/voiceover/scene${i}.wav" \
+    --language zh \
+    --output "news-pipeline/2026-05-29/asr/scene${i}.txt"
+done
+```
+
+#### 7.2 ASR 转录 vs 脚本文本对比
+
+对比 ASR 输出与原始脚本文本，检查：
+- 是否有漏词、多词
+- 专有名词是否正确（模型名、公司名）
+- 数字是否准确
+
+```python
+def verify_asr(asr_text: str, script_text: str) -> dict:
+    """
+    对比 ASR 转录与脚本文本
+    
+    返回: {"match": bool, "diff": str}
+    """
+    # 去除标点和空格后比较
+    clean_asr = re.sub(r'[^\w]', '', asr_text)
+    clean_script = re.sub(r'[^\w]', '', script_text)
+    
+    match = clean_asr == clean_script
+    return {"match": match, "asr": asr_text, "script": script_text}
+```
+
+**如果 ASR 发现脚本与实际发音不一致**：以 ASR 转录文本为准更新字幕。
+
+### Phase 8: 字幕生成（字数比例估算）
+
+**按标点断句 + 字数比例估算时间轴。**
+
+> **为什么不用 faster-whisper 词级时间戳？** 实测 faster-whisper（tiny/small/medium）对中文 TTS 音频的词级对齐率低（<30%）。mimo-asr 转录精度高但不提供词级时间戳。因此采用字数比例估算（TTS 语速稳定，估算精度足够）。如需更高精度，可安装 faster-whisper 并使用 `medium` 模型。
+
+#### 8.1 标点符号断句
 
 ```python
 import re
@@ -283,7 +325,7 @@ def split_sentences(full_text: str) -> list:
     return result
 ```
 
-#### 7.2 字数比例估算时间轴
+#### 8.2 字数比例估算时间轴
 
 ```python
 def estimate_timing(sentences: list, scene_duration_ms: int) -> list:
@@ -327,19 +369,22 @@ def estimate_timing(sentences: list, scene_duration_ms: int) -> list:
     return captions
 ```
 
-#### 7.3 完整字幕生成流程
+#### 8.3 完整字幕生成流程
 
 ```python
-def generate_subtitles_for_scene(scene_text: str, scene_duration_ms: int) -> list:
+def generate_subtitles_for_scene(scene_text: str, scene_duration_ms: int, asr_text: str = None) -> list:
     """
     为单个场景生成字幕
 
-    流程：脚本文本 → 标点断句 → 字数比例估算时间轴
+    流程：脚本文本 → ASR 验证 → 标点断句 → 字数比例估算时间轴
     """
-    # Step 1: 断句
-    sentences = split_sentences(scene_text)
+    # Step 1: 如果 ASR 转录与脚本不一致，以 ASR 为准
+    text = asr_text if asr_text else scene_text
 
-    # Step 2: 估算时间
+    # Step 2: 断句
+    sentences = split_sentences(text)
+
+    # Step 3: 估算时间
     captions = estimate_timing(sentences, scene_duration_ms)
 
     return captions
@@ -349,7 +394,7 @@ def generate_all_captions(scenes: list) -> list:
     """
     为所有场景生成全局字幕（累加偏移）
     
-    scenes: [{"scene": 1, "text": "...", "duration_sec": 9.92}, ...]
+    scenes: [{"scene": 1, "text": "...", "duration_sec": 9.92, "asr_text": "..."}, ...]
     """
     all_captions = []
     cumulative_offset_ms = 0
@@ -357,9 +402,10 @@ def generate_all_captions(scenes: list) -> list:
     for scene_config in scenes:
         scene_duration_ms = int(scene_config["duration_sec"] * 1000)
 
-        # 断句 + 估算时间
+        # 断句 + 估算时间（优先使用 ASR 转录文本）
         scene_captions = generate_subtitles_for_scene(
-            scene_config["text"], scene_duration_ms
+            scene_config["text"], scene_duration_ms,
+            asr_text=scene_config.get("asr_text")
         )
 
         # 添加累计偏移
@@ -373,6 +419,63 @@ def generate_all_captions(scenes: list) -> list:
         cumulative_offset_ms += scene_duration_ms
 
     return all_captions
+```
+
+#### 8.4 可选：faster-whisper 词级精确对齐
+
+如需更高精度的字幕对齐（词级时间戳），可安装 faster-whisper 并使用 `medium` 模型：
+
+```bash
+pip install faster-whisper
+```
+
+```python
+from faster_whisper import WhisperModel
+
+def asr_extract_words(audio_path: str) -> list:
+    """用 Faster Whisper 提取词级时间戳（可选，需 medium+ 模型）"""
+    model = WhisperModel("medium", device="cpu", compute_type="int8")
+    segments, info = model.transcribe(
+        audio_path, word_timestamps=True, language="zh", vad_filter=True,
+    )
+    words = []
+    for segment in segments:
+        for word_info in segment.words:
+            words.append({
+                'word': word_info.word.strip(),
+                'start': word_info.start,
+                'end': word_info.end,
+            })
+    return words
+
+
+def sliding_window_align(sentences: list, words: list) -> list:
+    """滑动窗口对齐：在 ASR 词序列中找到与字幕匹配的子序列"""
+    captions = []
+    word_index = 0
+    for sentence in sentences:
+        text = sentence.replace(' ', '')
+        best_start = word_index
+        best_length = 0
+        for i in range(word_index, len(words)):
+            match_text = ""
+            j = i
+            while j < len(words) and len(match_text) < len(text) + 5:
+                match_text += words[j]['word']
+                j += 1
+            clean_match = match_text.replace(' ', '')
+            if text in clean_match or clean_match in text:
+                if j - i > best_length:
+                    best_length = j - i
+                    best_start = i
+        if best_length > 0:
+            captions.append({
+                "text": sentence,
+                "startMs": int(words[best_start]['start'] * 1000),
+                "endMs": int(words[best_start + best_length - 1]['end'] * 1000),
+            })
+            word_index = best_start + best_length
+    return captions
 ```
 
 ### Phase 9: 渲染前校验（必须执行）
@@ -579,7 +682,7 @@ cp news-pipeline/YYYY-MM-DD/publish.json news-pipeline/YYYY-MM-DD/
 - TTS 使用 mimo-tts，推荐音色「阿根」
 - 视频总时长建议 60-120 秒
 - 事件数量建议 3 个（保证信息密度）
-- **Phase 8（渲染前校验）是强制步骤，不可跳过**
+- **Phase 9（渲染前校验）是强制步骤，不可跳过**
 
 ## 目录结构
 
@@ -629,12 +732,13 @@ Claude:
 5. 选择图片风格 → 生成图片 Prompt
 6. 调用 gen-img 生成图片 → 用户预览
 7. TTS 生成配音（根据脚本逐场景生成音频）
-8. 字幕生成：标点断句 → 字数比例估算时间轴
-9. 渲染前校验：梳理对应关系 → 修正 Composition → 复制资源
-10. 调用 Remotion 渲染视频
-11. 生成封面 + 发布信息 (publish.json)
-12. 归档所有资源到 YYYY-MM-DD/ 目录
-13. 输出最终摘要
+8. ASR 验证：mimo-asr 识别 TTS 音频，对比脚本文本
+9. 字幕生成：标点断句 → 字数比例估算时间轴
+10. 渲染前校验：梳理对应关系 → 修正 Composition → 复制资源
+11. 调用 Remotion 渲染视频
+12. 生成封面 + 发布信息 (publish.json)
+13. 归档所有资源到 YYYY-MM-DD/ 目录
+14. 输出最终摘要
 ```
 
 ## 注意事项
