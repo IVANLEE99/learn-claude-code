@@ -280,6 +280,98 @@ def verify_asr(asr_text: str, script_text: str) -> dict:
 
 > **核心原则**：先 TTS 生成音频，再用 FunASR 提取字符级时间戳，逐小句在 ASR 输出中滑动窗口匹配。一处匹配失败不影响其他句子。
 
+#### 8.0.1 字体使用规范（必须遵守）
+
+**⚠️ 重要：禁止使用商用字体，避免版权风险！**
+
+**推荐字体（免费可商用）**：
+| 字体名称 | 类型 | 适用场景 | 许可证 |
+|----------|------|----------|--------|
+| PingFang SC | 系统字体 | macOS 字幕 | Apple EULA |
+| Microsoft YaHei | 系统字体 | Windows 字幕 | Microsoft EULA |
+| Noto Sans SC | 开源字体 | 跨平台字幕 | Apache 2.0 |
+| Source Han Sans | 开源字体 | 高质量字幕 | Apache 2.0 |
+| WenQuanYi Micro Hei | 开源字体 | Linux 字幕 | GPL |
+
+**禁止使用的字体**：
+- ❌ 思源黑体（部分版本有商用限制）
+- ❌ 方正字体（需要商业授权）
+- ❌ 汉仪字体（需要商业授权）
+- ❌ 造字工房字体（需要商业授权）
+- ❌ 任何需要付费授权的字体
+
+**字体配置示例**（Subtitles.tsx）：
+```tsx
+// 使用系统字体，避免 Google Fonts 网络加载超时
+const fontFamily = '"PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif';
+```
+
+**字体大小规范**：
+- 标题：48-56px，加粗
+- 字幕：40-48px，加粗
+- 辅助文字：32-36px，常规
+
+**颜色规范**：
+- 主文字：#FFFFFF（白色）
+- 描边/阴影：黑色半透明（rgba(0,0,0,0.8)）
+- 背景：黑色半透明（rgba(0,0,0,0.75)）
+
+**注意事项**：
+- 始终使用系统字体或开源字体
+- 定期检查字体许可证是否变更
+- 如需使用新字体，先确认商用许可
+- 保留字体许可证文件以备查验
+
+#### 8.0 结束语字幕生成
+
+**每个视频必须包含结束语，增强用户互动和品牌认知。**
+
+**结束语模板**：
+```
+今天AI圈真是又热闹又魔幻，
+觉得有用点个赞，关注不迷路，
+我们下期见！
+```
+
+**结束语生成流程**：
+1. 生成结束语 TTS 音频（scene7.wav）
+2. 获取结束语音频时长（约 6-8 秒）
+3. 生成结束语字幕（3-4 条）
+4. 添加到字幕文件末尾
+5. 更新视频总时长
+
+**结束语字幕示例**：
+```json
+[
+  {
+    "text": "今天AI圈真是又热闹又魔幻，",
+    "startMs": 101520,
+    "endMs": 104520
+  },
+  {
+    "text": "觉得有用点个赞，",
+    "startMs": 104520,
+    "endMs": 105520
+  },
+  {
+    "text": "关注不迷路，",
+    "startMs": 105520,
+    "endMs": 106520
+  },
+  {
+    "text": "我们下期见！",
+    "startMs": 106520,
+    "endMs": 107920
+  }
+]
+```
+
+**注意事项**：
+- 结束语开始时间 = 前一个场景结束时间
+- 结束语字幕时长 = 结束语音频时长
+- 每条字幕约 2-3 秒
+- 结束语文案可根据当期内容微调
+
 #### 8.1 语义拆句（8-15 字小句）
 
 ```python
@@ -571,7 +663,7 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
 | 新闻台 | 底部 | 现代弧形设计，红色霓虹灯条 |
 | 多屏背景 | 主播身后 | 2x3 或 3x3 网格，展示本期新闻相关画面 |
 | 品牌文字 | 右上角 | 「今日羊报 AI」+「AI 新闻」，白色大字 |
-| 日期 | 左下角 | YYYY-MM-DD 格式，白色粗体 |
+| 日期 | 底部居中 | YYYY-MM-DD 格式，白色粗体 |
 | 灯光 | 全局 | 蓝色环境光 + 红色重点光，营造新闻演播室氛围 |
 
 **背景屏幕内容**（根据当期新闻定制）：
@@ -674,6 +766,191 @@ cp news-pipeline/YYYY-MM-DD/publish.json news-pipeline/YYYY-MM-DD/
 - 视频总时长建议 60-120 秒
 - 事件数量建议 3 个（保证信息密度）
 - **Phase 9（渲染前校验）是强制步骤，不可跳过**
+- **Phase 12（B站自动上传）需要用户确认后执行**
+
+### Phase 12: B站自动上传（Playwright MCP）
+
+**使用 Playwright MCP 自动化浏览器操作，将视频上传到B站。**
+
+#### Step 12.1: 打开B站上传页面
+
+```python
+# 使用 Playwright MCP 打开浏览器
+browser_navigate("https://member.bilibili.com/platform/upload/video/frame")
+```
+
+#### Step 12.2: 上传视频文件
+
+```python
+# 等待页面加载完成
+browser_wait_for("text=上传视频")
+
+# 上传视频文件
+browser_file_upload("news-pipeline/YYYY-MM-DD/video/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4")
+```
+
+#### Step 12.3: 等待上传完成
+
+```python
+# 等待上传进度完成（通常需要几分钟）
+browser_wait_for("text=上传完成")
+```
+
+#### Step 12.4: 上传封面
+
+```python
+# 点击封面上传区域
+browser_click("element=封面上传区域")
+
+# 上传封面图片
+browser_file_upload("news-pipeline/YYYY-MM-DD/cover.png")
+```
+
+#### Step 12.5: 设置创作声明
+
+```python
+# 选择创作声明：个人观点
+browser_click("element=创作声明下拉框")
+browser_click("text=个人观点")
+```
+
+#### Step 12.6: 填写简介
+
+```python
+# 读取 publish.json 获取简介
+# 填写简介内容
+browser_type("element=简介输入框", "publish.json 中的 description")
+```
+
+#### Step 12.7: 填写标签
+
+```python
+# 读取 publish.json 获取标签
+# 逐个添加标签
+for tag in publish_json["platform"]["bilibili"]["tags"]:
+    browser_type("element=标签输入框", tag)
+    browser_press_key("Enter")
+```
+
+#### Step 12.8: 加入合集
+
+```python
+# 点击加入合集按钮
+browser_click("element=加入合集")
+
+# 选择「今日羊报AI」合集
+browser_click("text=今日羊报AI")
+```
+
+#### Step 12.9: 选择推荐活动
+
+```python
+# 选择第一个推荐的活动
+browser_click("element=推荐活动列表第一项")
+```
+
+#### Step 12.10: 设置定时发布
+
+```python
+# 计算最近的发布时间（12:00/14:00/20:00）
+import datetime
+
+now = datetime.datetime.now()
+publish_times = [
+    now.replace(hour=12, minute=0, second=0, microsecond=0),
+    now.replace(hour=14, minute=0, second=0, microsecond=0),
+    now.replace(hour=20, minute=0, second=0, microsecond=0),
+]
+
+# 找到最近的未来时间
+future_times = [t for t in publish_times if t > now]
+if future_times:
+    nearest_time = min(future_times)
+else:
+    # 如果都过了，用明天12:00
+    nearest_time = publish_times[0] + datetime.timedelta(days=1)
+
+# 点击定时发布
+browser_click("element=定时发布")
+
+# 设置日期和时间
+browser_type("element=日期输入框", nearest_time.strftime("%Y-%m-%d"))
+browser_type("element=时间输入框", nearest_time.strftime("%H:%M"))
+```
+
+#### Step 12.11: 确认发布
+
+```python
+# 点击发布按钮
+browser_click("element=发布按钮")
+
+# 等待发布成功
+browser_wait_for("text=发布成功")
+```
+
+#### 完整自动化流程
+
+```python
+def auto_upload_bilibili(video_path: str, cover_path: str, publish_info: dict):
+    """
+    自动上传视频到B站
+    
+    参数:
+        video_path: 视频文件路径
+        cover_path: 封面图片路径
+        publish_info: publish.json 内容
+    """
+    # 1. 打开上传页面
+    browser_navigate("https://member.bilibili.com/platform/upload/video/frame")
+    
+    # 2. 上传视频
+    browser_file_upload(video_path)
+    browser_wait_for("text=上传完成")
+    
+    # 3. 上传封面
+    browser_click("element=封面上传区域")
+    browser_file_upload(cover_path)
+    
+    # 4. 设置创作声明
+    browser_click("element=创作声明下拉框")
+    browser_click("text=个人观点")
+    
+    # 5. 填写简介
+    browser_type("element=简介输入框", publish_info["description"])
+    
+    # 6. 填写标签
+    for tag in publish_info["platform"]["bilibili"]["tags"]:
+        browser_type("element=标签输入框", tag)
+        browser_press_key("Enter")
+    
+    # 7. 加入合集
+    browser_click("element=加入合集")
+    browser_click("text=今日羊报AI")
+    
+    # 8. 选择推荐活动
+    browser_click("element=推荐活动列表第一项")
+    
+    # 9. 设置定时发布
+    nearest_time = calculate_nearest_publish_time()
+    browser_click("element=定时发布")
+    browser_type("element=日期输入框", nearest_time.strftime("%Y-%m-%d"))
+    browser_type("element=时间输入框", nearest_time.strftime("%H:%M"))
+    
+    # 10. 确认发布
+    browser_click("element=发布按钮")
+    browser_wait_for("text=发布成功")
+    
+    return {"success": True, "publish_time": nearest_time.isoformat()}
+```
+
+#### 注意事项
+
+- 执行前需要用户确认（风险操作）
+- 上传过程可能需要 2-5 分钟（取决于视频大小和网速）
+- 封面图片必须是 16:9 比例，建议 1920x1080
+- 标签最多 10 个，每个标签不超过 20 字符
+- 合集「今日羊报AI」需要提前在B站创建
+- 定时发布时间必须是未来时间
 
 ## 目录结构
 

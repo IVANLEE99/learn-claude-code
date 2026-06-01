@@ -235,20 +235,68 @@ pdca
 
 
 
-### ai-news-factory
-
-https://github.com/harry0703/MoneyPrinterTurbo
-
-寻找视频字幕音频对其的skill
+### ai-news-factory 优化
 
 
-如果属于新闻,则新增再图片中间添加新闻标题
+✅1、寻找视频字幕音频对其的skill
+   https://github.com/harry0703/MoneyPrinterTurbo
+   https://github.com/WEIFENG2333/VideoCaptioner
 
-### linuxdo-daily
 
-刷新
-获取100条帖子
+2、如果属于新闻,则新增再图片中间添加新闻标题
+
+3、新闻图片生成/skill
+
+4、根据 publish.json 自动打开浏览器上传
+
+打来浏览器https://member.bilibili.com/platform/upload/video/frame?spm_id_from=333.1007.top_bar.upload
+
+等待上传完成 
+
+选择封面上传
+创作声明选择:个人观点
+填写简介
+填写标签
+加入合集[今日羊报AI]
+
+选择第一个推荐的活动
+
+定时到12:00 14:00 20:00 最近的时间发布 
+
+
+
+5、直接生成视频
+
+6、建一个仓库存放数据
+
+7、定时任务/权限 配置/ 自动采集/自动生成/自动发布
+
+8、发布到各个平台/微信公众号/知乎/小红书
+
+9、不要用商用字体
+
+
+10 captions
+末尾加上
+今天AI圈真是又热闹又魔幻
+觉得有用点个赞，关注不迷路，
+我们下期见
+
+11、加入节日祝福
+
+### linuxdo-daily 优化
+
+✅刷新
+✅生成新闻稿
+建一个仓库存放数据
+✅滚动加载4次,获取100条帖子
+
+
+
 
 
 
 https://github.com/anthropics/knowledge-work-plugins
+
+
+整理每一期 日报到 github 目录tolear

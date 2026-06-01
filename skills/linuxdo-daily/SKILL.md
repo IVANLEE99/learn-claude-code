@@ -56,7 +56,7 @@ data/
 │  │  - 检查历史是否已抓取         │                               │
 │  │  - 逐条抓取正文（随机1-3s）   │                               │
 │  │  - 返回时刷新页面获取新帖     │                               │
-│  │  - 每源最多50帖               │                               │
+│  │  - 每源最多500帖              │                               │
 │  │  → 输出: data/posts/*.json    │                               │
 │  │  → 输出: data/daily/{date}.json│                              │
 │  └──────────────┬───────────────┘                               │
@@ -117,19 +117,19 @@ data/
 
 ### 1.1b 滚动加载更多帖子
 
-打开列表页后，使用 `browser_run_code_unsafe` 滚动到底部 4 次，触发 Discourse 无限滚动加载：
+打开列表页后，使用 `browser_run_code_unsafe` 滚动到底部 10 次，触发 Discourse 无限滚动加载：
 
 ```js
 async (page) => {
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 10; i++) {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForTimeout(2000);
   }
-  return 'scrolled 4 times';
+  return 'scrolled 10 times';
 }
 ```
 
-每次滚动后等待 2 秒让帖子加载。滚动完成后，页面中应有约 100+ 条帖子。
+每次滚动后等待 2 秒让帖子加载。滚动完成后，页面中应有约 300+ 条帖子。
 
 ### 1.2 提取帖子链接
 
@@ -160,10 +160,10 @@ async (page) => {
 
 ### 1.4 逐条抓取正文（模拟人类浏览）
 
-对待抓取帖子执行循环，**每源最多 50 帖**：
+对待抓取帖子执行循环，**每源最多 500 帖**：
 
 ```
-for each post in 待抓取队列（最多50帖）:
+for each post in 待抓取队列（最多500帖）:
   1. browser_navigate → 打开帖子 URL
   2. browser_wait_for → 等待 random(1, 3) 秒（模拟人类阅读）
   3. browser_evaluate → 提取正文：
@@ -491,7 +491,7 @@ async (page) => {
 - 模拟人类浏览行为：每帖随机等待 1-3 秒
 - 如果触发 Cloudflare 挑战页，通知用户进行人工验证
 - 返回列表页时刷新页面，获取最新帖子
-- 每个数据源最多抓取 50 帖
+- 每个数据源最多抓取 500 帖
 - 抓取前检查历史记录，避免重复抓取
 - Cookies 通过 Playwright MCP 的 `page.context().cookies()` 持久化到 `data/cookies.json`
 - 列表页帖子的 like_count 显示为 0（Discourse 显示问题），实际点赞数需从详情页获取
