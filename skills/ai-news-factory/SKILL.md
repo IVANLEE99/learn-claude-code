@@ -193,11 +193,47 @@ Developer workspace with terminal screen displaying model version 4.8 and benchm
 bash ~/.claude/skills/gen-img/scripts/gen-img.sh "<PROMPT>" "news-pipeline/images/sceneN.png" "1536x1024" "auto" 1 "png"
 ```
 
+**⚠️ gen-img.sh 大响应失败的备选方案**：
+
+gen-img.sh 使用 shell 变量接收 API 响应，当 base64 图片数据过大时可能报错"无法解析 API 响应"。**此时必须使用 Python+curl 方案绕过 shell 变量限制**：
+
+```python
+# 从 JSON 文件读取 prompt，用 curl 调用 API，Python 解码 base64
+import json, subprocess, base64, tempfile
+
+with open("news-pipeline/prompts/image-prompts-YYYY-MM-DD.json") as f:
+    prompts = json.load(f)
+
+for item in prompts:
+    prompt = item["prompt"]
+    output_path = f"news-pipeline/images/scene{item['scene']}.png"
+
+    # 用 curl 发请求，响应写入临时文件（绕过 shell 变量大小限制）
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+        tmp_path = tmp.name
+
+    subprocess.run([
+        "curl", "-s", "-X", "POST", f"{api_url}/v1/images/generations",
+        "-H", f"Authorization: Bearer {api_key}",
+        "-H", "Content-Type: application/json",
+        "-d", json.dumps({"model": "gpt-image-1", "prompt": prompt, "size": "1536x1024", "n": 1}),
+        "-o", tmp_path
+    ], check=True)
+
+    with open(tmp_path) as f:
+        resp = json.load(f)
+
+    img_b64 = resp["data"][0]["b64_json"]
+    with open(output_path, "wb") as f:
+        f.write(base64.b64decode(img_b64))
+```
+
 **注意事项**:
 - 使用 `1536x1024` (16:9 横屏)
 - 所有图片保持统一风格
 - 生成后立即预览，不满意可重新生成
 - **必须逐张生成**：API 有并发限制，一张生成完成后再生成下一张，不可并行
+- **Prompt 必须从 JSON 文件读取**，不能用简化版本替代（JSON 中的详细 prompt 才是最终调用的）
 
 ### Phase 6: TTS 配音
 
@@ -372,12 +408,12 @@ const fontFamily = '"PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif
 - 每条字幕约 2-3 秒
 - 结束语文案可根据当期内容微调
 
-#### 8.1 语义拆句（8-15 字小句）
+#### 8.1 语义拆句（8-18 字小句）
 
 ```python
-def semantic_split(text: str, min_chars: int = 6, max_chars: int = 15) -> list:
+def semantic_split(text: str, min_chars: int = 6, max_chars: int = 18) -> list:
     """
-    按语义拆成 8-15 字小句。
+    按语义拆成 8-18 字小句。
 
     规则：
     1. 优先在逗号、顿号、破折号处断开
@@ -445,6 +481,38 @@ def semantic_split(text: str, min_chars: int = 6, max_chars: int = 15) -> list:
             final.append(s)
 
     return final
+
+
+def _find_best_split(text: str, max_chars: int) -> int:
+    """
+    找到最佳断句位置，保护英文单词不被拆分。
+
+    优先级：
+    1. 在 max_chars 附近找标点符号（逗号、顿号、破折号）
+    2. 在 max_chars 附近找英文单词边界（空格）
+    3. 如果都没有，回退到 max_chars 位置
+    """
+    # 在 max_chars 附近搜索最佳断点
+    search_range = min(8, max_chars // 3)
+
+    # 优先找标点
+    for offset in range(search_range, 0, -1):
+        pos = max_chars - offset
+        if 0 <= pos < len(text) and text[pos] in '，、——':
+            return pos + 1
+
+    # 找英文单词边界（空格处断开）
+    for offset in range(search_range, 0, -1):
+        pos = max_chars - offset
+        if 0 <= pos < len(text) and text[pos] == ' ':
+            return pos
+
+    # 回退：从 max_chars 向前找非英文字符位置，避免拆分英文单词
+    pos = max_chars
+    while pos > 0 and text[pos - 1].isalnum() and text[pos - 1].isascii():
+        pos -= 1
+
+    return pos if pos > 0 else max_chars
 ```
 
 #### 8.2 FunASR 字符级时间戳提取
@@ -579,9 +647,36 @@ def ensure_no_gaps(captions: list, scene_duration_ms: int, max_gap_ms: int = 500
 
 **关键规则**:
 - 每个场景的图片ID、音频ID、字幕内容必须一一对应
-- 无音频的过渡场景（如主播画面），音频ID填「无」，时长用固定值（如 1s）
 - 字幕内容必须与音频内容一致，不能错位
 - 音频时长决定场景时长，不能用估算值
+
+**🔴 铁律：每个音频必须对应 1 张图，禁止 audioId=0 的无声场景！**
+
+> **教训**：曾出现 IPO 新闻拆成 2 张图但只有 1 段音频，导致第二张图场景 audioId=0（有字幕但无声音）。用户反馈："0:12 有字幕没声音"。
+
+**正确做法**：
+- 有 N 段音频 → 场景数 = N → 每个场景都有音频
+- 每段音频只配 1 张图，即使音频较长也只用一张图（不要拆图）
+- **如果某段音频特别长（>20s），可以考虑拆成多段音频，但必须保证每段音频都有对应图片**
+- **绝对禁止** `audioId: 0` 的场景配置——有字幕没声音会让用户以为视频有问题
+
+**场景数量确定公式**：
+```
+场景数 = 音频文件数（每段音频 = 1 个场景 = 1 张图）
+```
+
+**错误示例（禁止）**：
+```tsx
+// ❌ 错误：scene2 没有音频，导致 0:12-0:24 有字幕没声音
+{ imageId: 1, audioId: 1, duration: 12.0 },  // IPO part 1
+{ imageId: 2, audioId: 0, duration: 11.68 }, // IPO part 2 — 没有音频！
+```
+
+**正确示例**：
+```tsx
+// ✅ 正确：每个场景都有音频
+{ imageId: 1, audioId: 1, duration: 23.68 },  // IPO 完整音频，一张图
+```
 
 #### Step 9.2: 更新 Composition.tsx
 
@@ -653,7 +748,7 @@ cd video-project && npx remotion render AINewsVideo "out/【今日羊报AI】{�
 **封面模板 Prompt**：
 
 ```
-A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，如终端界面、产品截图、数据图表等}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom left corner, display the date "{YYYY-MM-DD}" in large white bold text. The overall mood is professional and authoritative. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, 16:9 aspect ratio.
+A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，如终端界面、产品截图、数据图表等}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. The overall mood is professional and authoritative. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, 16:9 aspect ratio.
 ```
 
 **模板要素**（必须包含）：
