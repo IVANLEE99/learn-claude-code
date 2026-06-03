@@ -1,8 +1,34 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.0.0
+version: 1.1.0
 ---
+
+# AI News Factory — 日报短视频自动生成 v1.1.0
+
+将 AI 日报 Markdown 自动转化为 B站风格短视频，完整 Pipeline：日报 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成。
+
+**核心原则：先 TTS 生成音频，再用字数比例估算字幕时间轴（TTS 语速稳定，字数比例比 ASR 更可靠）。**
+
+## 权限预授权
+
+**执行前需要用户授权以下权限，只需一次授权即可完成整个流程：**
+
+| 权限类型 | 用途 | 授权方式 |
+|----------|------|----------|
+| 文件读写 | 读取日报、写入脚本/图片/音频/字幕 | 自动（工作目录内） |
+| Shell 执行 | 调用 gen-img.sh、mimo-tts.sh、ffmpeg | 需确认 |
+| API 调用 | 图片生成 API、TTS API、ASR API | 需确认 |
+| 浏览器操作 | Playwright MCP 上传视频到B站 | 需确认 |
+| npm 执行 | npx remotion render 渲染视频 | 需确认 |
+
+**推荐授权策略：**
+```
+用户说"执行前预售权"或"一次授权"时：
+1. 列出所有需要的权限
+2. 请求用户确认
+3. 执行过程中不再逐个询问
+```
 
 # AI News Factory — 日报短视频自动生成
 
@@ -228,12 +254,39 @@ for item in prompts:
         f.write(base64.b64decode(img_b64))
 ```
 
+**API 多源支持（v1.1.0 新增）**：
+
+当主 API 配额不足或报错时，按以下顺序尝试备用 API：
+
+```python
+# API 源列表（按优先级排序）
+API_SOURCES = [
+    {"name": "windhub", "url": "https://windhub.cc", "key": "从 settings.json 读取"},
+    {"name": "littlesheep", "url": "https://ai.littlesheep.cc", "key": "用户提供"},
+    {"name": "luka77", "url": "http://api.luka77.cc", "key": "用户提供"},
+    {"name": "ioll", "url": "https://eo.ioll.pp.ua", "key": "用户提供"},
+]
+
+# 尝试逻辑
+for source in API_SOURCES:
+    try:
+        # 测试 API 是否可用
+        response = test_api(source)
+        if response.success:
+            print(f"使用 API: {source['name']}")
+            break
+    except Exception as e:
+        print(f"API {source['name']} 失败: {e}")
+        continue
+```
+
 **注意事项**:
 - 使用 `1536x1024` (16:9 横屏)
 - 所有图片保持统一风格
 - 生成后立即预览，不满意可重新生成
 - **必须逐张生成**：API 有并发限制，一张生成完成后再生成下一张，不可并行
 - **Prompt 必须从 JSON 文件读取**，不能用简化版本替代（JSON 中的详细 prompt 才是最终调用的）
+- **API 配额检查**：生成前先检查余额，余额不足时切换到备用 API
 
 ### Phase 6: TTS 配音
 
@@ -315,6 +368,11 @@ def verify_asr(asr_text: str, script_text: str) -> dict:
 **FunASR 字符级 ASR + 逐句对齐 + 无间隙填充。**
 
 > **核心原则**：先 TTS 生成音频，再用 FunASR 提取字符级时间戳，逐小句在 ASR 输出中滑动窗口匹配。一处匹配失败不影响其他句子。
+
+**v1.1.0 方案说明**：
+- **主方案**：FunASR 逐句对齐（字符级时间戳，精度高）
+- **备选方案**：字数比例估算（当 FunASR 不可用或对齐效果差时）
+- **选择逻辑**：先尝试 FunASR，如果未匹配字幕超过 30%，切换到字数比例估算
 
 #### 8.0.1 字体使用规范（必须遵守）
 
@@ -686,15 +744,30 @@ def ensure_no_gaps(captions: list, scene_duration_ms: int, max_gap_ms: int = 500
 // 正确的场景配置：图片ID、音频ID、时长
 const sceneConfig = [
   { imageId: 1, audioId: 1, duration: 6.40 },   // Hook
-  { imageId: 2, audioId: 0, duration: 1.00 },   // 主播过渡 (无音频)
-  { imageId: 3, audioId: 2, duration: 14.40 },  // 第一条
+  { imageId: 2, audioId: 2, duration: 14.40 },  // 第一条
+  { imageId: 3, audioId: 3, duration: 12.00 },  // 第二条
   // ... 每个场景都必须明确指定 imageId、audioId、duration
 ];
 ```
 
+**⚠️ v1.1.0 修复：移除 audioId > 0 条件判断**
+
+```tsx
+// ❌ 错误（会导致 scene0 无声音）：
+{scene.audioId > 0 && (
+  <Audio src={staticFile(`voiceover/scene${scene.audioId}.wav`)} />
+)}
+
+// ✅ 正确（所有场景都播放音频）：
+<Audio src={staticFile(`voiceover/scene${scene.audioId}.wav`)} />
+```
+
+**原因**：scene0 的 audioId=0 会被 `> 0` 条件跳过，导致有字幕但无声音。
+
 **禁止使用**:
 - 简单的 `scene.id` 自动映射（容易错位）
 - 硬编码的时长数组（应从音频实际时长获取）
+- `audioId > 0` 条件判断（会导致 scene0 无声音）
 
 #### Step 9.3: 更新 Root.tsx
 

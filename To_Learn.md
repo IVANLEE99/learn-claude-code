@@ -239,7 +239,6 @@ pdca
 
 
 ✅1、寻找视频字幕音频对其的skill
-   https://github.com/harry0703/MoneyPrinterTurbo
    https://github.com/WEIFENG2333/VideoCaptioner
 
 
@@ -284,12 +283,31 @@ pdca
 
 11、加入节日祝福
 
+12、视频数据分析优化
+
+13、视频生成模型，这是目前最强的开源大模型，叫ltx-2.3-fast，
+   https://github.com/harry0703/MoneyPrinterTurbo
+
+
 ### linuxdo-daily 优化
 
 ✅刷新
 ✅生成新闻稿
 建一个仓库存放数据
 ✅滚动加载4次,获取100条帖子
+
+日报今天和前面的重复了，需要去重
+
+
+根据今天的生成过程更新优化skill
+
+生成周报
+生成月报
+生成季报
+生成年报
+生成周报视频
+
+
 
 
 
@@ -300,3 +318,13 @@ https://github.com/anthropics/knowledge-work-plugins
 
 
 整理每一期 日报到 github 目录tolear
+
+
+
+
+chrome 插件 选中base64 自动解码
+时间戳
+base 64
+md5
+sha1
+sha512
