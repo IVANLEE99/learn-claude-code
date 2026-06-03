@@ -1,7 +1,7 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、linuxdo日报、AI日报、技术日报、抓取linuxdo
-version: 2.1.0
+version: 2.2.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
@@ -52,10 +52,9 @@ data/
 │  ┌──────────────────────────────┐                               │
 │  │  Agent 1: Crawler            │                               │
 │  │  - 打开两个数据源列表页       │                               │
+│  │  - 滚动加载全部帖子           │                               │
 │  │  - 提取帖子链接               │                               │
-│  │  - 检查历史是否已抓取         │                               │
-│  │  - 逐条抓取正文（随机1-3s）   │                               │
-│  │  - 返回时刷新页面获取新帖     │                               │
+│  │  - 批量抓取正文（每批20帖）   │                               │
 │  │  - 每源最多500帖              │                               │
 │  │  → 输出: data/posts/*.json    │                               │
 │  │  → 输出: data/daily/{date}.json│                              │
@@ -96,7 +95,7 @@ data/
 │  │  - Markdown → Typst 源码      │                               │
 │  │  - Typst 编译 → PDF           │                               │
 │  │  → 输出: data/reports/{date}.pdf│                             │
-│  └──────────────────────────────┘                               │
+│  └──────────────┘                                               │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -105,7 +104,7 @@ data/
 
 ## Agent 1: Crawler（抓取器）
 
-**职责**：从两个数据源抓取帖子，检查历史记录，模拟人类浏览行为。
+**职责**：从两个数据源抓取帖子，检查历史记录，批量抓取正文。
 
 ### 1.1 打开列表页
 
@@ -115,84 +114,127 @@ data/
 
 如果触发 Cloudflare 挑战页，通知用户进行人工验证。
 
-### 1.1b 滚动加载更多帖子
+### 1.2 滚动加载全部帖子
 
-打开列表页后，使用 `browser_run_code_unsafe` 滚动到底部 10 次，触发 Discourse 无限滚动加载：
+打开列表页后，使用 `browser_run_code_unsafe` 滚动加载。**至少滚动 15 次**（每次间隔 2 秒），确保加载全部帖子：
 
 ```js
 async (page) => {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 15; i++) {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForTimeout(2000);
   }
-  return 'scrolled 10 times';
+  return 'scrolled 15 times';
 }
 ```
 
-每次滚动后等待 2 秒让帖子加载。滚动完成后，页面中应有约 300+ 条帖子。
+滚动完成后用 `browser_evaluate` 检查帖子数量。如果帖子数 < 400，再追加 10 次滚动。最终目标是加载 400+ 帖子。
 
-### 1.2 提取帖子链接
+### 1.3 提取帖子链接（含动态ID范围判断）
 
-使用 `browser_evaluate` 提取列表中的帖子：
+使用 `browser_evaluate` 提取列表中的帖子。**关键：需动态判断"今日"帖子的ID范围**。
 
-```javascript
+首先提取全部帖子的 ID，观察最大 ID 范围来判断今日起始 ID：
+```js
+() => {
+  const rows = document.querySelectorAll('tr.topic-list-item');
+  const ids = [];
+  rows.forEach(row => {
+    const topicId = row.getAttribute('data-topic-id');
+    if (topicId) ids.push(parseInt(topicId));
+  });
+  ids.sort((a, b) => a - b);
+  // 返回最大/最小ID和分布，用于判断今日范围
+  return { min: ids[0], max: ids[ids.length-1], count: ids.length };
+}
+```
+
+**ID范围判断规则**：
+- 查看 `ls data/posts/*.json | sed 's/.*\///;s/\.json//' | sort -n | tail -5` 获取已有最大 ID
+- 今日帖子 ID 必须 > 已有最大 ID
+- 提取时只保留 ID > 阈值的帖子
+
+提取帖子的完整代码：
+```js
 () => {
   const rows = document.querySelectorAll('tr.topic-list-item');
   const posts = [];
-  rows.forEach((row, i) => {
+  rows.forEach(row => {
     const topicId = row.getAttribute('data-topic-id');
+    const id = parseInt(topicId);
+    if (id < TODAY_ID_THRESHOLD) return; // 动态阈值
     const titleLink = row.querySelector('.main-link a.title') || row.querySelector('a.title');
     const title = titleLink ? titleLink.textContent.trim() : '';
     const href = titleLink ? titleLink.getAttribute('href') : '';
     const views = row.querySelector('.views .number')?.textContent?.trim() || '0';
     const replies = row.querySelector('.posts .number')?.textContent?.trim() || '0';
-    if (topicId) posts.push({ index: i, id: topicId, title, href, views, replies });
+    const tags = Array.from(row.querySelectorAll('.discourse-tag')).map(t => t.textContent.trim());
+    posts.push({ id: topicId, title, href, views, replies, tags });
   });
   return posts;
 }
 ```
 
-### 1.3 检查历史记录
+### 1.4 批量抓取正文（核心优化）
 
-对每个帖子 ID，检查 `data/posts/{id}.json` 是否已存在：
-- **已存在**：跳过，不重复抓取
-- **不存在**：加入待抓取队列
+**禁止逐条抓取**（太慢，500帖需要17分钟）。必须使用 `browser_run_code_unsafe` 批量抓取，每批 20 帖：
 
-### 1.4 逐条抓取正文（模拟人类浏览）
-
-对待抓取帖子执行循环，**每源最多 500 帖**：
-
-```
-for each post in 待抓取队列（最多500帖）:
-  1. browser_navigate → 打开帖子 URL
-  2. browser_wait_for → 等待 random(1, 3) 秒（模拟人类阅读）
-  3. browser_evaluate → 提取正文：
-     () => {
-       const cooked = document.querySelector('.cooked');
-       const content = cooked ? cooked.innerText.trim() : '';
-       return { content: content.substring(0, 500), fullLength: content.length };
-     }
-  4. browser_navigate_back → 返回列表页
-  5. browser_evaluate → 刷新页面并提取新帖子列表
-     () => {
-       location.reload();
-       return 'reloading';
-     }
-  6. browser_wait_for → 等待 random(1, 3) 秒
-  7. 重新提取列表（可能有新帖子出现）
-  8. 保存帖子数据到 data/posts/{id}.json
+```js
+async (page) => {
+  const ids = ["2294504","2292281","2295037", /* ... 20个ID ... */];
+  const results = [];
+  for (const id of ids) {
+    try {
+      await page.goto('https://linux.do/t/topic/' + id, {
+        waitUntil: 'domcontentloaded', timeout: 12000
+      });
+      await page.waitForTimeout(2000); // 模拟人类阅读
+      const data = await page.evaluate(() => {
+        const cooked = document.querySelector('.cooked');
+        return cooked ? cooked.innerText.trim().substring(0, 500) : '';
+      });
+      results.push({ id, content: data.substring(0, 300) });
+    } catch (e) {
+      results.push({ id, error: e.message.substring(0, 100) });
+    }
+  }
+  return results;
+}
 ```
 
-### 1.5 保存数据
+**批量抓取策略**：
+- 每批 20 帖，每帖等待 2 秒
+- 每批耗时约 40-60 秒
+- 全部 500 帖约需 25 批 × 50 秒 ≈ 20 分钟
+- 如果触发连接限制（`ERR_CONNECTION_CLOSED`），立即停止，进入恢复流程
+
+### 1.5 连接恢复流程
+
+当批量抓取触发连接限制时：
+
+1. **停止当前批次**
+2. 导航到主页恢复连接：`browser_navigate → https://linux.do`
+3. 等待 5 秒
+4. 用小批次（10帖）恢复抓取
+5. 确认连接正常后恢复 20 帖/批
+
+### 1.6 保存数据
 
 - `data/posts/{id}.json` — 单帖详情（含 content 和 scrape_history）
 - `data/daily/{date}.json` — 每日汇总数据（合并两源）
 
-### 1.6 Cloudflare 检测
+### 1.7 Source B 特殊处理
 
-如果在抓取过程中触发 Cloudflare 保护：
-- 立即通知用户进行人工验证
-- 用户完成验证后，从当前帖子继续抓取
+Source B（`/c/news/34`）需要按标签过滤 AI 相关帖子：
+```js
+() => {
+  const tags = Array.from(row.querySelectorAll('.discourse-tag')).map(t => t.textContent.trim());
+  const isAi = tags.some(t => /人工智能|ai/i.test(t));
+  // 只保留 isAi = true 的帖子
+}
+```
+
+Source B 中不在 Source A 的独立帖子也需抓取正文。
 
 ---
 
@@ -219,13 +261,14 @@ for each post in 待抓取队列（最多500帖）:
 - **热度排序**：每组内按 views + replies 排序
 
 建议的主题分组（可根据实际内容调整）：
-- 客户端与工具生态
-- Agent 与多智能体
-- 开源平台与工具
+- OpenAI/ChatGPT 生态
+- Codex 生态
 - Claude 生态
-- DeepSeek 与国产模型
-- 实用教程与讨论
+- MiniMax/MiMo 与国产模型
+- Agent 与工具
 - 行业动态与新闻
+- 公益站与中转站
+- 支付与接码
 
 ### 2.4 输出
 
@@ -279,22 +322,22 @@ for each post in 待抓取队列（最多500帖）:
 
 ## 新内容
 
-### 客户端与工具生态
+### OpenAI/ChatGPT 生态
 - **帖子标题** — 摘要（浏览 X / 回复 Y）
 
-### Agent 与多智能体
+### Codex 生态
 - **帖子标题** — 摘要（浏览 X / 回复 Y）
 
-（按主题分组，每组 2-3 个帖子）
+（按主题分组，每组 3-8 个帖子，覆盖所有有实质内容的帖子）
 
 ## 数据概览
 | 指标 | 数值 |
 |------|------|
-| 抓取窗口 | ... |
 | Source A 原始帖数 | ... |
 | Source B 原始帖数 | ... |
-| 合并后总数 | ... |
-| AI 相关帖数 | ... |
+| Source B AI 过滤后 | ... |
+| 合并去重后总数 | ... |
+| 抓取正文帖数 | ... |
 
 ## 今日技术趋势
 （来自 Agent 3 的趋势分析，3-5 条）
@@ -371,17 +414,24 @@ for each post in 待抓取队列（最多500帖）:
 ```typst
 #set document(title: "linux.do AI 技术日报 - {date}")
 #set page(paper: "a4", margin: (top: 2cm, bottom: 2cm, left: 2cm, right: 2cm))
-#set text(font: ("Noto Sans CJK SC", "Noto Sans"), size: 10pt)
+#set text(font: ("PingFang SC", "Noto Sans CJK SC", "Noto Sans"), size: 10pt)
 #set heading(numbering: none)
 
 #align(center)[
   #text(size: 18pt, weight: "bold")[linux.do 人工智能 技术日报]
+  #v(4pt)
   #text(size: 12pt)[{date} | 新帖 {N} 篇]
+  #v(2pt)
+  #text(size: 10pt, fill: gray)[数据来源：linux.do \#人工智能 + 前沿快讯]
 ]
 
 // 转换 Markdown 内容为 Typst 格式
 // ...
 ```
+
+**重要**：Typst 中 `$` 是数学模式符号，文本中的 `$` 必须转义为 `\$`。例如：
+- `1000x2000$兑换码` → `1000x2000\$兑换码`
+- `$35-65` → `\$35-65`
 
 ### 6.2 Typst 编译
 
@@ -391,7 +441,11 @@ for each post in 待抓取队列（最多500帖）:
 typst compile data/reports/{date}.typ data/reports/{date}.pdf
 ```
 
-### 6.3 Typst 安装检查
+### 6.3 字体说明
+
+macOS 使用 `PingFang SC` 作为主字体。`Noto Sans CJK SC` 和 `Noto Sans` 作为后备字体，如果未安装会显示警告但不影响编译。
+
+### 6.4 Typst 安装检查
 
 如果 Typst 未安装，提示用户安装：
 
@@ -406,7 +460,7 @@ cargo install typst-cli
 # https://github.com/typst/typst/releases
 ```
 
-### 6.4 输出
+### 6.5 输出
 
 - `data/reports/{date}.typ` — Typst 源文件
 - `data/reports/{date}.pdf` — 最终 PDF 文件
@@ -488,12 +542,16 @@ async (page) => {
 ## 注意事项
 
 - **必须使用 Playwright MCP 浏览器工具抓取**，不要使用 curl/JSON API，避免触发 Cloudflare 保护
-- 模拟人类浏览行为：每帖随机等待 1-3 秒
+- **必须批量抓取正文**：每批 20 帖，每帖等待 2 秒，禁止逐条抓取
+- 滚动加载至少 15 次，确保帖子数 > 400
+- 动态判断今日帖子 ID 范围（`ls data/posts/*.json | sort -n | tail -5` 获取最大 ID）
+- 如果触发连接限制（`ERR_CONNECTION_CLOSED`），导航到主页恢复后用小批次继续
 - 如果触发 Cloudflare 挑战页，通知用户进行人工验证
-- 返回列表页时刷新页面，获取最新帖子
 - 每个数据源最多抓取 500 帖
 - 抓取前检查历史记录，避免重复抓取
+- Source B 需按 AI 标签过滤
 - Cookies 通过 Playwright MCP 的 `page.context().cookies()` 持久化到 `data/cookies.json`
 - 列表页帖子的 like_count 显示为 0（Discourse 显示问题），实际点赞数需从详情页获取
 - 正文从 `.cooked` 元素提取，最长 500 字符
+- Typst 中 `$` 符号需转义为 `\$`
 - PDF 生成使用 Typst，需确保已安装 typst CLI

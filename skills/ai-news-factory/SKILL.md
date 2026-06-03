@@ -904,37 +904,56 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/cover.png")
 #### Step 12.5: 设置创作声明
 
 ```python
-# 选择创作声明：个人观点
-browser_click("element=创作声明下拉框")
-browser_click("text=个人观点")
+# 创作声明下拉框是 bcc-select 自定义组件
+# 点击 textbox 打开下拉列表
+browser_click("textbox=请选择符合您视频内容的创作声明")
+
+# 选择「个人观点，仅供参考」（注意：不是「含AI生成内容」）
+browser_click("listitem=个人观点，仅供参考")
 ```
 
 #### Step 12.6: 填写简介
 
 ```python
-# 读取 publish.json 获取简介
-# 填写简介内容
-browser_type("element=简介输入框", "publish.json 中的 description")
+# 简介输入框是 Quill 编辑器（contenteditable div），不是 textarea
+# 方法 1: 使用 JavaScript 注入内容（推荐，Quill 编辑器兼容性更好）
+browser_evaluate("""() => {
+  const editor = document.querySelector('.ql-editor');
+  if (editor) {
+    editor.innerHTML = '<p>第一行简介内容</p><p><br></p><p>第二行简介内容</p>';
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}""")
+
+# 方法 2: 如果 Quill 编辑器不可用，尝试 textbox
+browser_type("textbox", "publish.json 中的 description")
 ```
 
 #### Step 12.7: 填写标签
 
 ```python
-# 读取 publish.json 获取标签
-# 逐个添加标签
-for tag in publish_json["platform"]["bilibili"]["tags"]:
-    browser_type("element=标签输入框", tag)
+# 标签输入框: textbox "按回车键Enter创建标签"
+# 第一个标签必须是「今日羊报AI」（品牌标签优先）
+tags = ["今日羊报AI"] + publish_json["platform"]["bilibili"]["tags"]
+
+for tag in tags:
+    browser_type("textbox=按回车键Enter创建标签", tag)
     browser_press_key("Enter")
+
+# 注意: B站标签最多 10 个，每个标签不超过 20 字符
+# 如果推荐标签中已有「今日羊报AI」，跳过重复添加
 ```
 
 #### Step 12.8: 加入合集
 
 ```python
-# 点击加入合集按钮
-browser_click("element=加入合集")
+# 合集名称: 「今日羊报 AI」（注意括号和空格）
+# 下拉框选择器: .video-season-select 或 generic 包含合集名
+browser_click("generic=「今日羊报 AI」")
 
-# 选择「今日羊报AI」合集
-browser_click("text=今日羊报AI")
+# 如果下拉框未显示，先点击加入合区域展开
+# browser_click("element=加入合集")
+# 然后选择合集
 ```
 
 #### Step 12.9: 选择推荐活动
@@ -965,12 +984,18 @@ else:
     # 如果都过了，用明天12:00
     nearest_time = publish_times[0] + datetime.timedelta(days=1)
 
-# 点击定时发布
-browser_click("element=定时发布")
+# 定时发布时间选择器是自定义组件，分两步操作：
+# 1. 先打开时间下拉框
+browser_click("element=时间显示区域")  # 显示当前时间的 paragraph
 
-# 设置日期和时间
-browser_type("element=日期输入框", nearest_time.strftime("%Y-%m-%d"))
-browser_type("element=时间输入框", nearest_time.strftime("%H:%M"))
+# 2. 在小时列中点击目标小时（Playwright 用 getByText 精确匹配）
+browser_get_by_text("12", exact=True).click()
+
+# 3. 在分钟列中点击目标分钟
+browser_get_by_text("00", exact=True).nth(1).click()
+
+# 4. 点击其他区域关闭下拉框
+browser_click("element=时间显示区域")  # 再次点击确认
 ```
 
 #### Step 12.11: 确认发布
@@ -998,42 +1023,47 @@ def auto_upload_bilibili(video_path: str, cover_path: str, publish_info: dict):
     # 1. 打开上传页面
     browser_navigate("https://member.bilibili.com/platform/upload/video/frame")
     
-    # 2. 上传视频
+    # 2. 上传视频（必须先触发文件选择对话框）
+    browser_wait_for("text=上传视频")
+    # 点击上传区域触发 file chooser
+    browser_click("element=添加视频")
     browser_file_upload(video_path)
     browser_wait_for("text=上传完成")
     
-    # 3. 上传封面
-    browser_click("element=封面上传区域")
+    # 3. 上传封面（必须先点击封面区域触发 file chooser）
+    browser_click("element=封面设置")
     browser_file_upload(cover_path)
     
-    # 4. 设置创作声明
-    browser_click("element=创作声明下拉框")
-    browser_click("text=个人观点")
+    # 4. 设置创作声明: 个人观点，仅供参考（不是含AI生成内容）
+    browser_click("textbox=请选择符合您视频内容的创作声明")
+    browser_click("listitem=个人观点，仅供参考")
     
-    # 5. 填写简介
-    browser_type("element=简介输入框", publish_info["description"])
+    # 5. 填写简介（Quill 编辑器，用 JavaScript 注入）
+    browser_evaluate("""() => {
+      const editor = document.querySelector('.ql-editor');
+      if (editor) {
+        editor.innerHTML = '<p>第一行</p><p><br></p><p>第二行</p>';
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }""")
     
-    # 6. 填写标签
-    for tag in publish_info["platform"]["bilibili"]["tags"]:
-        browser_type("element=标签输入框", tag)
+    # 6. 填写标签（第一个标签必须是「今日羊报AI」）
+    tags = ["今日羊报AI"] + publish_info["platform"]["bilibili"]["tags"]
+    for tag in tags:
+        browser_type("textbox=按回车键Enter创建标签", tag)
         browser_press_key("Enter")
     
-    # 7. 加入合集
-    browser_click("element=加入合集")
-    browser_click("text=今日羊报AI")
+    # 7. 加入合集「今日羊报 AI」
+    browser_click("generic=「今日羊报 AI」")
     
-    # 8. 选择推荐活动
-    browser_click("element=推荐活动列表第一项")
+    # 8. 设置定时发布（时间选择器是自定义组件）
+    browser_click("element=时间显示区域")
+    browser_get_by_text(nearest_time.strftime("%H"), exact=True).click()
+    browser_get_by_text(nearest_time.strftime("%M"), exact=True).nth(1).click()
     
-    # 9. 设置定时发布
-    nearest_time = calculate_nearest_publish_time()
-    browser_click("element=定时发布")
-    browser_type("element=日期输入框", nearest_time.strftime("%Y-%m-%d"))
-    browser_type("element=时间输入框", nearest_time.strftime("%H:%M"))
-    
-    # 10. 确认发布
-    browser_click("element=发布按钮")
-    browser_wait_for("text=发布成功")
+    # 9. 确认发布
+    browser_click("generic=立即投稿")
+    browser_wait_for("text=稿件投递成功")
     
     return {"success": True, "publish_time": nearest_time.isoformat()}
 ```
@@ -1044,8 +1074,25 @@ def auto_upload_bilibili(video_path: str, cover_path: str, publish_info: dict):
 - 上传过程可能需要 2-5 分钟（取决于视频大小和网速）
 - 封面图片必须是 16:9 比例，建议 1920x1080
 - 标签最多 10 个，每个标签不超过 20 字符
-- 合集「今日羊报AI」需要提前在B站创建
+- 合集「今日羊报 AI」需要提前在B站创建
 - 定时发布时间必须是未来时间
+
+**B站上传页面 UI 要点**（2026-06-02 实测）：
+
+| 组件 | 类型 | 操作方式 |
+|------|------|----------|
+| 创作声明 | bcc-select 下拉框 | 点击 textbox 打开 → 点击 listitem 选择 |
+| 简介 | Quill 编辑器 | `document.querySelector('.ql-editor')` JS 注入 |
+| 标签 | 输入框 | type + Enter，最多 10 个 |
+| 合集 | 自定义下拉框 | 点击合集名 generic 元素 |
+| 时间选择器 | 日期/时间分栏 | 先点时间区域打开 → 分别点小时和分钟列 |
+| 定时发布开关 | .switch-container | 点击切换开关状态 |
+
+**常见坑**：
+- `browser_file_upload` 必须在 file chooser 对话框打开后才能调用，否则报错
+- 创作声明选错会导致内容审核问题，**必须选「个人观点，仅供参考」**
+- 简介用 Quill 编辑器，直接 `browser_type` 可能不生效，推荐 JS 注入
+- 时间选择器的小时/分钟是两列独立滚动列表，用 `getByText` 精确匹配
 
 ## 目录结构
 
