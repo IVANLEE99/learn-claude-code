@@ -1,12 +1,12 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.2.0
+version: 1.3.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.2.0
+# AI News Factory — 日报短视频自动生成 v1.3.0
 
-将 AI 日报 Markdown 自动转化为 B站风格短视频，完整 Pipeline：日报 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → B站上传。
+将 AI 日报 Markdown 自动转化为 B站风格短视频，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → B站上传。
 
 **核心原则：字数比例估算字幕时间轴（TTS 语速稳定，字数比例比 ASR 更可靠）。**
 
@@ -24,17 +24,17 @@ version: 1.2.0
 执行以下操作需要你的授权，确认后全程不再询问：
 
 📁 文件操作
-  ☐ 读取日报 Markdown 文件
+  ☐ 读取日报 Markdown 文件（含历史日报用于去重）
   ☐ 写入脚本、分镜、Prompt、字幕等文件
   ☐ 复制资源到 video-project/public/
 
 🔧 Shell 执行
-  ☐ 调用 mimo-tts.sh 生成配音
+  ☐ 调用 mimo-tts.sh 生成配音（逐场景串行）
   ☐ 调用 ffprobe 获取音频时长
   ☐ 调用 npx remotion render 渲染视频
 
 🌐 API 调用
-  ☐ 图片生成 API（gpt-image-2）
+  ☐ 图片生成 API（用户提供 URL + Key）
   ☐ TTS API（mimo-tts）
 
 🖥️ 浏览器操作（Phase 12 上传时）
@@ -73,30 +73,55 @@ PERMISSIONS = {
 
 - **mimo-tts skill**: 语音合成 (`~/Documents/learn-claude-code/skills/mimo-tts/`)
 - **ffmpeg**: 音频格式转换（获取音频时长）
-- **mimo-asr skill**: 语音识别（可选，用于 ASR 验证）
-- **FunASR**: 字符级时间戳提取（`pip install funasr`）
 - **Remotion**: 视频渲染（`news-pipeline/video-project/`）
 - **Playwright MCP**: B站自动上传
+- **图片生成 API**: 用户提供 URL + Key（支持 OpenAI 兼容格式）
 
 ## 执行流程
 
-### Phase 1: 输入与事件切分
+### Phase 0: 获取用户输入
 
-**输入**: 日报 Markdown 文件路径或直接粘贴内容。
-
-**Step 1.1**: 读取日报内容，提取所有独立新闻事件。
-
-**Step 1.2**: 对每个事件打分排序，展示给用户：
+向用户确认以下信息（可在预授权时一并收集）：
 
 ```
-已识别以下热点事件，请确认要制作视频的事件：
-1. [事件1] (重要性: 9/10) — 浏览/回复数
-2. [事件2] (重要性: 8/10)
-3. [事件3] (重要性: 7/10)
-...
+需要你提供：
+1. 📄 日报文件路径（默认: data/reports/YYYY-MM-DD.md）
+2. 🖼️ 图片生成 API URL（如 https://ai.prism.uno）
+3. 🔑 图片生成 API Key
 ```
 
-**Step 1.3**: 用户确认选择（可选全部或部分事件）。
+### Phase 1: 输入、去重与事件切分
+
+**Step 1.1**: 读取今日日报内容。
+
+**Step 1.2**: 🔴 去重检查（v1.3.0 新增）
+
+读取前 3 天的日报文件（`data/reports/YYYY-MM-DD.md`），对比今日事件：
+
+```bash
+ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
+```
+
+**去重规则**：
+- 同一事件首次出现在之前的日报中 → 标记为「重复」
+- 同一事件的后续进展（如新数据、新声明）→ 标记为「新进展」，可保留
+- 纯回顾/总结性提及 → 标记为「重复」
+
+向用户展示去重结果：
+```
+🔍 去重对比（vs 06-03, 06-04）
+
+❌ 重复事件（建议去掉）：
+  - [事件A] — 首次出现在 06-03
+  - [事件B] — 首次出现在 06-04
+
+✅ 今日新鲜事件：
+  1. [事件1] — 全新，2.6k 浏览
+  2. [事件2] — 全新，1.4k 浏览
+  3. [事件3] — 新进展（06-03 首次报道，今天有新数据）
+```
+
+**Step 1.3**: 用户确认选择要制作视频的事件（建议 4-6 个）。
 
 ### Phase 2: 视频脚本生成
 
@@ -188,13 +213,13 @@ Avoid:
 
 ### Phase 5: 图片生成
 
-**主方案**: 使用 Python+curl 直接调用图片生成 API（绕过 gen-img.sh 的 shell 变量限制）。
+**主方案**: 使用 Python+curl 直接调用图片生成 API。
 
 ```python
 import json, subprocess, base64, tempfile, os, time
 
-API_URL = "http://api.luka77.cc"  # 主 API
-API_KEY = "用户提供的 key"
+API_URL = "用户提供的 API URL"  # 如 https://ai.prism.uno
+API_KEY = "用户提供的 API Key"
 MODEL = "gpt-image-2"  # 注意：不是 gpt-image-1
 
 def generate_image(prompt, output_path):
@@ -206,8 +231,9 @@ def generate_image(prompt, output_path):
             "-H", f"Authorization: Bearer {API_KEY}",
             "-H", "Content-Type: application/json",
             "-d", json.dumps({"model": MODEL, "prompt": prompt, "size": "1536x1024", "n": 1}),
-            "-o", tmp_path
-        ], check=True, timeout=120)
+            "-o", tmp_path,
+            "--max-time", "120"
+        ], check=True, timeout=130)
         with open(tmp_path) as f:
             resp = json.load(f)
         if "error" in resp:
@@ -217,6 +243,12 @@ def generate_image(prompt, output_path):
             with open(output_path, "wb") as f:
                 f.write(base64.b64decode(img_b64))
             return True, "OK"
+        # Try URL download
+        img_url = resp["data"][0].get("url", "")
+        if img_url:
+            subprocess.run(["curl", "-s", "-o", output_path, img_url], timeout=60)
+            if os.path.getsize(output_path) > 1000:
+                return True, "OK (from URL)"
         return False, "No image data"
     except Exception as e:
         return False, str(e)
@@ -229,10 +261,10 @@ def generate_image(prompt, output_path):
 
 | 优先级 | 名称 | URL | 模型 | 说明 |
 |--------|------|-----|------|------|
-| 1 | luka77 | http://api.luka77.cc | gpt-image-2 | 2026-06-04 验证可用 |
-| 2 | windhub | https://windhub.cc | gpt-image-1 | 需检查配额 |
-| 3 | littlesheep | https://ai.littlesheep.cc | - | 需用户提供 key |
-| 4 | ioll | https://eo.ioll.pp.ua | - | 需用户提供 key |
+| 1 | 用户提供 | 用户提供 | gpt-image-2 | 优先使用用户提供的 API |
+| 2 | prism | https://ai.prism.uno | gpt-image-2 | 2026-06-05 验证可用 |
+| 3 | luka77 | http://api.luka77.cc | gpt-image-2 | 2026-06-04 验证可用 |
+| 4 | windhub | https://windhub.cc | gpt-image-1 | 需检查配额 |
 
 **API 选择逻辑**：
 1. 优先使用用户提供的 API
@@ -257,8 +289,11 @@ bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
   --output "news-pipeline/YYYY-MM-DD/voiceover/sceneN.wav"
 ```
 
+**🔴 关键限制：mimo-tts.sh 使用 `mktemp` 生成临时文件，并行调用会导致文件名冲突和静默失败。必须逐场景串行执行！**
+
 **配音要求**:
 - 推荐音色: 阿根
+- **必须逐场景串行生成**（不要并行！）
 - 按场景生成音频文件（scene1.wav, scene2.wav, ...）
 - 每个场景的文本来自视频脚本对应段落
 - 结束语（"今天AI圈真是又热闹又魔幻..."）作为最后一个场景
@@ -274,7 +309,7 @@ done
 
 ### Phase 7: 字幕生成（字数比例估算）
 
-**v1.2.0 方案：字数比例估算为主，FunASR 为备选。**
+**v1.3.0 方案：字数比例估算为主，FunASR 为备选。**
 
 > **经验教训**：FunASR 逐句对齐在实际使用中匹配率偏低（部分场景仅 1/7），字数比例估算更稳定可靠。
 
@@ -441,10 +476,7 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
 
 ```bash
 mkdir -p news-pipeline/YYYY-MM-DD/{scripts,storyboards,prompts,images,voiceover,captions,video}
-cp news-pipeline/YYYY-MM-DD/images/scene*.png news-pipeline/YYYY-MM-DD/images/
-cp news-pipeline/YYYY-MM-DD/voiceover/scene*.wav news-pipeline/YYYY-MM-DD/voiceover/
-cp news-pipeline/YYYY-MM-DD/captions/captions.json news-pipeline/YYYY-MM-DD/captions/
-cp "news-pipeline/video-project/out/【今日羊报AI】*.mp4" news-pipeline/YYYY-MM-DD/video/
+cp news-pipeline/video-project/out/【今日羊报AI】*.mp4 news-pipeline/YYYY-MM-DD/video/
 ```
 
 ### Phase 11: B站自动上传（Playwright MCP）
@@ -560,7 +592,6 @@ news-pipeline/
 │   ├── images/                 # 生成的图片 (scene1.png ~ sceneN.png)
 │   ├── voiceover/              # TTS 音频 (scene1.wav ~ sceneN.wav)
 │   ├── captions/               # 字幕 JSON
-│   ├── asr/                    # ASR 转录文本（可选）
 │   ├── video/                  # 最终视频
 │   │   └── 【今日羊报AI】*.mp4
 │   ├── cover.png               # 视频封面
@@ -579,13 +610,37 @@ news-pipeline/
 └── sources/                    # 原始日报 Markdown
 ```
 
+## 已知坑与经验教训（v1.3.0 新增）
+
+### 🔴 TTS 并发冲突
+**问题**：`mimo-tts.sh` 内部使用 `mktemp /tmp/mimo-tts-request-XXXXXX.json` 生成临时文件。并行调用时多个进程竞争同一文件名，导致 `mktemp: mkstemp failed: File exists` 错误，TTS 静默失败不生成音频。
+
+**解决**：**必须逐场景串行执行 TTS**，每个场景等待上一个完成后再启动下一个。
+
+### 🔴 日报内容重复
+**问题**：linux.do 日报中大量事件会连续多天出现（如 OpenAI 举报、Codex 额度等），直接制作视频会导致内容与前几期高度重复。
+
+**解决**：Phase 1 中增加去重步骤，读取前 3 天日报对比，标记重复事件并展示给用户确认。
+
+### 🟡 API 地址不固定
+**问题**：不同用户可能使用不同的图片生成 API 服务，不能硬编码 API URL。
+
+**解决**：Phase 0 中向用户收集 API URL + Key，优先使用用户提供的 API。
+
+### 🟡 视频时长控制
+**问题**：TTS 实际时长可能与脚本预估偏差较大（如 18s 预估实际生成 25-28s），导致总时长超出预期。
+
+**解决**：脚本生成时保守预估，Phase 8 校验时以 TTS 实际时长为准。目标 60-120s，可适当放宽到 150s。
+
 ## 注意事项
 
 - **权限预授权是第一步**，必须在执行前完成
 - 每个 Phase 完成后向用户展示中间结果，确认后继续
 - 图片生成失败时自动重试一次
 - TTS 使用 mimo-tts，推荐音色「阿根」
-- 视频总时长建议 60-120 秒
-- 事件数量建议 3-6 个
+- **TTS 必须串行执行，禁止并行！**
+- 视频总时长建议 60-120 秒（可适当放宽）
+- 事件数量建议 4-6 个
+- **Phase 1 去重是强制步骤，不可跳过**
 - **Phase 8（渲染前校验）是强制步骤，不可跳过**
 - **Phase 11（B站上传）需要用户确认后执行**
