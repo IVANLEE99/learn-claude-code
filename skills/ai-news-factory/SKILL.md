@@ -1,12 +1,12 @@
 ---
 name: ai-news-factory
-description: AI News Factory - 从日报 Markdown 自动生成短视频的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.3.0
+description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
+version: 1.4.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.3.0
+# AI News Factory — 日报短视频自动生成 v1.4.0
 
-将 AI 日报 Markdown 自动转化为 B站风格短视频，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → B站上传。
+将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → B站上传。
 
 **核心原则：字数比例估算字幕时间轴（TTS 语速稳定，字数比例比 ASR 更可靠）。**
 
@@ -25,7 +25,7 @@ version: 1.3.0
 
 📁 文件操作
   ☐ 读取日报 Markdown 文件（含历史日报用于去重）
-  ☐ 写入脚本、分镜、Prompt、字幕等文件
+  ☐ 写入脚本、分镜、Prompt、字幕、公众号文章等文件
   ☐ 复制资源到 video-project/public/
 
 🔧 Shell 执行
@@ -45,23 +45,6 @@ version: 1.3.0
 
 请回复「确认」或「全部授权」开始执行。
 ```
-
-### 预授权实现
-
-用户确认后，记录授权状态，后续所有工具调用不再询问：
-
-```python
-# 授权状态追踪
-PERMISSIONS = {
-    "file_read": True,      # 用户已授权
-    "file_write": True,
-    "shell_exec": True,
-    "api_call": True,
-    "browser": True,
-}
-```
-
-**注意**：如果用户在某个 Phase 拒绝了权限，记录该拒绝并在后续跳过相关操作。
 
 ## 触发条件
 
@@ -94,7 +77,7 @@ PERMISSIONS = {
 
 **Step 1.1**: 读取今日日报内容。
 
-**Step 1.2**: 🔴 去重检查（v1.3.0 新增）
+**Step 1.2**: 🔴 去重检查
 
 读取前 3 天的日报文件（`data/reports/YYYY-MM-DD.md`），对比今日事件：
 
@@ -130,7 +113,7 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 **风格要求**:
 - 像 B站 AI 科技 UP 主
 - 快节奏、有情绪、不书面
-- 总时长 60-120 秒
+- 总时长 60-120 秒（可适当放宽到 150s）
 - 每段不超过 80 字
 - 保留争议性与情绪感
 
@@ -309,7 +292,7 @@ done
 
 ### Phase 7: 字幕生成（字数比例估算）
 
-**v1.3.0 方案：字数比例估算为主，FunASR 为备选。**
+**v1.4.0 方案：字数比例估算为主，FunASR 为备选。**
 
 > **经验教训**：FunASR 逐句对齐在实际使用中匹配率偏低（部分场景仅 1/7），字数比例估算更稳定可靠。
 
@@ -438,7 +421,7 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
 cd video-project && npx remotion render AINewsVideo "out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" --codec h264 --crf 18
 ```
 
-### Phase 10: 封面与发布信息
+### Phase 10: 封面、发布信息与公众号图文
 
 #### 10.1 生成视频封面
 
@@ -451,9 +434,9 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
 
 输出到 `news-pipeline/YYYY-MM-DD/cover.png`
 
-#### 10.2 生成发布信息
+#### 10.2 生成多平台发布信息
 
-生成 `news-pipeline/YYYY-MM-DD/publish.json`：
+生成 `news-pipeline/YYYY-MM-DD/publish.json`，包含 B站、抖音、视频号、公众号四个平台：
 
 ```json
 {
@@ -464,18 +447,81 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
     "bilibili": {
       "title": "【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD",
       "tags": ["今日羊报AI", "AI日报", "..."],
-      "description": "B站简介"
+      "description": "B站简介，含 hashtag"
+    },
+    "douyin": {
+      "title": "{核心标题}｜今日羊报AI YYYY-MM-DD",
+      "tags": ["AI日报", "..."],
+      "description": "抖音简介，含 hashtag"
+    },
+    "channels": {
+      "title": "{核心标题}｜今日羊报AI YYYY-MM-DD",
+      "tags": ["AI日报", "..."],
+      "description": "视频号简介，含 hashtag"
+    },
+    "wechat": {
+      "title": "{核心标题}｜今日羊报AI YYYY-MM-DD",
+      "article": "wechat-article-YYYY-MM-DD.md",
+      "images": "wechat-images/"
     }
   }
 }
 ```
 
-**标题规则**: `【今日羊报AI】{核心标题} | YYYY-MM-DD`，B站追加 `｜{N}条重磅AI新闻一次看完`
+**标题规则**:
+- B站：`【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD`
+- 抖音/视频号：`{核心标题}｜今日羊报AI YYYY-MM-DD`（较短）
+- 公众号：`{核心标题}｜今日羊报AI YYYY-MM-DD`
 
-#### 10.3 归档资源
+#### 10.3 生成公众号图文
+
+从视频脚本中提取核心内容，去掉 Hook/CTA 等口语化部分，生成公众号文章：
+
+**文章结构**：
+```
+# {标题}
+
+> 今日羊报 AI · YYYY-MM-DD
+
+---
+
+## 1. {新闻标题1}
+
+{正文内容，2-3段}
+
+![配图描述](images/sceneN.png)
+
+---
+
+## 2. {新闻标题2}
+...
+
+---
+
+**今日 AI 圈，又热闹又魔幻。**
+
+---
+
+👆 觉得有用就点个赞、转发给身边关注 AI 的朋友！
+🔔 关注「今日羊报 AI」，每天 9 点带你速览 AI 圈最热的 5 条新闻。
+💬 你最关心哪条？评论区聊聊！
+```
+
+**生成规则**：
+- 标题使用视频标题
+- 每个新闻事件一个 `##` 标题
+- 正文从脚本段落中提取，去掉口语化表达（"今天"、"我们"、"大家"等）
+- 每个事件配一张场景图片（scene2.png ~ sceneN.png，跳过 Hook 场景）
+- 结尾替换为引导关注的 CTA
+
+输出到：
+- 文章：`news-pipeline/YYYY-MM-DD/wechat-article-YYYY-MM-DD.md`
+- 配图：`news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png`
+
+#### 10.4 归档资源
 
 ```bash
-mkdir -p news-pipeline/YYYY-MM-DD/{scripts,storyboards,prompts,images,voiceover,captions,video}
+mkdir -p news-pipeline/YYYY-MM-DD/{scripts,storyboards,prompts,images,voiceover,captions,video,wechat-images}
 cp news-pipeline/video-project/out/【今日羊报AI】*.mp4 news-pipeline/YYYY-MM-DD/video/
 ```
 
@@ -489,8 +535,8 @@ cp news-pipeline/video-project/out/【今日羊报AI】*.mp4 news-pipeline/YYYY-
 
 ```bash
 # 1. 关闭现有浏览器进程
-ps aux | grep -i "chromium\|chrome" | grep -i "playwright"
-kill <PID>
+pkill -f "mcp-chrome-*" 2>/dev/null
+sleep 2
 
 # 2. 删除锁文件
 rm -f ~/Library/Caches/ms-playwright/mcp-chrome-*/SingletonLock
@@ -505,36 +551,55 @@ browser_navigate("https://member.bilibili.com/platform/upload/video/frame")
 #### 11.2 上传视频
 
 ```
-browser_click("element=点击上传或将视频拖拽到此区域")  # 触发 file chooser
+browser_click(target=e231)  # 点击上传区域，触发 file chooser
 browser_file_upload("news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4")
-browser_wait_for("text=上传完成", time=120)
 ```
 
-#### 11.3 上传封面
+**🔴 重要**：`browser_click` 使用 `target` 参数（ref 编号）比 `element` 文本描述更可靠。
+
+#### 11.3 上传封面（两步流程）
 
 ```
-browser_click("element=封面设置")  # 打开封面编辑弹窗
-browser_click("element=上传封面")  # 触发 file chooser
+browser_click(target=e328)  # 点击「封面设置」→ 打开封面编辑弹窗
+browser_click(target=e656)  # 点击「上传封面」→ 触发 file chooser
 browser_file_upload("news-pipeline/YYYY-MM-DD/cover.png")
-browser_click("element=完成")  # 确认封面
+browser_click(target=e715)  # 点击「完成」→ 确认封面
 ```
 
-#### 11.4 设置创作声明
+#### 11.4 设置创作声明（自定义下拉框）
 
-```
-browser_click("textbox=请选择符合您视频内容的创作声明")  # 打开下拉框
-browser_click("listitem=个人观点，仅供参考")  # 选择（不是「含AI生成内容」）
+**🔴 B站的创作声明是自定义下拉框组件，不是标准 `<select>`。`browser_click(listitem=...)` 不可靠，必须用 JS evaluate：**
+
+```javascript
+// 1. 点击打开下拉框
+browser_click(target=e362)  // textbox "请选择符合您视频内容的创作声明"
+
+// 2. 用 JS 找到并点击选项（必须！）
+browser_evaluate("""() => {
+  const options = document.querySelectorAll('li, div, span, p');
+  for (const opt of options) {
+    if (opt.textContent.trim() === '个人观点，仅供参考') {
+      opt.click();
+      return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
 ```
 
 #### 11.5 填写简介（Quill 编辑器）
+
+**🔴 B站简介使用 Quill 富文本编辑器，直接 `browser_type` 可能不生效。必须用 JS 注入：**
 
 ```javascript
 browser_evaluate("""() => {
   const editor = document.querySelector('.ql-editor');
   if (editor) {
-    editor.innerHTML = '<p>第一行简介</p><p><br></p><p>第二行简介</p>';
+    editor.innerHTML = '<p>第一段简介内容</p><p><br></p><p>#标签1 #标签2 #标签3</p>';
     editor.dispatchEvent(new Event('input', { bubbles: true }));
+    return 'description set';
   }
+  return 'editor not found';
 }""")
 ```
 
@@ -542,44 +607,61 @@ browser_evaluate("""() => {
 
 ```
 # 标签输入框: textbox "按回车键Enter创建标签"
-# 最多 10 个标签
-tags = ["今日羊报AI", "AI日报", "OpenAI", "ChatGPT", ...]
+# 最多 10 个标签，每个标签输入后按 Enter 确认
+tags = ["DeepSeek", "Anthropic", "Ideogram", "英伟达", ...]
 for tag in tags:
-    browser_type("textbox=按回车键Enter创建标签", tag)
+    browser_type(target=e399, text=tag)
     browser_press_key("Enter")
 ```
 
-#### 11.7 加入合集
+#### 11.7 加入合集（自定义下拉框）
 
-```
-browser_click("element=请选择合集")  # 展开下拉框
-browser_click("generic=「今日羊报 AI」")  # 选择合集
+**🔴 合集选择器也是自定义下拉框，必须用 JS evaluate：**
+
+```javascript
+// 1. 点击打开下拉框
+browser_click(target=e525)  // "请选择合集"
+
+// 2. 用 JS 找到并点击选项
+browser_evaluate("""() => {
+  const options = document.querySelectorAll('li, div, span, p');
+  for (const opt of options) {
+    if (opt.textContent.trim() === '「今日羊报 AI」') {
+      opt.click();
+      return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
 ```
 
 #### 11.8 确认投稿
 
 ```
-browser_click("element=立即投稿")
+browser_click(target=e552)  # 点击「立即投稿」
+# 等待页面跳转到「稿件投递成功」
 browser_wait_for("text=稿件投递成功")
 ```
 
-#### B站上传 UI 要点（2026-06-04 实测）
+#### B站上传组件操作总结（v1.4.0 实测）
 
-| 组件 | 类型 | 操作方式 |
-|------|------|----------|
-| 视频上传 | file chooser | 点击上传区域 → file_upload |
-| 封面设置 | 弹窗 | 点击封面设置 → 上传封面 → 完成 |
-| 创作声明 | bcc-select | 点击 textbox → 点击 listitem |
-| 简介 | Quill 编辑器 | JS 注入 `.ql-editor` |
-| 标签 | 输入框 | type + Enter，最多 10 个 |
-| 合集 | 自定义下拉框 | 点击展开 → 选择合集名 |
-| 投稿按钮 | 按钮 | 点击「立即投稿」 |
+| 组件 | 类型 | 操作方式 | 可靠性 |
+|------|------|----------|--------|
+| 视频上传 | file chooser | `browser_click(ref)` → `file_upload` | ✅ 高 |
+| 封面设置 | 弹窗 | 点击封面设置 → 上传封面 → file_upload → 完成 | ✅ 高 |
+| 创作声明 | **自定义下拉框** | 点击 textbox → **JS evaluate 点击选项** | ⚠️ 必须用 JS |
+| 分区 | 自定义下拉框 | 已有默认值，一般不需要改 | ✅ 高 |
+| 标签 | 输入框 | `type` + `Enter`，最多 10 个 | ✅ 高 |
+| 简介 | **Quill 编辑器** | **JS 注入 `.ql-editor`** | ⚠️ 必须用 JS |
+| 合集 | **自定义下拉框** | 点击展开 → **JS evaluate 点击选项** | ⚠️ 必须用 JS |
+| 投稿按钮 | 按钮 | `browser_click(ref)` | ✅ 高 |
 
-**常见坑**：
-- `browser_file_upload` 必须在 file chooser 对话框打开后才能调用
-- 创作声明**必须选「个人观点，仅供参考」**
-- 简介用 Quill 编辑器，直接 `browser_type` 可能不生效，推荐 JS 注入
-- 封面上传需要两步：先点「封面设置」打开弹窗，再点「上传封面」触发 file chooser
+**关键经验**：
+1. **`browser_click(target=ref编号)` 比 `browser_click(element=文本描述)` 更可靠**
+2. **所有自定义下拉框（创作声明、合集）必须用 `browser_evaluate` + JS 点击**
+3. **Quill 编辑器必须用 JS 注入 `innerHTML` + dispatch `input` 事件**
+4. **`browser_file_upload` 必须在 file chooser 对话框打开后才能调用**
+5. **封面上传是两步流程：先点「封面设置」打开弹窗，再点「上传封面」触发 file chooser**
 
 ## 目录结构
 
@@ -595,7 +677,9 @@ news-pipeline/
 │   ├── video/                  # 最终视频
 │   │   └── 【今日羊报AI】*.mp4
 │   ├── cover.png               # 视频封面
-│   └── publish.json            # 发布信息
+│   ├── publish.json            # 多平台发布信息
+│   ├── wechat-article-*.md     # 公众号图文
+│   └── wechat-images/          # 公众号配图
 ├── video-project/              # Remotion 项目 (固定复用)
 │   ├── public/
 │   │   ├── images/             # 当期图片（复制）
@@ -610,7 +694,7 @@ news-pipeline/
 └── sources/                    # 原始日报 Markdown
 ```
 
-## 已知坑与经验教训（v1.3.0 新增）
+## 已知坑与经验教训
 
 ### 🔴 TTS 并发冲突
 **问题**：`mimo-tts.sh` 内部使用 `mktemp /tmp/mimo-tts-request-XXXXXX.json` 生成临时文件。并行调用时多个进程竞争同一文件名，导致 `mktemp: mkstemp failed: File exists` 错误，TTS 静默失败不生成音频。
@@ -622,6 +706,16 @@ news-pipeline/
 
 **解决**：Phase 1 中增加去重步骤，读取前 3 天日报对比，标记重复事件并展示给用户确认。
 
+### 🔴 B站自定义下拉框
+**问题**：B站的创作声明、合集选择器等使用自定义下拉框组件（bcc-select），不是标准 HTML `<select>`。`browser_click(listitem=...)` 或 `browser_click(element=文本)` 经常失败。
+
+**解决**：先用 `browser_click` 打开下拉框，然后用 `browser_evaluate` + JS 遍历 DOM 找到选项并点击。
+
+### 🔴 B站 Quill 编辑器
+**问题**：B站简介使用 Quill 富文本编辑器，`browser_type` 无法直接输入内容。
+
+**解决**：用 `browser_evaluate` 注入 `innerHTML` 到 `.ql-editor`，然后 dispatch `input` 事件。
+
 ### 🟡 API 地址不固定
 **问题**：不同用户可能使用不同的图片生成 API 服务，不能硬编码 API URL。
 
@@ -631,6 +725,11 @@ news-pipeline/
 **问题**：TTS 实际时长可能与脚本预估偏差较大（如 18s 预估实际生成 25-28s），导致总时长超出预期。
 
 **解决**：脚本生成时保守预估，Phase 8 校验时以 TTS 实际时长为准。目标 60-120s，可适当放宽到 150s。
+
+### 🟡 browser_click 文本匹配不稳定
+**问题**：`browser_click(element=文本描述)` 有时会匹配到错误的元素（如匹配到侧边栏而非表单区域）。
+
+**解决**：优先使用 `browser_click(target=ref编号)` 精确匹配。如果需要文本匹配，先 `browser_snapshot` 获取 ref 编号，再用 ref 点击。
 
 ## 注意事项
 
@@ -644,3 +743,4 @@ news-pipeline/
 - **Phase 1 去重是强制步骤，不可跳过**
 - **Phase 8（渲染前校验）是强制步骤，不可跳过**
 - **Phase 11（B站上传）需要用户确认后执行**
+- **B站自定义下拉框必须用 JS evaluate，不能用 browser_click 文本匹配**
