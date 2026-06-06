@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.6.0
+version: 1.7.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.6.0
+# AI News Factory — 日报短视频自动生成 v1.7.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → B站上传。
 
@@ -840,145 +840,290 @@ browser_click(target={确认按钮ref})
 
 **⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
 
-**🔴 重要经验：视频号编辑器使用自定义 React 组件，自动化难度较高。部分操作（如描述填写、合集选择）可能需要手动完成。**
+**🔴 重要经验：视频号编辑器使用 iframe + 自定义 React 组件，自动化难度较高。必须先检测 iframe 结构。**
 
-#### 13.0 打开视频号后台
+#### 13.0 检测 iframe 结构（关键步骤）
 
-```
-browser_navigate("https://channels.weixin.qq.com/platform")
-```
+**🔴 视频号页面内容在 iframe 中渲染！必须先检测 iframe 才能操作表单元素。**
 
-如果显示「请重新登录」，点击「登录」链接。
-
-#### 13.1 进入视频发布页面
-
-```
-# 点击「内容管理」→「发表视频」
+```javascript
+// 检测 iframe 结构
 browser_run_code_unsafe("""async (page) => {
-  const btn = page.getByText('发表视频').first();
-  if (await btn.isVisible()) {
-    await btn.click();
-    return 'clicked';
-  }
-  return 'not found';
+  const frames = page.frames();
+  const frameInfo = frames.map(f => ({ url: f.url().substring(0, 80), name: f.name() }));
+  return JSON.stringify(frameInfo);
+}""")
+```
+
+**常见 iframe 结构**：
+- 主页面：`https://channels.weixin.qq.com/platform/post/...`
+- 内容 iframe：`name="content"`, URL 包含 `/micro/content/post/...`
+
+**操作 iframe 内容时必须用 `page.frame({ name: 'content' })`**：
+```javascript
+browser_run_code_unsafe("""async (page) => {
+  const frame = page.frame({ name: 'content' });
+  if (!frame) return 'frame not found';
+  const result = await frame.evaluate(() => {
+    // 在 iframe 内操作 DOM
+    return document.querySelector('.some-class')?.textContent;
+  });
+  return result;
+}""")
+```
+
+#### 13.1 打开视频号发布页
+
+```
+# 直接导航到发布页（跳过首页）
+browser_navigate("https://channels.weixin.qq.com/platform/post/create")
+
+# 或从首页进入
+browser_navigate("https://channels.weixin.qq.com/platform")
+# 点击「发表视频」按钮
+browser_run_code_unsafe("""async (page) => {
+  const btn = page.getByRole('button', { name: '发表视频' });
+  await btn.click();
+  await page.waitForTimeout(3000);
+  return 'clicked';
 }""")
 ```
 
 #### 13.2 上传视频
 
 ```
-# 点击上传区域触发 file chooser
-browser_click(target={上传按钮ref})
+# 点击上传区域（+号按钮）触发 file chooser
+browser_run_code_unsafe("""async (page) => {
+  const [fileChooser] = await Promise.all([
+    page.waitForEvent('filechooser', { timeout: 5000 }),
+    page.locator('.finder-upload__add-btn, [class*="upload-btn"]').first().click({ force: true })
+  ]);
+  await fileChooser.setFiles('news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4');
+  return 'uploaded';
+}""")
 
-# 上传视频文件
-browser_file_upload("news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4")
-
-# 等待上传完成（视频文件较大，需要较长时间）
-browser_wait_for(time=30)
+# 等待上传完成（15MB 视频约需 10-15 秒）
+browser_wait_for(time=15)
 ```
 
-#### 13.3 填写视频描述
+#### 13.3 填写视频描述（坐标方式）
 
-**🔴 视频号描述使用自定义 contenteditable div，不是标准 textarea：**
+**🔴 视频号描述使用自定义 contenteditable div，标准选择器找不到。必须用坐标点击 + 键盘输入：**
 
 ```javascript
-// 方法1：坐标点击（推荐，最可靠）
 browser_run_code_unsafe("""async (page) => {
-  // 根据截图，描述区域大约在 x=760, y=310
-  await page.mouse.click(760, 310);
+  // 1. 点击描述区域（根据截图估算坐标）
+  await page.mouse.click(990, 420);  // x=990, y=420 附近
+  await page.waitForTimeout(500);
+  // 2. 键盘输入描述
   await page.keyboard.type('描述内容');
-  return 'typed';
-}""")
-
-// 方法2：尝试找 contenteditable div
-browser_evaluate("""() => {
-  const divs = document.querySelectorAll('[contenteditable]');
-  for (const div of divs) {
-    if (div.offsetParent !== null && div.offsetWidth > 200) {
-      div.click();
-      div.textContent = '描述内容';
-      div.dispatchEvent(new Event('input', { bubbles: true }));
-      return 'set';
-    }
-  }
-  return 'not found';
+  await page.waitForTimeout(500);
+  return 'description filled';
 }""")
 ```
+
+**坐标估算方法**：截图后根据「视频描述」标签位置，描述输入框在其右侧约 200px 处。
 
 #### 13.4 填写短标题
 
+**🔴 短标题是 contenteditable div（不是标准 input），在 iframe 中！必须用 JS 在 iframe 内操作：**
+
 ```javascript
-// 短标题是标准 input，可以直接 type
-browser_click(target={短标题输入框ref})
-browser_type(target={短标题输入框ref}, text="标题内容")
+// 方法1：坐标点击 + 键盘输入（推荐）
+browser_run_code_unsafe("""async (page) => {
+  await page.mouse.click(990, 550);  // 短标题区域坐标
+  await page.waitForTimeout(300);
+  await page.keyboard.type('标题内容');
+  return 'typed';
+}""")
+
+// 方法2：在 iframe 内用 JS 直接修改（更可靠）
+browser_run_code_unsafe("""async (page) => {
+  const frame = page.frame({ name: 'content' });
+  if (!frame) return 'frame not found';
+  const result = await frame.evaluate(() => {
+    const div = document.querySelector('.edit-shorttitle-content');
+    if (div) {
+      div.textContent = '新标题内容';
+      div.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'updated: ' + div.textContent;
+    }
+    return 'div not found';
+  });
+  return result;
+}""")
 ```
+
+**短标题限制**：最多 16 个中文字符，超过会报错「标题超过16字限制」。
 
 #### 13.5 选择合集
 
-**🔴 视频号合集选择器是自定义下拉框：**
-
 ```javascript
-// 1. 点击下拉框
 browser_run_code_unsafe("""async (page) => {
+  // 1. 点击合集下拉框
   const dropdown = page.locator('text=选择合集').first();
-  if (await dropdown.isVisible()) {
-    await dropdown.click();
-  }
-  // 2. 点击选项（坐标方式）
-  await page.mouse.click(860, 180);  // 根据截图调整坐标
-  return 'clicked';
+  await dropdown.click();
+  await page.waitForTimeout(1000);
+  // 2. 用坐标点击选项（根据截图调整）
+  await page.mouse.click(880, 420);
+  await page.waitForTimeout(500);
+  return 'selected';
 }""")
 ```
 
-#### 13.6 设置定时发表
-
-**🔴 保存草稿前必须设为「不定时」！**
+#### 13.6 发布视频
 
 ```javascript
-// 确保选中「不定时」
 browser_run_code_unsafe("""async (page) => {
+  // 确保定时发表为「不定时」
   const radio = page.locator('text=不定时').first();
-  if (await radio.isVisible()) {
-    await radio.click();
-    return 'clicked 不定时';
-  }
-  return 'not found';
+  if (await radio.isVisible()) await radio.click();
+  
+  // 点击发表按钮
+  const publishBtn = page.locator('button:has-text("发表")');
+  await publishBtn.click();
+  await page.waitForTimeout(3000);
+  return 'published';
 }""")
 ```
 
-#### 13.7 保存草稿
+**发布后自动跳转到视频列表页，URL 变为 `/platform/post/list`。**
+
+#### 13.7 修改封面和短标题（发布后）
+
+**🔴 视频发布后仍可修改封面和短标题，但「仅支持修改一次，修改后不可撤回」！**
+
+##### 13.7.1 进入编辑页
+
+```
+# 从列表页点击视频标题进入编辑页
+browser_run_code_unsafe("""async (page) => {
+  const title = page.locator('text=视频标题关键词').first();
+  await title.click();
+  await page.waitForTimeout(3000);
+  return page.url();  # 应跳转到 /platform/post/coverEdit?objectId=...
+}""")
+```
+
+##### 13.7.2 上传封面（在 iframe 中操作）
+
+**🔴 封面编辑弹窗在 iframe 中，必须用 `page.frame({ name: 'content' })` 操作：**
 
 ```javascript
-// 点击保存草稿按钮
+// 上传 3:4 个人主页卡片封面
 browser_run_code_unsafe("""async (page) => {
-  const saveBtn = page.getByRole('button', { name: '保存草稿' });
-  if (await saveBtn.count() > 0) {
-    await saveBtn.first().click();
-    return 'clicked';
-  }
-  return 'not found';
+  // 1. 点击第一个「编辑」按钮
+  const editBtn = page.locator('.edit-btn').first();
+  await editBtn.click({ force: true });
+  await page.waitForTimeout(1000);
+  
+  // 2. 点击「+」上传区域触发 file chooser
+  await page.mouse.click(680, 585);  // +号按钮坐标
+  await page.waitForTimeout(1000);
+  return 'ready for upload';
+}""")
+
+# 上传文件
+browser_file_upload("news-pipeline/YYYY-MM-DD/cover-vertical.png")  # 3:4 封面
+
+# 确认
+browser_run_code_unsafe("""async (page) => {
+  const confirmBtn = page.getByRole('button', { name: '确认' }).first();
+  await confirmBtn.click();
+  await page.waitForTimeout(2000);
+  return 'confirmed';
 }""")
 ```
 
-#### 视频号上传组件操作总结（v1.5.0 实测）
+**封面尺寸**：
+- 个人主页卡片：3:4（1024×1536）→ `cover-vertical.png`
+- 分享卡片：4:3（1536×1024）→ `cover-horizontal.png`
+
+##### 13.7.3 修改短标题（在 iframe 中操作）
+
+```javascript
+browser_run_code_unsafe("""async (page) => {
+  const frame = page.frame({ name: 'content' });
+  if (!frame) return 'frame not found';
+  
+  const result = await frame.evaluate(() => {
+    const div = document.querySelector('.edit-shorttitle-content');
+    if (div) {
+      div.textContent = '新短标题内容';
+      div.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'updated: ' + div.textContent;
+    }
+    return 'div not found';
+  });
+  return result;
+}""")
+```
+
+##### 13.7.4 保存修改
+
+```javascript
+# 点击「完成」按钮
+browser_run_code_unsafe("""async (page) => {
+  const frame = page.frame({ name: 'content' });
+  if (frame) {
+    await frame.evaluate(() => {
+      const buttons = document.querySelectorAll('button');
+      for (const btn of buttons) {
+        if (btn.textContent.trim() === '完成' && btn.offsetParent !== null) {
+          btn.click();
+          return;
+        }
+      }
+    });
+  }
+  await page.waitForTimeout(2000);
+  return 'clicked 完成';
+}""")
+
+# 弹出确认对话框：「仅支持修改一次，修改后不可撤回」
+# 点击「确认修改」
+browser_run_code_unsafe("""async (page) => {
+  const frame = page.frame({ name: 'content' });
+  if (frame) {
+    await frame.evaluate(() => {
+      const buttons = document.querySelectorAll('button');
+      for (const btn of buttons) {
+        if (btn.textContent.trim() === '确认修改' && btn.offsetParent !== null) {
+          btn.click();
+          return;
+        }
+      }
+    });
+  }
+  await page.waitForTimeout(3000);
+  return 'modification confirmed';
+}""")
+```
+
+**修改后自动跳转回视频列表页，显示「修改审核中，预计30分钟内审核完成」。**
+
+#### 视频号上传组件操作总结（v1.7.0 实测）
 
 | 组件 | 类型 | 操作方式 | 可靠性 |
 |------|------|----------|--------|
-| 视频上传 | file chooser | 点击上传区域 → `file_upload` | ✅ 高 |
-| 视频描述 | **自定义 contenteditable** | 坐标点击 + `keyboard.type` | ⚠️ 坐标方式 |
-| 短标题 | 标准 input | `browser_type` | ✅ 高 |
+| 视频上传 | file chooser | 点击 + 号 → `file_upload` | ✅ 高 |
+| 视频描述 | **iframe 内 contenteditable** | 坐标点击 + `keyboard.type` | ⚠️ 坐标方式 |
+| 短标题 | **iframe 内 contenteditable div** | iframe JS 修改 `.edit-shorttitle-content` | ✅ 高（用JS） |
 | 位置 | 下拉框 | 已有默认值，一般不需改 | ✅ 高 |
 | 合集 | **自定义下拉框** | 坐标点击（不稳定） | ⚠️ 可能需手动 |
 | 定时发表 | radio 按钮 | `browser_click` | ✅ 高 |
-| 保存草稿 | 按钮 | `getByRole('button')` | ✅ 高 |
+| 发表 | 按钮 | `button:has-text("发表")` | ✅ 高 |
+| 封面上传 | **iframe 内 file chooser** | 点击编辑 → +号 → `file_upload` → 确认 | ✅ 高 |
+| 短标题修改 | **iframe 内 div** | JS 修改 `.edit-shorttitle-content` → 完成 → 确认修改 | ✅ 高 |
 
 **关键经验**：
-1. **视频号描述是自定义 contenteditable div**，标准 `textarea`/`placeholder` 选择器找不到
-2. **坐标点击是最可靠的描述填写方式**，根据截图估算坐标
-3. **合集选择器是自定义组件**，下拉框坐标方式偶尔有效
-4. **保存草稿前必须设为「不定时」**，否则无法保存
-5. **视频上传后需要等待较长时间**（15MB 视频约需 10-15 秒）
-6. **描述和短标题可以为空就保存草稿**，但建议填写
+1. **🔴 视频号页面内容在 iframe 中**，必须用 `page.frame({ name: 'content' })` 操作表单元素
+2. **🔴 短标题是 contenteditable div**（`.edit-shorttitle-content`），不是标准 input
+3. **🔴 封面修改和短标题修改有「仅支持修改一次」限制**，修改前确认内容正确
+4. **坐标点击是描述填写的最可靠方式**，根据截图估算坐标
+5. **发布后跳转到 `/platform/post/list`**，可通过 URL 变化判断发布成功
+6. **修改后显示「修改审核中」**，约 30 分钟审核完成
+7. **视频号支持两种封面比例**：3:4（个人主页卡片）和 4:3（分享卡片）
 
 ## 目录结构
 
@@ -1104,6 +1249,56 @@ news-pipeline/
 **问题**：尝试用 Playwright 的 `getByPlaceholder`、`getByText`、`locator('textarea')` 等方法都找不到描述输入框。
 
 **解决**：这是微信视频号的自定义组件，只能通过坐标点击 + 键盘输入的方式填写。
+
+### 🔴 视频号 iframe 结构（v1.7.0 新增）
+**问题**：视频号页面内容在 iframe 中渲染，直接操作 `document.querySelector` 找不到表单元素。短标题（`.edit-shorttitle-content`）、封面编辑弹窗等都在 iframe 内。
+
+**解决**：
+1. 先用 `page.frames()` 检测 iframe 结构
+2. 找到 `name="content"` 的 iframe
+3. 用 `page.frame({ name: 'content' })` 获取 frame 对象
+4. 在 frame 内用 `frame.evaluate()` 操作 DOM
+
+### 🔴 视频号短标题是 contenteditable div（v1.7.0 新增）
+**问题**：短标题不是标准 `<input>`，而是 `<div class="edit-shorttitle-content">`，Playwright 的 `fill()`、`type()` 无法直接操作。
+
+**解决**：在 iframe 内用 JS 直接修改：
+```javascript
+const frame = page.frame({ name: 'content' });
+await frame.evaluate(() => {
+  document.querySelector('.edit-shorttitle-content').textContent = '新标题';
+});
+```
+
+### 🔴 视频号封面修改限制（v1.7.0 新增）
+**问题**：视频号修改封面和短标题有「仅支持修改一次，修改后不可撤回」限制。修改记录会展示在视频上。
+
+**解决**：
+1. 修改前确认所有内容（封面、短标题）都正确
+2. 一次性完成所有修改再提交
+3. 修改后显示「修改审核中，预计30分钟内审核完成」
+
+### 🔴 视频号封面在 iframe 内上传（v1.7.0 新增）
+**问题**：封面编辑弹窗在 iframe 中，`browser_file_upload` 无法直接触发 file chooser。
+
+**解决**：
+1. 点击 `.edit-btn` 打开封面编辑弹窗
+2. 用坐标点击 `+` 号按钮（约 x=680, y=585）触发 file chooser
+3. 用 `browser_file_upload` 上传文件
+4. 点击「确认」保存
+
+### 🟡 B站封面隐藏 file input（v1.7.0 新增）
+**问题**：B站封面上传的 file input 是隐藏的（`accept: "image/png, image/jpeg"`），且有多个 file input（视频、封面、字幕等）。
+
+**解决**：
+```javascript
+const inputs = await page.$$('input[type="file"]');
+// inputs[0]: 视频 (.mp4)
+// inputs[1]: 封面 (image/png, image/jpeg)
+// inputs[2]: 字幕 (.txt)
+// inputs[3]: 素材 (.zip)
+await inputs[1].setInputFiles('cover.png');  // 设置封面
+```
 
 ## 注意事项
 
