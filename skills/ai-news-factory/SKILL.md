@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.7.0
+version: 1.8.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.7.0
+# AI News Factory — 日报短视频自动生成 v1.8.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → B站上传。
 
@@ -667,52 +667,402 @@ browser_wait_for("text=稿件投递成功")
 
 **⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
 
-**🔴 重要经验：微信公众号编辑器使用 Vue/React 自定义组件，自动化难度远高于 B站。部分操作（如图片插入、合集选择）可能需要手动完成。**
+**🔴 重要经验：公众号编辑器使用 ProseMirror + 自定义 Vue 组件，自动化难度较高。封面选择、合集选择等需要特殊处理。**
 
-#### 12.0 打开公众号后台
+#### 12.0 完整上传流程（推荐顺序）
 
 ```
-browser_navigate("https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN&token={token}")
+1. 打开公众号后台 → 点击「新的创作」→「文章」（新标签页打开）
+2. 切换到新标签页
+3. 填写标题（ProseMirror）+ 作者（标准 input）
+4. 点击正文区域获取 focus → 插入视频号内容
+5. 填写正文内容（ProseMirror innerHTML）
+6. 通过「图片」→「本地上传」插入封面图到正文
+7. 上传封面（从正文选择 / 从图片库选择）
+8. 设置原创声明
+9. 设置赞赏
+10. 选择合集
+11. 保存草稿
+```
+
+#### 12.1 打开公众号后台
+
+```
+browser_navigate("https://mp.weixin.qq.com/cgi-bin/home?t=home/index&token={token}")
 ```
 
 如果显示「请重新登录」，点击「登录」链接。登录后 token 会自动更新。
 
-#### 12.1 创建新文章
+#### 12.2 创建新文章
 
 ```
-# 点击「新的创作」→「文章」
-browser_evaluate("""() => {
-  const items = document.querySelectorAll('.new-creation__menu-item, .new-creation__item');
-  for (const item of items) {
-    if (item.textContent.includes('文章')) {
-      item.click();
-      return 'clicked';
-    }
-  }
-  return 'not found';
+# 点击「新的创作」→「文章」（会打开新标签页）
+browser_run_code_unsafe("""async (page) => {
+  const menuItem = page.locator('.new-creation__menu-item').first();
+  await menuItem.click();
+  await page.waitForTimeout(3000);
+  // 获取所有页面，找到新打开的编辑页
+  const pages = page.context().pages();
+  return pages.length;
 }""")
 
-# 新标签页会打开，切换到最新标签页
+# 切换到最新标签页
 browser_tabs(action="select", index={最新标签页索引})
 ```
 
-#### 12.2 填写标题
+#### 12.3 填写标题和作者
 
 **🔴 公众号标题使用 ProseMirror 编辑器，不是标准 input：**
 
 ```javascript
-// 找到标题 ProseMirror 编辑器并填入内容
-browser_evaluate("""() => {
-  const editors = document.querySelectorAll('.ProseMirror');
-  const titleEditor = editors[0];  // 第一个是标题
-  if (titleEditor) {
-    titleEditor.textContent = '标题内容';
-    titleEditor.dispatchEvent(new Event('input', { bubbles: true }));
-    return 'title set';
-  }
-  return 'editor not found';
+browser_run_code_unsafe("""async (page) => {
+  const result = await page.evaluate(() => {
+    const editors = document.querySelectorAll('.ProseMirror');
+    // 第一个 ProseMirror 是标题
+    if (editors[0]) {
+      editors[0].textContent = '标题内容';
+      editors[0].dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    // 作者是标准 input
+    const authorInput = document.querySelector('input[placeholder="请输入作者"]');
+    if (authorInput) {
+      authorInput.value = 'Youngs羊示';
+      authorInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    return 'title and author set';
+  });
+  return result;
 }""")
 ```
+
+#### 12.4 插入视频号内容
+
+**🔴 公众号支持直接插入视频号视频，这是推荐的视频插入方式：**
+
+```
+# 1. 点击正文区域获取 focus
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => {
+    const editors = document.querySelectorAll('.ProseMirror');
+    if (editors[1]) editors[1].click();
+  });
+  return 'body clicked';
+}""")
+
+# 2. 点击工具栏「视频号」按钮（坐标方式）
+browser_run_code_unsafe("""async (page) => {
+  // 找到视频号按钮位置
+  const result = await page.evaluate(() => {
+    const allElements = document.querySelectorAll('a, button, span, div');
+    for (const el of allElements) {
+      const rect = el.getBoundingClientRect();
+      if (rect.y < 50 && rect.y > 0 && el.textContent.trim() === '视频号') {
+        return { x: rect.x, y: rect.y };
+      }
+    }
+    return null;
+  });
+  if (result) {
+    await page.mouse.click(result.x + 20, result.y + 10);
+    await page.waitForTimeout(2000);
+  }
+  return 'clicked 视频号';
+}""")
+
+# 3. 在弹窗中选择「最近使用」的账号
+browser_run_code_unsafe("""async (page) => {
+  // 点击「最近使用」中的账号名
+  const result = await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      const text = el.textContent.trim();
+      const rect = el.getBoundingClientRect();
+      if (text === '账号名' && el.offsetParent !== null && rect.x > 500 && rect.y > 300 && rect.y < 500) {
+        el.click();
+        return 'clicked';
+      }
+    }
+    return 'not found';
+  });
+  await page.waitForTimeout(2000);
+  return result;
+}""")
+
+# 4. 选择第一个视频
+browser_run_code_unsafe("""async (page) => {
+  await page.mouse.click(340, 320);  // 第一个视频缩略图位置
+  await page.waitForTimeout(1000);
+  return 'selected video';
+}""")
+
+# 5. 点击「插入」
+browser_run_code_unsafe("""async (page) => {
+  const insertBtn = page.locator('button:has-text("插入")');
+  await insertBtn.first().click();
+  await page.waitForTimeout(2000);
+  return 'inserted';
+}""")
+```
+
+#### 12.5 填写正文内容
+
+**🔴 正文使用 ProseMirror 编辑器，用 innerHTML 注入：**
+
+```javascript
+browser_run_code_unsafe("""async (page) => {
+  const result = await page.evaluate(() => {
+    const editors = document.querySelectorAll('.ProseMirror');
+    const bodyEditor = editors[1];  // 第二个 ProseMirror 是正文
+    if (!bodyEditor) return 'body editor not found';
+    bodyEditor.innerHTML = `
+      <h2>1. 新闻标题</h2>
+      <p>正文内容...</p>
+      <h2>2. 新闻标题</h2>
+      <p>正文内容...</p>
+    `;
+    bodyEditor.dispatchEvent(new Event('input', { bubbles: true }));
+    return 'body content set';
+  });
+  return result;
+}""")
+```
+
+#### 12.6 上传图片到正文
+
+**🔴 通过工具栏「图片」→「本地上传」插入图片：**
+
+```
+# 1. 点击正文区域获取 focus
+# 2. 点击工具栏「图片」→「本地上传」
+browser_run_code_unsafe("""async (page) => {
+  // 点击图片按钮
+  await page.mouse.click(530, 17);  // 图片按钮位置
+  await page.waitForTimeout(1000);
+  // 点击「本地上传」
+  await page.mouse.click(550, 75);
+  await page.waitForTimeout(1000);
+  return 'clicked 本地上传';
+}""")
+
+# 3. 上传文件（等待 file chooser）
+browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png")
+
+# 重复以上步骤插入多张图片
+```
+
+#### 12.7 上传封面
+
+**🔴 封面上传有两种方式，推荐「从图片库选择」：**
+
+```
+# 方式1：从图片库选择（推荐）
+# 1. 滚动到封面区域
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  return 'scrolled';
+}""")
+
+# 2. 点击封面区域的「+」号
+browser_run_code_unsafe("""async (page) => {
+  await page.mouse.click(696, 570);  // +号按钮位置
+  await page.waitForTimeout(1000);
+  // 点击「从图片库选择」
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '从图片库选择' && el.offsetParent !== null) {
+        el.click();
+        return;
+      }
+    }
+  });
+  await page.waitForTimeout(2000);
+  return 'opened image library';
+}""")
+
+# 3. 选择图片并确认
+
+# 方式2：从正文选择（需要正文中有图片）
+# 如果「从正文选择」选项可用，可以选择正文中的图片作为封面
+```
+
+**🔴 「从正文选择」选项只有在正文中有已保存的图片时才会出现。如果通过 innerHTML 注入图片，该选项可能不可用。**
+
+#### 12.8 设置原创声明
+
+```
+browser_run_code_unsafe("""async (page) => {
+  // 1. 点击「原创」区域打开弹窗
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '原创' && el.offsetParent !== null) {
+        const rect = el.getBoundingClientRect();
+        if (rect.y > 150 && rect.y < 250) {
+          el.click();
+          return;
+        }
+      }
+    }
+  });
+  await page.waitForTimeout(1000);
+  
+  // 2. 弹窗已自动选中「文字原创」+ 勾选「我已阅读并同意」
+  // 3. 点击「确定」
+  await page.evaluate(() => {
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      if (btn.textContent.trim() === '确定' && btn.offsetParent !== null) {
+        btn.click();
+        return;
+      }
+    }
+  });
+  await page.waitForTimeout(2000);
+  return 'original declaration set';
+}""")
+```
+
+#### 12.9 设置赞赏
+
+```
+browser_run_code_unsafe("""async (page) => {
+  // 1. 点击「赞赏」区域打开弹窗
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '赞赏' && el.offsetParent !== null) {
+        const rect = el.getBoundingClientRect();
+        if (rect.y > 300 && rect.y < 400) {
+          el.click();
+          return;
+        }
+      }
+    }
+  });
+  await page.waitForTimeout(1000);
+  
+  // 2. 点击「不开启」
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '不开启' && el.offsetParent !== null) {
+        el.click();
+        return;
+      }
+    }
+  });
+  await page.waitForTimeout(500);
+  
+  // 3. 勾选「我已阅读并同意」
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim().includes('我已阅读并同意') && el.offsetParent !== null) {
+        const parent = el.closest('label, div');
+        if (parent) {
+          const checkbox = parent.querySelector('input[type="checkbox"], [role="checkbox"]');
+          if (checkbox) checkbox.click();
+        }
+        return;
+      }
+    }
+  });
+  await page.waitForTimeout(500);
+  
+  // 4. 点击「确定」
+  await page.evaluate(() => {
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      if (btn.textContent.trim() === '确定' && btn.offsetParent !== null) {
+        btn.click();
+        return;
+      }
+    }
+  });
+  await page.waitForTimeout(2000);
+  return 'appreciation set';
+}""")
+```
+
+#### 12.10 选择合集
+
+**🔴 合集选择器是自定义 Vue 组件，需要用坐标点击：**
+
+```
+browser_run_code_unsafe("""async (page) => {
+  // 1. 点击「合集 未添加」行
+  await page.mouse.click(730, 355);  // 未添加文字位置
+  await page.waitForTimeout(1000);
+  
+  // 2. 点击下拉框打开选项
+  await page.mouse.click(690, 375);
+  await page.waitForTimeout(1000);
+  
+  // 3. 选择合集
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '「今日羊报 AI」' && el.offsetParent !== null) {
+        el.click();
+        return;
+      }
+    }
+  });
+  await page.waitForTimeout(500);
+  
+  // 4. 点击「确认」
+  await page.evaluate(() => {
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      if (btn.textContent.trim() === '确认' && btn.offsetParent !== null) {
+        btn.click();
+        return;
+      }
+    }
+  });
+  await page.waitForTimeout(2000);
+  return 'collection selected';
+}""")
+```
+
+#### 12.11 保存草稿
+
+```
+browser_run_code_unsafe("""async (page) => {
+  const saveBtn = page.locator('button:has-text("保存为草稿")');
+  await saveBtn.first().click();
+  await page.waitForTimeout(3000);
+  return 'saved as draft';
+}""")
+```
+
+#### 微信公众号上传组件操作总结（v1.7.0 实测）
+
+| 组件 | 类型 | 操作方式 | 可靠性 |
+|------|------|----------|--------|
+| 标题 | **ProseMirror** | JS 注入 `textContent` | ✅ 高 |
+| 作者 | 标准 input | `value` + dispatch `input` | ✅ 高 |
+| 正文 | **ProseMirror** | JS 注入 `innerHTML` | ✅ 高 |
+| 视频号 | 弹窗选择 | 工具栏「视频号」→ 选账号 → 选视频 → 插入 | ✅ 高 |
+| 图片上传 | 工具栏菜单 | 「图片」→「本地上传」→ file_upload | ✅ 高 |
+| 封面 | 拖拽区域 | 「从图片库选择」/ 「从正文选择」 | ⚠️ 需坐标点击 |
+| 原创声明 | 弹窗 | 点击「原创」→ 确定 | ✅ 高 |
+| 赞赏 | 弹窗 | 点击「赞赏」→ 不开启 → 勾选同意 → 确定 | ✅ 高 |
+| 合集 | **自定义 Vue 组件** | 坐标点击下拉框 → 选择 → 确认 | ⚠️ 坐标方式 |
+| 保存草稿 | 按钮 | `button:has-text("保存为草稿")` | ✅ 高 |
+
+**关键经验**：
+1. **公众号编辑器使用 ProseMirror**，不是 Quill，注入方式不同
+2. **标题和正文都是 ProseMirror**，通过 `document.querySelectorAll('.ProseMirror')` 获取，第一个是标题，第二个是正文
+3. **视频号插入是最可靠的视频方式**，通过工具栏「视频号」按钮 → 选择账号 → 选择视频 → 插入
+4. **图片通过工具栏「图片」→「本地上传」插入**，会插入到正文光标位置
+5. **「从正文选择」封面选项需要正文中有已保存的图片**，innerHTML 注入的图片可能不被识别
+6. **合集选择器是自定义 Vue 组件**，需要用坐标点击（约 x=730, y=355 点击「未添加」，x=690, y=375 打开下拉框）
+7. **赞赏弹窗中「我已阅读并同意」需要手动勾选**，checkbox 在 `label > input[type="checkbox"]` 结构中
+8. **原创声明弹窗会自动选中「文字原创」+ 勾选同意**，直接点确定即可
+9. **保存草稿前不需要完成所有设置**，封面和合集可以后续手动添加
+10. **新标签页打开**：点击「文章」会打开新标签页，需要切换到最新标签页
 
 #### 12.3 填写作者
 
@@ -1223,6 +1573,49 @@ news-pipeline/
 **问题**：点击「文章」会打开多个新标签页（可能重复点击导致）。
 
 **解决**：创建文章后，切换到最新标签页（index 最大的）。关闭其他重复标签页。
+
+### 🔴 公众号「从正文选择」封面不可用（v1.7.0 新增）
+**问题**：通过 innerHTML 注入到正文的图片不会被封面选择器识别，「从正文选择」选项不出现。
+
+**原因**：公众号封面选择器只识别通过正常编辑器操作插入的图片，innerHTML 注入的图片不在其检测范围内。
+
+**解决**：
+1. 先通过「图片」→「本地上传」将封面图插入正文
+2. 使用「从图片库选择」方式选择封面
+3. 或者先保存草稿，再重新编辑时封面选择器可能会识别正文中的图片
+
+### 🔴 公众号赞赏弹窗 checkbox 结构（v1.7.0 新增）
+**问题**：「我已阅读并同意」checkbox 在 `label > div` 结构中，不是标准 `input[type="checkbox"]`。
+
+**解决**：用 JS 遍历找到包含「我已阅读并同意」的元素，然后找其父元素中的 checkbox：
+```javascript
+const parent = el.closest('label, div');
+const checkbox = parent.querySelector('input[type="checkbox"], [role="checkbox"]');
+if (checkbox) checkbox.click();
+```
+
+### 🔴 公众号合集选择器坐标（v1.7.0 新增）
+**问题**：合集选择器是自定义 Vue 组件，下拉框坐标方式偶尔有效。
+
+**解决**：
+1. 点击「合集 未添加」行（约 x=730, y=355）
+2. 点击下拉框（约 x=690, y=375）
+3. 用 JS evaluate 找到并点击「「今日羊报 AI」」选项
+4. 点击「确认」
+5. 如果失败，建议手动选择
+
+### 🟡 公众号原创声明弹窗自动填充（v1.7.0 新增）
+**问题**：原创声明弹窗打开后，「文字原创」已默认选中，「我已阅读并同意」已默认勾选。
+
+**解决**：直接点击「确定」即可，无需手动操作其他选项。
+
+### 🟡 公众号工具栏按钮坐标（v1.7.0 新增）
+**问题**：工具栏按钮（图片、视频号等）的位置会随页面滚动变化。
+
+**解决**：
+- 「图片」按钮：约 x=530, y=17（顶部工具栏）
+- 「视频号」按钮：约 x=1074, y=17（顶部工具栏右侧）
+- 使用 `browser_evaluate` 动态查找按钮位置更可靠
 
 ### 🔴 微信视频号描述字段
 **问题**：视频号描述使用自定义 contenteditable div，标准 `textarea`、`placeholder`、`contenteditable="true"` 选择器都找不到。
