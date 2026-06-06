@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.4.0
+version: 1.6.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.4.0
+# AI News Factory — 日报短视频自动生成 v1.6.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → B站上传。
 
@@ -663,6 +663,323 @@ browser_wait_for("text=稿件投递成功")
 4. **`browser_file_upload` 必须在 file chooser 对话框打开后才能调用**
 5. **封面上传是两步流程：先点「封面设置」打开弹窗，再点「上传封面」触发 file chooser**
 
+### Phase 12: 微信公众号自动上传（Playwright MCP）
+
+**⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
+
+**🔴 重要经验：微信公众号编辑器使用 Vue/React 自定义组件，自动化难度远高于 B站。部分操作（如图片插入、合集选择）可能需要手动完成。**
+
+#### 12.0 打开公众号后台
+
+```
+browser_navigate("https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN&token={token}")
+```
+
+如果显示「请重新登录」，点击「登录」链接。登录后 token 会自动更新。
+
+#### 12.1 创建新文章
+
+```
+# 点击「新的创作」→「文章」
+browser_evaluate("""() => {
+  const items = document.querySelectorAll('.new-creation__menu-item, .new-creation__item');
+  for (const item of items) {
+    if (item.textContent.includes('文章')) {
+      item.click();
+      return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
+
+# 新标签页会打开，切换到最新标签页
+browser_tabs(action="select", index={最新标签页索引})
+```
+
+#### 12.2 填写标题
+
+**🔴 公众号标题使用 ProseMirror 编辑器，不是标准 input：**
+
+```javascript
+// 找到标题 ProseMirror 编辑器并填入内容
+browser_evaluate("""() => {
+  const editors = document.querySelectorAll('.ProseMirror');
+  const titleEditor = editors[0];  // 第一个是标题
+  if (titleEditor) {
+    titleEditor.textContent = '标题内容';
+    titleEditor.dispatchEvent(new Event('input', { bubbles: true }));
+    return 'title set';
+  }
+  return 'editor not found';
+}""")
+```
+
+#### 12.3 填写作者
+
+```javascript
+// 作者是标准 input，可以直接 type
+browser_click(target={作者输入框ref})
+browser_type(target={作者输入框ref}, text="Youngs羊示")
+```
+
+#### 12.4 填写正文
+
+**🔴 公众号正文也是 ProseMirror 编辑器，必须用 JS 注入 innerHTML：**
+
+```javascript
+browser_evaluate("""() => {
+  const editors = document.querySelectorAll('.ProseMirror');
+  const bodyEditor = editors.length > 1 ? editors[1] : editors[0];  // 第二个是正文
+  if (bodyEditor) {
+    bodyEditor.innerHTML = `
+      <h2>1. 新闻标题</h2>
+      <p>正文内容...</p>
+      <h2>2. 新闻标题</h2>
+      <p>正文内容...</p>
+    `;
+    bodyEditor.dispatchEvent(new Event('input', { bubbles: true }));
+    return 'body content set';
+  }
+  return 'editor not found';
+}""")
+```
+
+#### 12.5 上传图片（复杂，建议手动）
+
+**🔴 公众号图片上传机制特殊：**
+
+1. 找到隐藏的 file input：`input[type="file"][accept*="image"]`
+2. 用 `page.$('input[type="file"]').setInputFiles(path)` 设置文件
+3. **但图片不会自动插入到文章中**，需要先定位光标位置
+
+**推荐方案**：先保存草稿，然后手动在文章中定位光标 → 点击工具栏「图片」→「本地上传」→ 选择图片。
+
+```javascript
+// 如果要尝试自动上传（不保证成功）
+browser_run_code_unsafe("""async (page) => {
+  const fileInput = await page.$('input[type="file"][accept*="image"]');
+  if (fileInput) {
+    await fileInput.setInputFiles('/path/to/image.png');
+    return 'file set';
+  }
+  return 'input not found';
+}""")
+```
+
+#### 12.6 保存草稿
+
+```javascript
+browser_evaluate("""() => {
+  const buttons = document.querySelectorAll('button, a, div');
+  for (const btn of buttons) {
+    if (btn.textContent.trim() === '保存为草稿' && btn.offsetParent !== null) {
+      btn.click();
+      return 'saved';
+    }
+  }
+  return 'not found';
+}""")
+```
+
+#### 12.7 设置合集（困难，建议手动）
+
+**🔴 公众号合集选择器是自定义 Vue/React 组件，自动化成功率低：**
+
+```javascript
+// 方法1：尝试点击「合集 未添加」行
+browser_evaluate("""() => {
+  const elements = document.querySelectorAll('*');
+  for (const el of elements) {
+    if (el.textContent.includes('合集') && el.textContent.includes('未添加') && el.offsetParent !== null) {
+      el.click();
+      return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
+
+// 方法2：在弹出的对话框中选择合集
+browser_click(target={下拉框ref})
+browser_evaluate("""() => {
+  const options = document.querySelectorAll('*');
+  for (const opt of options) {
+    if (opt.textContent.trim() === '「今日羊报 AI」' && opt.offsetParent !== null) {
+      opt.click();
+      return 'selected';
+    }
+  }
+  return 'not found';
+}""")
+
+// 点击确认
+browser_click(target={确认按钮ref})
+```
+
+**⚠️ 实测经验**：合集选择器的 JS click 经常不生效，可能需要手动完成。
+
+#### 微信公众号上传组件操作总结（v1.5.0 实测）
+
+| 组件 | 类型 | 操作方式 | 可靠性 |
+|------|------|----------|--------|
+| 标题 | **ProseMirror** | JS 注入 `textContent` | ✅ 高 |
+| 作者 | 标准 input | `browser_type` | ✅ 高 |
+| 正文 | **ProseMirror** | JS 注入 `innerHTML` | ✅ 高 |
+| 图片上传 | **隐藏 file input** | `setInputFiles`（但不插入文章） | ⚠️ 需手动插入 |
+| 封面 | 拖拽区域 | 需手动上传 | ❌ 建议手动 |
+| 合集 | **自定义 Vue 组件** | JS click（不稳定） | ❌ 建议手动 |
+| 保存草稿 | 按钮 | JS click | ✅ 高 |
+
+**关键经验**：
+1. **公众号编辑器使用 ProseMirror**，不是 Quill，注入方式不同
+2. **标题和正文都是 ProseMirror**，通过 `document.querySelectorAll('.ProseMirror')` 获取，第一个是标题，第二个是正文
+3. **图片上传到素材库成功，但不会自动插入文章**，需要手动定位光标后插入
+4. **合集选择器是自定义 Vue 组件**，JS click 不稳定，建议手动
+5. **保存草稿前不需要完成所有设置**，可以先保存再编辑
+
+### Phase 13: 微信视频号自动上传（Playwright MCP）
+
+**⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
+
+**🔴 重要经验：视频号编辑器使用自定义 React 组件，自动化难度较高。部分操作（如描述填写、合集选择）可能需要手动完成。**
+
+#### 13.0 打开视频号后台
+
+```
+browser_navigate("https://channels.weixin.qq.com/platform")
+```
+
+如果显示「请重新登录」，点击「登录」链接。
+
+#### 13.1 进入视频发布页面
+
+```
+# 点击「内容管理」→「发表视频」
+browser_run_code_unsafe("""async (page) => {
+  const btn = page.getByText('发表视频').first();
+  if (await btn.isVisible()) {
+    await btn.click();
+    return 'clicked';
+  }
+  return 'not found';
+}""")
+```
+
+#### 13.2 上传视频
+
+```
+# 点击上传区域触发 file chooser
+browser_click(target={上传按钮ref})
+
+# 上传视频文件
+browser_file_upload("news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4")
+
+# 等待上传完成（视频文件较大，需要较长时间）
+browser_wait_for(time=30)
+```
+
+#### 13.3 填写视频描述
+
+**🔴 视频号描述使用自定义 contenteditable div，不是标准 textarea：**
+
+```javascript
+// 方法1：坐标点击（推荐，最可靠）
+browser_run_code_unsafe("""async (page) => {
+  // 根据截图，描述区域大约在 x=760, y=310
+  await page.mouse.click(760, 310);
+  await page.keyboard.type('描述内容');
+  return 'typed';
+}""")
+
+// 方法2：尝试找 contenteditable div
+browser_evaluate("""() => {
+  const divs = document.querySelectorAll('[contenteditable]');
+  for (const div of divs) {
+    if (div.offsetParent !== null && div.offsetWidth > 200) {
+      div.click();
+      div.textContent = '描述内容';
+      div.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'set';
+    }
+  }
+  return 'not found';
+}""")
+```
+
+#### 13.4 填写短标题
+
+```javascript
+// 短标题是标准 input，可以直接 type
+browser_click(target={短标题输入框ref})
+browser_type(target={短标题输入框ref}, text="标题内容")
+```
+
+#### 13.5 选择合集
+
+**🔴 视频号合集选择器是自定义下拉框：**
+
+```javascript
+// 1. 点击下拉框
+browser_run_code_unsafe("""async (page) => {
+  const dropdown = page.locator('text=选择合集').first();
+  if (await dropdown.isVisible()) {
+    await dropdown.click();
+  }
+  // 2. 点击选项（坐标方式）
+  await page.mouse.click(860, 180);  // 根据截图调整坐标
+  return 'clicked';
+}""")
+```
+
+#### 13.6 设置定时发表
+
+**🔴 保存草稿前必须设为「不定时」！**
+
+```javascript
+// 确保选中「不定时」
+browser_run_code_unsafe("""async (page) => {
+  const radio = page.locator('text=不定时').first();
+  if (await radio.isVisible()) {
+    await radio.click();
+    return 'clicked 不定时';
+  }
+  return 'not found';
+}""")
+```
+
+#### 13.7 保存草稿
+
+```javascript
+// 点击保存草稿按钮
+browser_run_code_unsafe("""async (page) => {
+  const saveBtn = page.getByRole('button', { name: '保存草稿' });
+  if (await saveBtn.count() > 0) {
+    await saveBtn.first().click();
+    return 'clicked';
+  }
+  return 'not found';
+}""")
+```
+
+#### 视频号上传组件操作总结（v1.5.0 实测）
+
+| 组件 | 类型 | 操作方式 | 可靠性 |
+|------|------|----------|--------|
+| 视频上传 | file chooser | 点击上传区域 → `file_upload` | ✅ 高 |
+| 视频描述 | **自定义 contenteditable** | 坐标点击 + `keyboard.type` | ⚠️ 坐标方式 |
+| 短标题 | 标准 input | `browser_type` | ✅ 高 |
+| 位置 | 下拉框 | 已有默认值，一般不需改 | ✅ 高 |
+| 合集 | **自定义下拉框** | 坐标点击（不稳定） | ⚠️ 可能需手动 |
+| 定时发表 | radio 按钮 | `browser_click` | ✅ 高 |
+| 保存草稿 | 按钮 | `getByRole('button')` | ✅ 高 |
+
+**关键经验**：
+1. **视频号描述是自定义 contenteditable div**，标准 `textarea`/`placeholder` 选择器找不到
+2. **坐标点击是最可靠的描述填写方式**，根据截图估算坐标
+3. **合集选择器是自定义组件**，下拉框坐标方式偶尔有效
+4. **保存草稿前必须设为「不定时」**，否则无法保存
+5. **视频上传后需要等待较长时间**（15MB 视频约需 10-15 秒）
+6. **描述和短标题可以为空就保存草稿**，但建议填写
+
 ## 目录结构
 
 ```
@@ -730,6 +1047,63 @@ news-pipeline/
 **问题**：`browser_click(element=文本描述)` 有时会匹配到错误的元素（如匹配到侧边栏而非表单区域）。
 
 **解决**：优先使用 `browser_click(target=ref编号)` 精确匹配。如果需要文本匹配，先 `browser_snapshot` 获取 ref 编号，再用 ref 点击。
+
+### 🔴 微信公众号 ProseMirror 编辑器
+**问题**：公众号标题和正文都使用 ProseMirror 编辑器（不是 Quill），`browser_type` 无法直接输入内容。
+
+**解决**：用 `browser_evaluate` 注入内容：
+- 标题：`editors[0].textContent = '标题'` + dispatch `input` 事件
+- 正文：`editors[1].innerHTML = '<h2>...</h2><p>...</p>'` + dispatch `input` 事件
+
+### 🔴 微信公众号图片插入
+**问题**：通过 `setInputFiles` 可以将图片上传到素材库，但图片不会自动插入到文章正文中。需要先在文章中定位光标，然后通过工具栏「图片」→「本地上传」手动插入。
+
+**解决**：建议先保存草稿，然后手动完成图片插入。或者尝试：
+1. 在文章中点击定位光标
+2. 点击工具栏「图片」
+3. 选择「本地上传」
+4. 通过 `setInputFiles` 上传
+
+### 🔴 微信公众号合集选择器
+**问题**：公众号合集选择器是自定义 Vue/React 组件，不是标准 HTML 元素。JS click 不稳定，有时选择后不生效。
+
+**解决**：建议手动完成合集选择。如果要尝试自动化：
+1. 点击「合集 未添加」行打开对话框
+2. 点击下拉框
+3. 用 JS evaluate 找到并点击选项
+4. 点击「确认」
+5. 保存草稿后检查是否生效
+
+### 🟡 微信公众号多标签页
+**问题**：点击「文章」会打开多个新标签页（可能重复点击导致）。
+
+**解决**：创建文章后，切换到最新标签页（index 最大的）。关闭其他重复标签页。
+
+### 🔴 微信视频号描述字段
+**问题**：视频号描述使用自定义 contenteditable div，标准 `textarea`、`placeholder`、`contenteditable="true"` 选择器都找不到。
+
+**解决**：使用坐标点击方式：
+1. 根据截图估算描述区域坐标（约 x=760, y=310）
+2. `page.mouse.click(x, y)` 点击
+3. `page.keyboard.type(text)` 输入内容
+
+### 🔴 微信视频号合集选择器
+**问题**：视频号合集选择器是自定义 React 组件，下拉框坐标方式偶尔有效。
+
+**解决**：
+1. 点击「选择合集」下拉框
+2. 用坐标点击选项（约 x=860, y=180）
+3. 如果失败，建议手动选择
+
+### 🔴 微信视频号保存草稿限制
+**问题**：如果「定时发表」设为「定时」，保存草稿按钮会显示警告「使用定时发表将无法保存草稿」。
+
+**解决**：保存草稿前必须确保「定时发表」选中「不定时」。
+
+### 🟡 视频号描述自动填充失败
+**问题**：尝试用 Playwright 的 `getByPlaceholder`、`getByText`、`locator('textarea')` 等方法都找不到描述输入框。
+
+**解决**：这是微信视频号的自定义组件，只能通过坐标点击 + 键盘输入的方式填写。
 
 ## 注意事项
 
