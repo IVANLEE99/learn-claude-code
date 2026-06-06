@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.8.0
+version: 1.9.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.8.0
+# AI News Factory — 日报短视频自动生成 v1.9.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → B站上传。
 
@@ -1692,6 +1692,321 @@ const inputs = await page.$$('input[type="file"]');
 // inputs[3]: 素材 (.zip)
 await inputs[1].setInputFiles('cover.png');  // 设置封面
 ```
+
+### Phase 14: 抖音自动上传（Playwright MCP）
+
+**⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
+
+**🔴 重要经验：抖音创作者中心使用自定义组件，封面上传需要用 force click，发布需要短信验证码。**
+
+#### 14.1 打开抖音创作者中心
+
+```
+browser_navigate("https://creator.douyin.com/creator-micro/content/upload")
+```
+
+#### 14.2 上传视频
+
+```
+# 点击「上传视频」按钮触发 file chooser
+browser_run_code_unsafe("""async (page) => {
+  const uploadBtn = page.locator('text=上传视频');
+  await uploadBtn.first().click();
+  await page.waitForTimeout(2000);
+  return 'clicked';
+}""")
+
+# 上传视频文件
+browser_file_upload("news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4")
+
+# 等待上传完成
+browser_wait_for(time=10)
+```
+
+#### 14.3 关闭提示弹窗
+
+**🔴 上传视频后会弹出「视频预览功能」提示，必须先关闭：**
+
+```
+browser_click(target={我知道了按钮ref})
+# 或用 JS
+browser_run_code_unsafe("""async (page) => {
+  await page.getByRole('button', { name: '我知道了' }).click();
+  return 'closed';
+}""")
+```
+
+#### 14.4 填写作品描述（30字）
+
+**🔴 抖音作品描述是标准 input，但 placeholder 为「填写作品标题，为作品获得更多流量」：**
+
+```
+browser_run_code_unsafe("""async (page) => {
+  const result = await page.evaluate(() => {
+    const elements = document.querySelectorAll('textarea, input[type="text"], [contenteditable]');
+    for (const el of elements) {
+      const placeholder = el.placeholder || '';
+      if (placeholder.includes('填写作品标题')) {
+        el.focus();
+        el.value = '标题内容';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        return 'filled';
+      }
+    }
+    return 'not found';
+  });
+  return result;
+}""")
+```
+
+#### 14.5 填写作品简介
+
+**🔴 作品简介区域在描述下方，需要先滚动定位：**
+
+```
+browser_run_code_unsafe("""async (page) => {
+  // 简介区域在 y=217 附近
+  await page.mouse.click(690, 217);
+  await page.waitForTimeout(500);
+  await page.keyboard.type('简介内容');
+  return 'intro typed';
+}""")
+```
+
+#### 14.6 上传封面（横封面4:3 + 竖封面3:4）
+
+**🔴 抖音封面上传需要两步：先上传横封面，再上传竖封面。封面编辑器使用 canvas 组件：**
+
+```
+# 步骤1：点击横封面区域打开封面编辑器
+browser_run_code_unsafe("""async (page) => {
+  // 滚动到封面区域
+  await page.evaluate(() => window.scrollBy(0, 300));
+  // 点击横封面4:3区域
+  await page.mouse.click(421, 562);  // 横封面位置
+  await page.waitForTimeout(1000);
+  return 'clicked 横封面';
+}""")
+
+# 步骤2：点击「上传封面」（需要 force: true，因为 SVG 元素拦截点击）
+browser_run_code_unsafe("""async (page) => {
+  const uploadBtn = page.locator('text=上传封面');
+  await uploadBtn.first().click({ force: true });
+  await page.waitForTimeout(2000);
+  return 'clicked';
+}""")
+
+# 步骤3：上传横封面文件
+browser_file_upload("news-pipeline/YYYY-MM-DD/cover-horizontal.png")
+
+# 步骤4：点击「完成」确认横封面
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '完成' && el.offsetParent !== null) {
+        const rect = el.getBoundingClientRect();
+        if (rect.y > 630 && rect.y < 680) {
+          el.click();
+          return;
+        }
+      }
+    }
+  });
+  return 'confirmed';
+}""")
+
+# 步骤5：点击「设置竖封面」按钮
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '设置竖封面' && el.offsetParent !== null) {
+        const rect = el.getBoundingClientRect();
+        if (rect.y > 560 && rect.y < 600) {
+          el.click();
+          return;
+        }
+      }
+    }
+  });
+  return 'clicked 设置竖封面';
+}""")
+
+# 步骤6：上传竖封面文件
+browser_run_code_unsafe("""async (page) => {
+  const uploadBtn = page.locator('text=上传封面');
+  await uploadBtn.first().click({ force: true });
+  await page.waitForTimeout(2000);
+  return 'clicked';
+}""")
+
+browser_file_upload("news-pipeline/YYYY-MM-DD/cover-vertical.png")
+
+# 步骤7：点击「完成」确认竖封面
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '完成' && el.offsetParent !== null) {
+        const rect = el.getBoundingClientRect();
+        if (rect.y > 630 && rect.y < 680) {
+          el.click();
+          return;
+        }
+      }
+    }
+  });
+  return 'confirmed';
+}""")
+```
+
+#### 14.7 添加合集「今日羊报AI」
+
+**🔴 抖音合集选择器使用 listbox 组件，可以用 ref 精确点击：**
+
+```
+# 滚动到合集区域
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => window.scrollBy(0, 300));
+  return 'scrolled';
+}""")
+
+# 点击「请选择合集」打开下拉框
+browser_run_code_unsafe("""async (page) => {
+  const elements = document.querySelectorAll('*');
+  for (const el of elements) {
+    if (el.textContent.trim() === '请选择合集' && el.offsetParent !== null) {
+      el.click();
+      return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
+
+# 用 snapshot 找到合集选项的 ref
+browser_snapshot(depth=5)
+# 找到 option "「今日羊报AI」 共1个作品" 的 ref（如 e1232）
+browser_click(target={ref编号})
+```
+
+#### 14.8 设置自主声明
+
+```
+# 点击「请选择自主声明」
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '请选择自主声明' && el.offsetParent !== null) {
+        el.click();
+        return;
+      }
+    }
+  });
+  return 'clicked';
+}""")
+
+# 选择「内容为个人观点或见解」
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => {
+    const elements = document.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.textContent.trim() === '内容为个人观点或见解' && el.offsetParent !== null) {
+        el.click();
+        return;
+      }
+    }
+  });
+  return 'selected';
+}""")
+
+# 点击「确定」
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => {
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      if (btn.textContent.trim() === '确定' && btn.offsetParent !== null) {
+        btn.click();
+        return;
+      }
+    }
+  });
+  return 'confirmed';
+}""")
+```
+
+#### 14.9 添加标签
+
+```
+# 点击「#添加话题」
+browser_run_code_unsafe("""async (page) => {
+  const elements = document.querySelectorAll('*');
+  for (const el of elements) {
+    if (el.textContent.trim() === '#添加话题' && el.offsetParent !== null) {
+      el.click();
+      return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
+
+# 输入标签并按 Enter
+browser_run_code_unsafe("""async (page) => {
+  await page.keyboard.type('今日羊报AI');
+  await page.keyboard.press('Enter');
+  return 'tag added';
+}""")
+```
+
+#### 14.10 发布视频
+
+**🔴 发布需要短信验证码，必须用户手动输入：**
+
+```
+# 点击「发布」按钮
+browser_run_code_unsafe("""async (page) => {
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const buttons = document.querySelectorAll('button');
+  for (const btn of buttons) {
+    if (btn.textContent.trim() === '发布' && btn.offsetParent !== null) {
+      btn.click();
+      return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
+
+# 等待短信验证码弹窗出现
+browser_wait_for(time=3)
+
+# 提示用户输入验证码
+# 用户输入验证码后点击「验证」
+```
+
+#### 抖音上传组件操作总结（v1.8.0 实测）
+
+| 组件 | 类型 | 操作方式 | 可靠性 |
+|------|------|----------|--------|
+| 视频上传 | file chooser | `text=上传视频` → `file_upload` | ✅ 高 |
+| 提示弹窗 | 按钮 | `getByRole('button', { name: '我知道了' })` | ✅ 高 |
+| 作品描述 | 标准 input | JS 设置 `value` + dispatch `input` | ✅ 高 |
+| 作品简介 | 文本区域 | 坐标点击 + `keyboard.type` | ✅ 高 |
+| 横封面4:3 | **canvas 组件** | 坐标点击 → force click 上传封面 → file_upload → 完成 | ⚠️ 需 force |
+| 竖封面3:4 | **canvas 组件** | 设置竖封面 → force click 上传封面 → file_upload → 完成 | ⚠️ 需 force |
+| 合集 | listbox | 点击下拉框 → snapshot 找 ref → 精确点击 | ✅ 高 |
+| 自主声明 | 弹窗 | 点击打开 → 选择选项 → 确定 | ✅ 高 |
+| 标签 | 输入框 | 点击 `#添加话题` → `keyboard.type` + Enter | ✅ 高 |
+| 发布 | 按钮 | 点击「发布」→ 短信验证码（需用户手动） | ⚠️ 需用户 |
+
+**关键经验**：
+1. **上传视频后必须关闭「视频预览功能」弹窗**，否则后续操作被阻挡
+2. **封面上传需要 `force: true`**，因为 SVG 元素会拦截点击事件
+3. **合集选择器使用 listbox 组件**，可以用 `snapshot` 找到 ref 精确点击
+4. **发布需要短信验证码**，这是安全验证，必须用户手动输入
+5. **作品描述是标准 input**，但 placeholder 是「填写作品标题，为作品获得更多流量」
+6. **作品简介是文本区域**，需要用坐标点击 + `keyboard.type` 输入
+7. **自主声明弹窗**中选择「内容为个人观点或见解」，然后点确定
 
 ## 注意事项
 
