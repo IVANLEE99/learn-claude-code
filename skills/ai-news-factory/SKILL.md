@@ -1007,67 +1007,61 @@ browser_evaluate("""() => {
 }""")
 ```
 
-#### 12.9 设置赞赏
+#### 12.9 设置赞赏（已验证 v1.9.1）
+
+**🔴 弹窗打开后「赞赏作者」已选中，账户已填入，「我已阅读并同意」已勾选，直接点确定即可。**
 
 ```
+# 步骤1：点击「赞赏」区域打开弹窗
 browser_run_code_unsafe("""async (page) => {
-  // 1. 点击「赞赏」区域打开弹窗
   await page.evaluate(() => {
     const elements = document.querySelectorAll('*');
     for (const el of elements) {
       if (el.textContent.trim() === '赞赏' && el.offsetParent !== null) {
         const rect = el.getBoundingClientRect();
-        if (rect.y > 300 && rect.y < 400) {
+        if (rect.y > 300 && rect.y < 500 && rect.x > 500) {
           el.click();
           return;
         }
       }
     }
   });
-  await page.waitForTimeout(1000);
-  
-  // 2. 点击「不开启」
-  await page.evaluate(() => {
-    const elements = document.querySelectorAll('*');
-    for (const el of elements) {
-      if (el.textContent.trim() === '不开启' && el.offsetParent !== null) {
-        el.click();
-        return;
-      }
+  return 'clicked';
+}""")
+
+# 步骤2：等待弹窗出现
+browser_wait_for(time=1)
+
+# 步骤3：直接点击「确定」（弹窗已默认配置好）
+browser_evaluate("""() => {
+  const buttons = document.querySelectorAll('button, a');
+  for (const btn of buttons) {
+    if (btn.textContent.trim() === '确定' && btn.offsetParent !== null) {
+      btn.click();
+      return 'clicked';
     }
-  });
-  await page.waitForTimeout(500);
-  
-  // 3. 勾选「我已阅读并同意」
-  await page.evaluate(() => {
-    const elements = document.querySelectorAll('*');
-    for (const el of elements) {
-      if (el.textContent.trim().includes('我已阅读并同意') && el.offsetParent !== null) {
-        const parent = el.closest('label, div');
-        if (parent) {
-          const checkbox = parent.querySelector('input[type="checkbox"], [role="checkbox"]');
-          if (checkbox) checkbox.click();
-        }
-        return;
-      }
+  }
+  return 'not found';
+}""")
+
+# 步骤4：保存草稿
+browser_evaluate("""() => {
+  const buttons = document.querySelectorAll('button');
+  for (const btn of buttons) {
+    if (btn.textContent.trim() === '保存为草稿' && btn.offsetParent !== null) {
+      btn.click();
+      return 'clicked';
     }
-  });
-  await page.waitForTimeout(500);
-  
-  // 4. 点击「确定」
-  await page.evaluate(() => {
-    const buttons = document.querySelectorAll('button');
-    for (const btn of buttons) {
-      if (btn.textContent.trim() === '确定' && btn.offsetParent !== null) {
-        btn.click();
-        return;
-      }
-    }
-  });
-  await page.waitForTimeout(2000);
-  return 'appreciation set';
+  }
+  return 'not found';
 }""")
 ```
+
+**关键经验（v1.9.1 验证）：**
+- 弹窗打开后「赞赏作者」已默认选中
+- 账户「Youngs羊示」已自动填入
+- 「我已阅读并同意」checkbox 已默认勾选
+- 直接点击「确定」即可，无需手动操作其他选项
 
 #### 12.10 选择合集
 
