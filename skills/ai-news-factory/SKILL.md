@@ -945,33 +945,60 @@ browser_click(target={保存为草稿按钮ref})
 4. **弹窗中点击图片后会出现勾选标记**，然后才能点「下一步」
 5. **裁剪弹窗点击「确认」**即可，不需要调整裁剪区域
 
-#### 12.8 设置原创声明
+#### 12.8 设置原创声明（已验证 v1.9.1）
+
+**🔴 弹窗打开后「文字原创」和「我已阅读并同意」已默认选中，直接点确定即可。**
 
 ```
+# 步骤1：点击「原创」区域打开弹窗
 browser_run_code_unsafe("""async (page) => {
-  // 1. 点击「原创」区域打开弹窗
   await page.evaluate(() => {
     const elements = document.querySelectorAll('*');
     for (const el of elements) {
       if (el.textContent.trim() === '原创' && el.offsetParent !== null) {
         const rect = el.getBoundingClientRect();
-        if (rect.y > 150 && rect.y < 250) {
+        if (rect.y > 150 && rect.y < 400 && rect.x > 500) {
           el.click();
           return;
         }
       }
     }
   });
-  await page.waitForTimeout(1000);
-  
-  // 2. 弹窗已自动选中「文字原创」+ 勾选「我已阅读并同意」
-  // 3. 点击「确定」
-  await page.evaluate(() => {
-    const buttons = document.querySelectorAll('button');
-    for (const btn of buttons) {
-      if (btn.textContent.trim() === '确定' && btn.offsetParent !== null) {
-        btn.click();
-        return;
+  return 'clicked';
+}""")
+
+# 步骤2：等待弹窗出现
+browser_wait_for(time=1)
+
+# 步骤3：直接点击「确定」（弹窗已默认选中文字原创+同意协议）
+browser_evaluate("""() => {
+  const buttons = document.querySelectorAll('button, a');
+  for (const btn of buttons) {
+    if (btn.textContent.trim() === '确定' && btn.offsetParent !== null) {
+      btn.click();
+      return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
+
+# 步骤4：保存草稿
+browser_evaluate("""() => {
+  const buttons = document.querySelectorAll('button');
+  for (const btn of buttons) {
+    if (btn.textContent.trim() === '保存为草稿' && btn.offsetParent !== null) {
+      btn.click();
+      return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
+```
+
+**关键经验（v1.9.1 验证）：**
+- 弹窗打开后「文字原创」已默认选中
+- 「我已阅读并同意」checkbox 已默认勾选
+- 直接点击「确定」即可，无需手动操作其他选项
       }
     }
   });
