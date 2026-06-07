@@ -51,6 +51,53 @@ version: 1.9.1
 - "AI日报", "新闻工厂", "news factory"
 - "日报视频", "生成日报视频", "AI news video"
 - "把日报做成视频", "日报转视频"
+- "AI周报", "羊报AI周刊", "weekly report", "周报视频"
+
+## 周报模式
+
+**当触发词包含"周报"或"weekly"时，进入周报模式：**
+
+### 周报与日报的区别
+
+| 项目 | 日报 | 周报 |
+|------|------|------|
+| 数据源 | 单日日报 | 7天日报汇总 |
+| 输出目录 | `news-pipeline/YYYY-MM-DD/` | `news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/` |
+| 封面提示词 | 单日事件 | 本周多事件拼贴 |
+| 视频脚本 | 3-5个当日事件 | 5-6个本周核心事件 |
+| 过滤规则 | 无 | **过滤公益站/中转站/倒卖相关内容** |
+| 标题格式 | `【今日羊报AI】...` | `【羊报AI周刊】...` |
+
+### 周报生成流程
+
+1. **读取本周日报**：读取 `data/reports/` 目录下最近7天的日报文件
+2. **提取关键事件**：每天选出1-2个最重要事件，过滤公益站相关内容
+3. **生成周报 Markdown**：输出到 `news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD.md`
+4. **生成周报封面**：使用周报专用封面提示词（多事件拼贴风格）
+5. **生成视频脚本**：5-6个本周核心事件，总时长90-120秒
+6. **后续流程**：与日报相同（分镜→图片→TTS→字幕→视频→上传）
+
+### 周报封面提示词模板
+
+```
+A professional Chinese AI news studio weekly cover image. A male news anchor in a dark navy suit sits at a modern curved news desk. Behind him are multiple large display screens showing: {本周核心事件相关视觉元素}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI周刊" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date range "{YYYY-MM-DD} ~ {YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, 16:9 aspect ratio.
+```
+
+### 周报过滤规则
+
+**以下内容必须过滤掉：**
+- 公益站相关（N1nEAPI、RawChat、PrismAI、Alpha、薄荷等）
+- 中转站价格变动
+- 倒卖/交易相关内容
+- 兑换码/邀请码分享
+
+**保留的内容：**
+- 模型发布与更新
+- 公司动态（IPO、融资、收购）
+- 重大安全事件
+- 开源模型发布
+- 行业政策与监管
+- 重大技术突破
 
 ## 前置依赖
 
@@ -477,9 +524,12 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
 ```
 
 **标题规则**:
-- B站：`【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD`
-- 抖音/视频号：`{核心标题}｜今日羊报AI YYYY-MM-DD`（较短）
-- 公众号：`{核心标题}｜今日羊报AI YYYY-MM-DD`
+- 日报 B站：`【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD`
+- 日报 抖音/视频号：`{核心标题}｜今日羊报AI YYYY-MM-DD`（较短）
+- 日报 公众号：`{核心标题}｜今日羊报AI YYYY-MM-DD`
+- **周报 B站**：`【羊报AI周刊】{核心标题}｜本周{N}大AI新闻一次看完 | MM-DD~MM-DD`
+- **周报 抖音/视频号**：`{核心标题}｜羊报AI周刊 MM-DD~MM-DD`
+- **周报 公众号**：`{核心标题}｜羊报AI周刊 MM-DD~MM-DD`
 
 #### 10.3 生成公众号图文
 

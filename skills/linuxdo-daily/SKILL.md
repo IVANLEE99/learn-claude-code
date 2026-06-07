@@ -1,7 +1,7 @@
 ---
 name: linuxdo-daily
-description: linux.do AI日报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、linuxdo日报、AI日报、技术日报、抓取linuxdo
-version: 2.2.0
+description: linux.do AI日报/周报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、linuxdo日报、AI日报、AI周报、技术日报、weekly
+version: 3.0.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
@@ -17,10 +17,17 @@ version: 2.2.0
 
 ## 触发条件
 
+### 日报模式
 当用户说以下关键词时激活：
 - "日报"、"AI日报"、"技术日报"
 - "linuxdo日报"、"抓取linuxdo"
 - "今日AI新闻"、"AI资讯"
+
+### 周报模式
+当用户说以下关键词时激活：
+- "周报"、"AI周报"、"技术周报"
+- "weekly"、"出周报"
+- "本周AI新闻"、"一周总结"
 
 ## 目录结构
 
@@ -99,6 +106,165 @@ data/
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 周报模式（Weekly Report）
+
+### 周报工作流
+
+周报**不需要重新抓取**，直接读取 `data/daily/` 下最近7天的数据进行聚合。
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    linuxdo-weekly 工作流                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────────────────────┐                               │
+│  │  Agent 1: Data Loader        │                               │
+│  │  - 读取最近7天 daily/*.json   │                               │
+│  │  - 跨天去重（同帖多天出现）   │                               │
+│  │  - 合并为周数据集             │                               │
+│  │  → 输出: 合并后的周帖子列表   │                               │
+│  └──────────────┬───────────────┘                               │
+│                 ▼                                                │
+│  ┌──────────────────────────────┐                               │
+│  │  Agent 2: Topic Merger       │                               │
+│  │  - 按主题聚类分组             │                               │
+│  │  - 识别一周内的主题演变       │                               │
+│  │  → 输出: 周主题分组           │                               │
+│  └──────────────┬───────────────┘                               │
+│                 ▼                                                │
+│  ┌──────────────────────────────┐                               │
+│  │  Agent 3: Trend Analyzer     │                               │
+│  │  - 分析一周趋势变化           │                               │
+│  │  - 识别新兴话题和衰减话题     │                               │
+│  │  - 生成周趋势总结（5-8条）    │                               │
+│  │  → 输出: 本周技术趋势         │                               │
+│  └──────────────┬───────────────┘                               │
+│                 ▼                                                │
+│  ┌──────────────────────────────┐                               │
+│  │  Agent 4: Weekly Writer      │                               │
+│  │  - 生成周报 Markdown          │                               │
+│  │  → 输出: data/weekly/{week}.md│                               │
+│  └──────────────┬───────────────┘                               │
+│                 ▼                                                │
+│  ┌──────────────────────────────┐                               │
+│  │  Agent 5: Press Writer       │                               │
+│  │  - 生成周报新闻稿             │                               │
+│  │  → 输出: data/weekly/{week}_press.md│                        │
+│  └──────────────┬───────────────┘                               │
+│                 ▼                                                │
+│  ┌──────────────────────────────┐                               │
+│  │  Agent 6: PDF Builder        │                               │
+│  │  - Typst 编译 → PDF           │                               │
+│  │  → 输出: data/weekly/{week}.pdf│                              │
+│  └──────────────┘                                               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 周报 Agent 1: Data Loader（数据加载器）
+
+**职责**：读取最近7天的日报数据，跨天去重，合并为周数据集。
+
+#### 1.1 确定日期范围
+
+```python
+# 计算最近7天的日期
+from datetime import datetime, timedelta
+end_date = datetime.now()
+start_date = end_date - timedelta(days=7)
+dates = [(start_date + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(8)]
+```
+
+#### 1.2 读取并合并数据
+
+```python
+import json, os
+
+all_posts = {}
+for date in dates:
+    path = f'data/daily/{date}.json'
+    if os.path.exists(path):
+        with open(path) as f:
+            data = json.load(f)
+        for p in data['posts']:
+            pid = p['id']
+            if pid not in all_posts:
+                all_posts[pid] = {**p, 'first_seen': date}
+            else:
+                # 更新浏览量/回复数（取最大值）
+                all_posts[pid]['views'] = max(all_posts[pid].get('views', '0'), p.get('views', '0'))
+                all_posts[pid]['replies'] = max(all_posts[pid].get('replies', '0'), p.get('replies', '0'))
+
+posts = sorted(all_posts.values(), key=lambda x: int(x['id']), reverse=True)
+```
+
+#### 1.3 去除话题延续
+
+对合并后的帖子进行话题延续过滤（同日报逻辑）：
+- 识别连续多天出现的同一话题
+- 保留话题的最新进展帖，标记早期帖子为"延续"
+
+#### 1.4 输出
+
+保存到 `data/weekly/{week}.json`，格式同 daily。
+
+### 周报 Agent 4: Weekly Writer（周报撰写器）
+
+**职责**：生成一周技术趋势周报。
+
+#### 4.1 周报结构
+
+```markdown
+# linux.do 人工智能 技术周报
+**{start_date} ~ {end_date}** | 本周新帖 {N} 篇 | 数据来源：linux.do #人工智能 + 前沿快讯
+
+## 本周五大事件
+（5 条核心事件，每条一句话概括 + 关键数据）
+
+## 每日速览
+
+### {date_1}（周{weekday}）
+- **事件1** — 摘要（浏览 X / 回复 Y）
+- **事件2** — 摘要
+
+### {date_2}（周{weekday}）
+...
+
+## 本周趋势分析
+（5-8 条趋势，分析一周内的变化）
+
+### 趋势1: {标题}
+- 涉及天数: {days}
+- 相关帖子: {top_post_ids}
+- 分析: {description}
+
+## 本周数据汇总
+| 指标 | 数值 |
+|------|------|
+| 本周总帖数 | ... |
+| 日均帖数 | ... |
+| 最热帖子 | ... |
+| 最多回复 | ... |
+| 新兴话题数 | ... |
+| 延续话题数 | ... |
+
+## 下周展望
+（基于本周趋势，预测下周可能的热点）
+```
+
+#### 4.2 输出
+
+保存到 `data/weekly/{week}.md`，其中 `{week}` 格式为 `{start_date}~{end_date}`。
+
+### 周报命名规则
+
+- 周报文件: `data/weekly/2026-06-01~2026-06-07.md`
+- 新闻稿: `data/weekly/2026-06-01~2026-06-07_press.md`
+- PDF: `data/weekly/2026-06-01~2026-06-07.pdf`
+- Typst: `data/weekly/2026-06-01~2026-06-07.typ`
 
 ---
 
