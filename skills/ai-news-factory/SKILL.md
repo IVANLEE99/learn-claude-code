@@ -1063,46 +1063,62 @@ browser_evaluate("""() => {
 - 「我已阅读并同意」checkbox 已默认勾选
 - 直接点击「确定」即可，无需手动操作其他选项
 
-#### 12.10 选择合集
+#### 12.10 选择合集（已验证 v1.9.1）
 
-**🔴 合集选择器是自定义 Vue 组件，需要用坐标点击：**
+**🔴 合集选择器是自定义 Vue 组件，必须用 Playwright locator 精确匹配：**
 
 ```
+# 步骤1：点击「合集」→「未添加」打开弹窗
 browser_run_code_unsafe("""async (page) => {
-  // 1. 点击「合集 未添加」行
-  await page.mouse.click(730, 355);  // 未添加文字位置
-  await page.waitForTimeout(1000);
-  
-  // 2. 点击下拉框打开选项
-  await page.mouse.click(690, 375);
-  await page.waitForTimeout(1000);
-  
-  // 3. 选择合集
   await page.evaluate(() => {
     const elements = document.querySelectorAll('*');
     for (const el of elements) {
-      if (el.textContent.trim() === '「今日羊报 AI」' && el.offsetParent !== null) {
-        el.click();
-        return;
+      if (el.textContent.trim() === '未添加' && el.offsetParent !== null) {
+        const rect = el.getBoundingClientRect();
+        if (rect.y > 400 && rect.y < 600 && rect.x > 600) {
+          el.click();
+          return;
+        }
       }
     }
   });
+  await page.waitForTimeout(1500);
+  return 'dialog opened';
+}""")
+
+# 步骤2：点击输入框 focus
+browser_run_code_unsafe("""async (page) => {
+  const input = page.getByRole('textbox', { name: '请选择合集' });
+  await input.click();
   await page.waitForTimeout(500);
-  
-  // 4. 点击「确认」
-  await page.evaluate(() => {
-    const buttons = document.querySelectorAll('button');
-    for (const btn of buttons) {
-      if (btn.textContent.trim() === '确认' && btn.offsetParent !== null) {
-        btn.click();
-        return;
-      }
-    }
-  });
-  await page.waitForTimeout(2000);
-  return 'collection selected';
+  await input.fill('今日羊报');
+  await page.waitForTimeout(1000);
+  return 'typed';
+}""")
+
+# 步骤3：hover 并点击选项（必须用 exact: true 精确匹配！）
+browser_run_code_unsafe("""async (page) => {
+  const option = page.getByText('「今日羊报 AI」', { exact: true });
+  await option.hover();
+  await page.waitForTimeout(500);
+  await option.click();
+  await page.waitForTimeout(500);
+  return 'clicked option';
+}""")
+
+# 步骤4：点击「确认」
+browser_run_code_unsafe("""async (page) => {
+  const confirmBtn = page.getByRole('button', { name: '确认' });
+  await confirmBtn.click();
+  await page.waitForTimeout(1000);
+  return 'confirmed';
 }""")
 ```
+
+**关键经验（v1.9.1 验证）：**
+1. **必须用 `page.getByText('「今日羊报 AI」', { exact: true })` 精确匹配**，否则会匹配到正文中的同名文本
+2. **必须先 hover 再 click**，直接 click 可能不生效
+3. **点击「确认」用 `page.getByRole('button', { name: '确认' })`**，不要用 JS evaluate
 
 #### 12.11 保存草稿
 
@@ -1678,15 +1694,21 @@ const checkbox = parent.querySelector('input[type="checkbox"], [role="checkbox"]
 if (checkbox) checkbox.click();
 ```
 
-### 🔴 公众号合集选择器坐标（v1.7.0 新增）
-**问题**：合集选择器是自定义 Vue 组件，下拉框坐标方式偶尔有效。
+### 🔴 公众号合集选择器正确流程（v1.9.1 更新）
+**问题**：合集选择器是自定义 Vue 组件，JS evaluate 和坐标点击都不可靠。
 
-**解决**：
-1. 点击「合集 未添加」行（约 x=730, y=355）
-2. 点击下拉框（约 x=690, y=375）
-3. 用 JS evaluate 找到并点击「「今日羊报 AI」」选项
-4. 点击「确认」
-5. 如果失败，建议手动选择
+**已验证的正确流程**：
+1. 点击「合集」→「未添加」打开弹窗
+2. 点击「请选择合集」输入框 focus
+3. 输入「今日羊报」搜索
+4. 用 `page.getByText('「今日羊报 AI」', { exact: true })` 精确匹配选项
+5. **先 hover 再 click**（必须！）
+6. 用 `page.getByRole('button', { name: '确认' })` 点击确认
+
+**关键点**：
+- 必须用 `exact: true` 精确匹配，否则会匹配到正文中的同名文本
+- 必须先 hover 再 click，直接 click 不生效
+- 不要用 JS evaluate，用 Playwright locator 更可靠
 
 ### 🟡 公众号原创声明弹窗自动填充（v1.7.0 新增）
 **问题**：原创声明弹窗打开后，「文字原创」已默认选中，「我已阅读并同意」已默认勾选。
