@@ -437,7 +437,7 @@ cd video-project && npx remotion render AINewsVideo "out/【今日羊报AI】{�
 
 **封面模板 Prompt**：
 ```
-A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, {ratio} aspect ratio.
+A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, {ratio} aspect ratio.
 ```
 
 输出到 `news-pipeline/YYYY-MM-DD/` 目录
@@ -858,43 +858,92 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png")
 # 重复以上步骤插入多张图片
 ```
 
-#### 12.7 上传封面
+#### 12.7 上传封面（已验证流程 v1.9.1）
 
-**🔴 封面上传有两种方式，推荐「从图片库选择」：**
+**🔴 推荐流程：先上传图片到正文，再通过「从正文选择」设置封面。**
 
 ```
-# 方式1：从图片库选择（推荐）
-# 1. 滚动到封面区域
-browser_run_code_unsafe("""async (page) => {
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  return 'scrolled';
-}""")
+# 步骤1：上传封面图到正文（通过工具栏「图片」→「本地上传」）
+# 点击正文区域获取 focus
+browser_click(target={正文段落ref})
 
-# 2. 点击封面区域的「+」号
+# 点击工具栏「图片」按钮（动态查找坐标）
 browser_run_code_unsafe("""async (page) => {
-  await page.mouse.click(696, 570);  // +号按钮位置
-  await page.waitForTimeout(1000);
-  // 点击「从图片库选择」
   await page.evaluate(() => {
-    const elements = document.querySelectorAll('*');
-    for (const el of elements) {
-      if (el.textContent.trim() === '从图片库选择' && el.offsetParent !== null) {
-        el.click();
-        return;
+    const items = document.querySelectorAll('li, a, span');
+    for (const item of items) {
+      if (item.textContent.trim() === '图片' && item.offsetParent !== null) {
+        const rect = item.getBoundingClientRect();
+        if (rect.y < 50 && rect.y > 0) { item.click(); return; }
       }
     }
   });
-  await page.waitForTimeout(2000);
-  return 'opened image library';
+  await page.waitForTimeout(1500);
+  // 点击「本地上传」
+  await page.evaluate(() => {
+    const items = document.querySelectorAll('*');
+    for (const item of items) {
+      if (item.textContent.trim() === '本地上传' && item.offsetParent !== null) {
+        item.click(); return;
+      }
+    }
+  });
+  return 'clicked';
 }""")
 
-# 3. 选择图片并确认
+# 等待 file chooser 出现后上传
+browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-21-9.png")
 
-# 方式2：从正文选择（需要正文中有图片）
-# 如果「从正文选择」选项可用，可以选择正文中的图片作为封面
+# 步骤2：Hover 封面区域，显示选项菜单
+browser_hover(target={拖拽或选择封面ref})
+
+# 步骤3：点击「从正文选择」（必须用 class 选择器）
+browser_evaluate("""() => {
+  const btn = document.querySelector('.js_selectCoverFromContent');
+  if (btn) { btn.click(); return 'clicked'; }
+  return 'not found';
+}""")
+
+# 步骤4：在弹窗中点击图片选择（出现勾选标记）
+browser_run_code_unsafe("""async (page) => {
+  await page.mouse.click(313, 340);  // 图片位置
+  await page.waitForTimeout(1000);
+  return 'selected';
+}""")
+
+# 步骤5：点击「下一步」
+browser_evaluate("""() => {
+  const buttons = document.querySelectorAll('button, a');
+  for (const btn of buttons) {
+    if (btn.textContent.trim() === '下一步' && btn.offsetParent !== null) {
+      btn.click(); return 'clicked';
+    }
+  }
+  return 'not found';
+}""")
+
+# 步骤6：确认裁剪
+browser_evaluate("""() => {
+  const buttons = document.querySelectorAll('button, a');
+  for (const btn of buttons) {
+    const text = btn.textContent.trim();
+    if ((text === '确定' || text === '确认') && btn.offsetParent !== null) {
+      btn.click(); return 'clicked: ' + text;
+    }
+  }
+  return 'not found';
+}""")
+
+# 步骤7：保存草稿
+browser_click(target={保存为草稿按钮ref})
 ```
 
-**🔴 「从正文选择」选项只有在正文中有已保存的图片时才会出现。如果通过 innerHTML 注入图片，该选项可能不可用。**
+**🔴 关键经验（v1.9.1 新增）：**
+1. **必须先通过工具栏「图片」→「本地上传」将封面图插入正文**，否则「从正文选择」不可用
+2. **Hover 封面区域才能显示选项菜单**，直接 click 不会触发
+3. **「从正文选择」必须用 `.js_selectCoverFromContent` class 选择器**，普通文本匹配找不到
+4. **弹窗中点击图片后会出现勾选标记**，然后才能点「下一步」
+5. **裁剪弹窗点击「确认」**即可，不需要调整裁剪区域
 
 #### 12.8 设置原创声明
 
@@ -1065,7 +1114,7 @@ browser_run_code_unsafe("""async (page) => {
 2. **标题和正文都是 ProseMirror**，通过 `document.querySelectorAll('.ProseMirror')` 获取，第一个是标题，第二个是正文
 3. **视频号插入是最可靠的视频方式**，通过工具栏「视频号」按钮 → 选择账号 → 选择视频 → 插入
 4. **图片通过工具栏「图片」→「本地上传」插入**，会插入到正文光标位置
-5. **「从正文选择」封面选项需要正文中有已保存的图片**，innerHTML 注入的图片可能不被识别
+5. **「从正文选择」封面**：必须先通过工具栏上传图片到正文，然后用 `.js_selectCoverFromContent` class 选择器点击
 6. **合集选择器是自定义 Vue 组件**，需要用坐标点击（约 x=730, y=355 点击「未添加」，x=690, y=375 打开下拉框）
 7. **赞赏弹窗中「我已阅读并同意」需要手动勾选**，checkbox 在 `label > input[type="checkbox"]` 结构中
 8. **原创声明弹窗会自动选中「文字原创」+ 勾选同意**，直接点确定即可
@@ -1582,15 +1631,21 @@ news-pipeline/
 
 **解决**：创建文章后，切换到最新标签页（index 最大的）。关闭其他重复标签页。
 
-### 🔴 公众号「从正文选择」封面不可用（v1.7.0 新增）
-**问题**：通过 innerHTML 注入到正文的图片不会被封面选择器识别，「从正文选择」选项不出现。
+### 🔴 公众号封面上传正确流程（v1.9.1 更新）
+**问题**：之前的方法（坐标点击、innerHTML 注入）都不可靠。
 
-**原因**：公众号封面选择器只识别通过正常编辑器操作插入的图片，innerHTML 注入的图片不在其检测范围内。
+**已验证的正确流程**：
+1. 通过工具栏「图片」→「本地上传」将封面图插入正文（触发 file chooser）
+2. Hover 封面区域「拖拽或选择封面」→ 显示选项菜单
+3. 用 `.js_selectCoverFromContent` class 选择器点击「从正文选择」
+4. 在弹窗中点击图片（出现勾选标记）→ 点击「下一步」
+5. 确认裁剪 → 点击「确认」
+6. 保存草稿
 
-**解决**：
-1. 先通过「图片」→「本地上传」将封面图插入正文
-2. 使用「从图片库选择」方式选择封面
-3. 或者先保存草稿，再重新编辑时封面选择器可能会识别正文中的图片
+**关键点**：
+- 必须先通过工具栏上传图片到正文，不能用 innerHTML 注入
+- Hover 才能显示选项菜单，直接 click 不触发
+- 「从正文选择」必须用 class 选择器，文本匹配找不到
 
 ### 🔴 公众号赞赏弹窗 checkbox 结构（v1.7.0 新增）
 **问题**：「我已阅读并同意」checkbox 在 `label > div` 结构中，不是标准 `input[type="checkbox"]`。
