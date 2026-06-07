@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.9.0
+version: 1.9.1
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.9.0
+# AI News Factory — 日报短视频自动生成 v1.9.1
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → B站上传。
 
@@ -423,16 +423,24 @@ cd video-project && npx remotion render AINewsVideo "out/【今日羊报AI】{�
 
 ### Phase 10: 封面、发布信息与公众号图文
 
-#### 10.1 生成视频封面
+#### 10.1 生成多平台封面
 
-使用图片生成 API 生成封面（1536x1024，16:9）：
+使用图片生成 API 为各平台生成不同比例的封面：
+
+| 平台 | 比例 | 尺寸 | 输出文件 |
+|------|------|------|----------|
+| 通用/视频封面 | 16:9 | 1536x1024 | `cover.png` |
+| B站 | 4:3 | 1536x1152 | `bilibili-4-3.png` |
+| 公众号 | 21:9 | 1536x659 | `wechat-21-9.png` |
+| 抖音横版 | 4:3 | 1536x1152 | `douyin-horizontal-4-3.png` |
+| 抖音竖版 | 3:4 | 1152x1536 | `douyin-vertical-3-4.png` |
 
 **封面模板 Prompt**：
 ```
-A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, 16:9 aspect ratio.
+A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, {ratio} aspect ratio.
 ```
 
-输出到 `news-pipeline/YYYY-MM-DD/cover.png`
+输出到 `news-pipeline/YYYY-MM-DD/` 目录
 
 #### 10.2 生成多平台发布信息
 
@@ -2007,6 +2015,26 @@ browser_wait_for(time=3)
 5. **作品描述是标准 input**，但 placeholder 是「填写作品标题，为作品获得更多流量」
 6. **作品简介是文本区域**，需要用坐标点击 + `keyboard.type` 输入
 7. **自主声明弹窗**中选择「内容为个人观点或见解」，然后点确定
+
+### 🟡 B站封面上传不可靠（v1.9.1 新增）
+**问题**：B站隐藏 file input 的 accept 属性不包含图片类型（只有视频格式），且通过封面编辑弹窗上传的图片不一定被应用。
+
+**解决**：B站封面建议手动上传，或跳过封面使用系统默认第一帧。
+
+### 🟡 TTS 超时重试（v1.9.1 新增）
+**问题**：mimo-tts.sh 首次调用可能超时（exit code 28），但重试后成功。
+
+**解决**：TTS 调用失败后自动重试一次，不要立即报错。
+
+### 🟡 视频号需要独立登录（v1.9.1 新增）
+**问题**：视频号助手与公众号使用不同的登录会话，需要微信扫码登录，不能复用公众号的 cookie。
+
+**解决**：视频号上传前必须先扫码登录，建议在 Phase 13 开始时提示用户。
+
+### 🟡 抖音发布可能不需要验证码（v1.9.1 新增）
+**问题**：抖音发布在某些情况下可以直接发布，不需要短信验证码（与账号信任度、设备指纹有关）。
+
+**解决**：先尝试直接发布，如果弹出验证码再让用户手动输入。
 
 ## 注意事项
 
