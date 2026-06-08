@@ -1,7 +1,7 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.9.1
+version: 1.9.2
 ---
 
 # AI News Factory — 日报短视频自动生成 v1.9.1
@@ -1849,6 +1849,53 @@ const inputs = await page.$$('input[type="file"]');
 await inputs[1].setInputFiles('cover.png');  // 设置封面
 ```
 
+### 周报多平台上传流程（v1.9.2 新增）
+
+**周报上传流程与日报相同，但需要使用周报专用文件和合集：**
+
+#### 周报 B站上传
+1. 导航到 `https://member.bilibili.com/platform/upload/video/frame`
+2. 上传周报视频：`news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/video/【羊报AI周刊】*.mp4`
+3. 标题自动填充：`【羊报AI周刊】... | YYYY-MM-DD~YYYY-MM-DD`
+4. 上传封面：`news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/bilibili-4-3.png`
+5. 设置创作声明：个人观点，仅供参考
+6. 添加标签：羊报AI周刊, AI周报, OpenAI, Anthropic, DeepSeek
+7. 填写简介：本期热点...
+8. 选择合集：「羊报AI周刊」
+9. 点击「立即投稿」
+
+#### 周报公众号上传
+1. 打开公众号后台 → 点击「新的创作」→「文章」
+2. 切换到新标签页
+3. 填写标题：`OpenAI二验风暴、Anthropic IPO、DeepSeek 500亿融资｜羊报AI周刊 YYYY-MM-DD~YYYY-MM-DD`
+4. 填写作者：Youngs羊示
+5. 填写正文（ProseMirror innerHTML）
+6. 上传封面图到正文：
+   - 点击正文区域获取 focus
+   - 按回车创建新行
+   - 点击工具栏「图片」→「本地上传」
+   - 用 `input.setInputFiles()` 上传 `wechat-21-9.png`
+7. 设置封面：
+   - Hover「拖拽或选择封面」显示选项菜单
+   - 用 `.js_selectCoverFromContent` class 选择器点击「从正文选择」
+   - 在弹窗中点击图片（出现勾选标记）
+   - 点击「下一步」
+   - 点击「确认」确认裁剪
+8. 设置原创声明：点击「原创」→ 确定（已默认选中）
+9. 设置赞赏：点击「赞赏」→ 确定（已默认配置）
+10. 选择合集：「羊报AI周刊」
+11. 保存草稿
+
+#### 周报封面文件
+
+| 平台 | 文件 | 尺寸 |
+|------|------|------|
+| 通用/视频封面 | `weekly-cover.png` | 1536x1024 (16:9) |
+| B站 | `bilibili-4-3.png` | 1536x1152 (4:3) |
+| 公众号 | `wechat-21-9.png` | 1536x659 (21:9) |
+| 抖音横版 | `douyin-horizontal-4-3.png` | 1536x1152 (4:3) |
+| 抖音竖版 | `douyin-vertical-3-4.png` | 1152x1536 (3:4) |
+
 ### Phase 14: 抖音自动上传（Playwright MCP）
 
 **⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
@@ -2183,6 +2230,20 @@ browser_wait_for(time=3)
 **问题**：抖音发布在某些情况下可以直接发布，不需要短信验证码（与账号信任度、设备指纹有关）。
 
 **解决**：先尝试直接发布，如果弹出验证码再让用户手动输入。
+
+### 🟡 周报封面上传到正文（v1.9.2 新增）
+**问题**：周报封面上传到公众号正文时，file chooser 可能不触发。
+
+**解决**：使用 `input.setInputFiles()` 直接设置文件：
+```javascript
+const input = await page.$('input[type="file"][accept*="image"]');
+await input.setInputFiles('news-pipeline/weekly/.../wechat-21-9.png');
+```
+
+### 🟡 周报B站合集自动选择（v1.9.2 新增）
+**问题**：周报上传到B站时，合集「羊报AI周刊」可能不会自动选择。
+
+**解决**：合集选择器是自定义 Vue 组件，建议手动选择或跳过。如果需要自动化，使用 `page.getByText('「羊报AI周刊」', { exact: true })` 精确匹配。
 
 ## 注意事项
 
