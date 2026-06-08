@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.9.2
+version: 1.10.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.9.1
+# AI News Factory — 日报短视频自动生成 v1.10.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → B站上传。
 
@@ -13,6 +13,31 @@ version: 1.9.2
 ## ⚡ 权限预授权（必须在执行前完成）
 
 **在开始 Pipeline 之前，必须先获得用户的一次性预授权。执行过程中不再逐个询问权限。**
+
+### 🔴 重要：配置 Claude Code 自动授权
+
+**Pipeline 执行过程中会调用大量工具（Bash、Playwright、文件操作），如果每次都弹出权限确认会严重中断流程。**
+
+**建议用户在开始前配置自动授权：**
+
+```
+方法1：使用 --dangerously-skip-permissions 启动 Claude Code
+  claude --dangerously-skip-permissions
+
+方法2：在 Claude Code 设置中配置自动批准
+  输入 /permissions 添加规则：
+  - Bash(mimo-tts.sh*) → allow
+  - Bash(ffprobe*) → allow
+  - Bash(npx remotion*) → allow
+  - Bash(python3*) → allow
+  - Bash(curl*) → allow
+  - Bash(ls*) → allow
+  - Bash(cp*) → allow
+  - Bash(mkdir*) → allow
+  - Bash(cat*) → allow
+  - Bash(pkill*) → allow
+  - Bash(rm*) → allow
+```
 
 ### 预授权检查清单
 
@@ -32,16 +57,22 @@ version: 1.9.2
   ☐ 调用 mimo-tts.sh 生成配音（逐场景串行）
   ☐ 调用 ffprobe 获取音频时长
   ☐ 调用 npx remotion render 渲染视频
+  ☐ 调用 python3 执行图片生成脚本
+  ☐ 调用 curl 下载图片
 
 🌐 API 调用
   ☐ 图片生成 API（用户提供 URL + Key）
   ☐ TTS API（mimo-tts）
 
-🖥️ 浏览器操作（Phase 12 上传时）
-  ☐ Playwright MCP 打开B站上传页面
+🖥️ 浏览器操作（上传时）
+  ☐ Playwright MCP 打开B站/公众号/视频号/抖音上传页面
   ☐ 自动填写标题、简介、标签
   ☐ 自动上传视频和封面
-  ☐ 自动点击投稿
+  ☐ 自动点击投稿/保存草稿
+
+⚠️ 重要提示：
+  为避免执行过程中频繁弹出权限确认，
+  建议先配置自动授权（见上方说明）。
 
 请回复「确认」或「全部授权」开始执行。
 ```
@@ -2244,6 +2275,66 @@ await input.setInputFiles('news-pipeline/weekly/.../wechat-21-9.png');
 **问题**：周报上传到B站时，合集「羊报AI周刊」可能不会自动选择。
 
 **解决**：合集选择器是自定义 Vue 组件，建议手动选择或跳过。如果需要自动化，使用 `page.getByText('「羊报AI周刊」', { exact: true })` 精确匹配。
+
+### 🔴 视频号封面上传 file input 被分离（v1.10.0 新增）
+**问题**：视频号封面编辑弹窗中的 file input 是动态创建的，使用 `page.$('input[type="file"]')` 获取后，元素可能已被分离（detached），导致 `setInputFiles` 失败。
+
+**解决**：跳过视频号封面自动上传，建议手动设置封面后发布。
+
+### 🔴 视频号短标题字数限制（v1.10.0 新增）
+**问题**：视频号短标题限制 16 个中文字符，超出会报错「标题超过16字限制」。
+
+**解决**：短标题控制在 16 字以内，如「AI日报0608」、「Notion打脸Anthropic」（17字会超限）。
+
+### 🔴 公众号合集选择器简化流程（v1.10.0 更新）
+**问题**：之前的合集选择流程（hover + class 选择器）不稳定。
+
+**已验证的更简单流程**：
+1. 点击「合集」→「未添加」打开弹窗
+2. 在搜索框输入「今日羊报」
+3. 等待搜索结果出现
+4. 直接点击 `page.getByText('「今日羊报 AI」')` 选择
+5. 点击「确认」
+
+**关键点**：
+- 搜索框可以直接输入文字搜索，不需要先 hover
+- 搜索结果会自动出现，等待 1 秒即可
+- 不需要用 `exact: true`，直接 `getByText` 即可
+
+### 🔴 执行过程中权限确认中断流程（v1.10.0 新增）
+**问题**：Pipeline 执行过程中会调用大量工具（Bash、Playwright、文件操作），每次都会弹出权限确认，严重中断流程。用户需要反复点击「确认」。
+
+**解决**：
+1. **最佳方案**：使用 `claude --dangerously-skip-permissions` 启动 Claude Code
+2. **替代方案**：在 Claude Code 设置中配置自动批准规则（`/permissions`）
+3. **临时方案**：用户在预授权阶段明确表示「全部授权」，并在每次弹出确认时快速点击
+
+### 🟡 公众号图片上传到正文（v1.10.0 更新）
+**问题**：之前的方法（工具栏「图片」→「本地上传」）需要多步操作，且 file chooser 可能不触发。
+
+**已验证的更可靠流程**：
+1. 直接使用 `input.setInputFiles()` 上传图片到素材库
+2. 图片会自动插入到正文光标位置
+3. 然后通过「从正文选择」设置封面
+
+**关键代码**：
+```javascript
+const input = await page.$('input[type="file"][accept*="image"]');
+await input.setInputFiles('/path/to/image.png');
+```
+
+### 🟡 视频号短标题自动填充（v1.10.0 更新）
+**问题**：视频号短标题是 contenteditable div，之前用坐标点击 + 键盘输入的方式不稳定。
+
+**已验证的更可靠流程**：
+1. 点击短标题输入框获取 focus
+2. 使用 `browser_type` 直接输入（Playwright 会自动处理 contenteditable）
+3. 如果输入超长，会自动截断或报错
+
+**关键点**：
+- 不需要用 `browser_evaluate` + JS 修改
+- 直接用 `browser_type` 即可
+- 但必须控制在 16 字以内
 
 ## 注意事项
 
