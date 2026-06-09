@@ -1,12 +1,52 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、linuxdo日报、AI日报、AI周报、技术日报、weekly
-version: 3.0.0
+version: 4.0.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报。
+
+## ⚡ 权限预授权（必须最先执行）
+
+**开始抓取前，必须一次性授权所有 Playwright MCP 工具**，避免中途反复弹出授权窗口。
+
+### 预授权步骤
+
+1. **关闭旧浏览器实例**（如存在）：
+   ```bash
+   pkill -f "mcp-chrome" 2>/dev/null; sleep 2
+   ```
+
+2. **导航到目标页面触发浏览器启动**：
+   ```
+   browser_navigate → https://linux.do/tag/444-tag/444
+   ```
+
+3. **等待 Cloudflare 验证通过**（如有）：
+   ```
+   browser_wait_for → time: 8
+   ```
+
+4. **加载 cookies 保持登录态**（如有 cookies.json）：
+   ```
+   browser_run_code_unsafe → 读取 data/cookies.json 并加载
+   ```
+
+5. **此时所有 Playwright MCP 工具应已获得授权**，后续抓取不再需要逐次授权。
+
+### 权限检查清单
+
+以下工具在抓取过程中会用到，确保全部已授权：
+- `browser_navigate` — 页面导航
+- `browser_wait_for` — 等待加载
+- `browser_run_code_unsafe` — 执行 JS 代码（滚动、批量抓取）
+- `browser_evaluate` — 执行 JS 表达式（提取数据）
+- `browser_snapshot` — 页面快照（调试用）
+- `browser_take_screenshot` — 截图（调试用）
+
+---
 
 ## 数据源
 
@@ -41,6 +81,57 @@ data/
 ├── reports/{date}.typ         # Typst 源文件
 └── cookies.json               # 浏览器 cookies（需登录时用）
 ```
+
+## 过滤规则
+
+### 公益站过滤（日报模式必须执行）
+
+以下帖子在生成日报时**必须过滤掉**，不纳入统计和报告：
+
+**关键词过滤**（标题、标签、内容中出现以下任一即过滤）：
+- 公益站、公益推广、公益、公益站、公益站
+- LDC、ldc、cdk
+- 签到、白嫖、薅羊毛、薅秃
+- 充值额度、兑换码、免费额度
+- 号池、号商、共享号
+
+**意图过滤**（帖子主要内容为以下类型即过滤）：
+- 分享免费 API 额度/Key 的帖子
+- 公益站注册/使用教程
+- 公益站运维公告（关站、维护、升级等）
+- 薅羊毛攻略
+
+### 历史去重（日报模式必须执行）
+
+生成日报前，扫描所有历史日报 Markdown 文件，提取已报道的帖子 ID：
+
+```python
+import re, os
+prev_ids = set()
+for f in os.listdir('data/reports'):
+    if f.endswith('.md') and f != f'{today}.md':
+        with open(f'data/reports/{f}') as fh:
+            ids = re.findall(r'\[(\d{7,})\]', fh.read())
+            prev_ids.update(ids)
+```
+
+已存在于 `prev_ids` 中的帖子不再纳入今日日报。
+
+### 24小时范围筛选（日报模式必须执行）
+
+帖子必须在 24 小时范围内才纳入日报。使用 Discourse JSON API 获取 `created_at`：
+
+```
+GET /t/{id}.json → post_stream.posts[0].created_at
+```
+
+**时间窗口**：今日 UTC+8 00:00 至 24:00（即 UTC 前一天 16:00 至今日 16:00）
+
+**批量获取日期策略**：
+1. 先提取全部帖子 ID（两源合并后）
+2. 用 `browser_run_code_unsafe` 批量获取 `created_at`（每批 20 帖，使用 JSON API）
+3. 按时间窗口筛选，只保留窗口内的帖子
+4. **注意**：Discourse ID 不按日期顺序（跨分类），**不能用 ID 阈值判断日期**
 
 ## 多 Agent 协作流程
 
@@ -270,7 +361,7 @@ posts = sorted(all_posts.values(), key=lambda x: int(x['id']), reverse=True)
 
 ## Agent 1: Crawler（抓取器）
 
-**职责**：从两个数据源抓取帖子，检查历史记录，批量抓取正文。
+**职责**：从两个数据源抓取帖子，获取时间戳筛选24h范围，检查历史记录，批量抓取正文。
 
 ### 1.1 打开列表页
 
@@ -278,7 +369,7 @@ posts = sorted(all_posts.values(), key=lambda x: int(x['id']), reverse=True)
 - Source A: `https://linux.do/tag/444-tag/444`
 - Source B: `https://linux.do/c/news/34`
 
-如果触发 Cloudflare 挑战页，通知用户进行人工验证。
+如果触发 Cloudflare 挑战页，使用 `browser_wait_for → time: 8` 等待自动通过。如仍无法通过，通知用户进行人工验证。
 
 ### 1.2 滚动加载全部帖子
 
@@ -296,39 +387,16 @@ async (page) => {
 
 滚动完成后用 `browser_evaluate` 检查帖子数量。如果帖子数 < 400，再追加 10 次滚动。最终目标是加载 400+ 帖子。
 
-### 1.3 提取帖子链接（含动态ID范围判断）
+### 1.3 提取帖子列表
 
-使用 `browser_evaluate` 提取列表中的帖子。**关键：需动态判断"今日"帖子的ID范围**。
+使用 `browser_evaluate` 提取列表中的帖子。**注意：不在此步骤过滤日期，先全部提取**。
 
-首先提取全部帖子的 ID，观察最大 ID 范围来判断今日起始 ID：
-```js
-() => {
-  const rows = document.querySelectorAll('tr.topic-list-item');
-  const ids = [];
-  rows.forEach(row => {
-    const topicId = row.getAttribute('data-topic-id');
-    if (topicId) ids.push(parseInt(topicId));
-  });
-  ids.sort((a, b) => a - b);
-  // 返回最大/最小ID和分布，用于判断今日范围
-  return { min: ids[0], max: ids[ids.length-1], count: ids.length };
-}
-```
-
-**ID范围判断规则**：
-- 查看 `ls data/posts/*.json | sed 's/.*\///;s/\.json//' | sort -n | tail -5` 获取已有最大 ID
-- 今日帖子 ID 必须 > 已有最大 ID
-- 提取时只保留 ID > 阈值的帖子
-
-提取帖子的完整代码：
 ```js
 () => {
   const rows = document.querySelectorAll('tr.topic-list-item');
   const posts = [];
   rows.forEach(row => {
     const topicId = row.getAttribute('data-topic-id');
-    const id = parseInt(topicId);
-    if (id < TODAY_ID_THRESHOLD) return; // 动态阈值
     const titleLink = row.querySelector('.main-link a.title') || row.querySelector('a.title');
     const title = titleLink ? titleLink.textContent.trim() : '';
     const href = titleLink ? titleLink.getAttribute('href') : '';
@@ -341,25 +409,81 @@ async (page) => {
 }
 ```
 
-### 1.4 批量抓取正文（核心优化）
+### 1.4 批量获取时间戳（关键步骤）
+
+**Discourse ID 不按日期顺序（跨分类），不能用 ID 阈值判断日期。** 必须使用 JSON API 获取 `created_at`。
+
+使用 `browser_run_code_unsafe` 批量获取，每批 20 帖：
+
+```js
+async (page) => {
+  const ids = ["2326008","2325913", /* ... 20个ID ... */];
+  const results = [];
+  for (const id of ids) {
+    try {
+      await page.goto('https://linux.do/t/' + id + '.json', {
+        waitUntil: 'domcontentloaded', timeout: 10000
+      });
+      await page.waitForTimeout(800);
+      const data = await page.evaluate(() => {
+        try {
+          const text = document.body.innerText;
+          const json = JSON.parse(text);
+          return {
+            created_at: json.post_stream?.posts?.[0]?.created_at || json.created_at || '',
+            title: json.title || '',
+            views: json.views || 0,
+            posts_count: json.posts_count || 0,
+            like_count: json.post_stream?.posts?.[0]?.like_count || 0
+          };
+        } catch(e) { return { error: 'parse' }; }
+      });
+      results.push({ id, ...data });
+    } catch (e) {
+      results.push({ id, error: 'nav' });
+    }
+  }
+  return results;
+}
+```
+
+**24小时时间窗口**：今日 UTC+8 00:00 至 24:00（即 UTC 前一天 16:00 至今日 16:00）
+
+筛选代码：
+```python
+from datetime import datetime, timezone, timedelta
+cst = timezone(timedelta(hours=8))
+today_start = datetime.now(cst).replace(hour=0, minute=0, second=0, microsecond=0)
+today_end = today_start + timedelta(days=1)
+# 转为 UTC 用于比较
+utc_start = today_start.astimezone(timezone.utc)
+utc_end = today_end.astimezone(timezone.utc)
+# 筛选: utc_start <= created_at < utc_end
+```
+
+### 1.5 批量抓取正文（核心优化）
 
 **禁止逐条抓取**（太慢，500帖需要17分钟）。必须使用 `browser_run_code_unsafe` 批量抓取，每批 20 帖：
 
 ```js
 async (page) => {
-  const ids = ["2294504","2292281","2295037", /* ... 20个ID ... */];
+  const ids = ["2326008","2325913", /* ... 20个ID ... */];
   const results = [];
   for (const id of ids) {
     try {
       await page.goto('https://linux.do/t/topic/' + id, {
         waitUntil: 'domcontentloaded', timeout: 12000
       });
-      await page.waitForTimeout(2000); // 模拟人类阅读
+      await page.waitForTimeout(1500);
       const data = await page.evaluate(() => {
+        const title = document.querySelector('.fancy-title')?.textContent?.trim() || '';
         const cooked = document.querySelector('.cooked');
-        return cooked ? cooked.innerText.trim().substring(0, 500) : '';
+        const content = cooked ? cooked.innerText.trim().substring(0, 500) : '';
+        const views = document.querySelector('.views .number')?.textContent?.trim() || '0';
+        const tags = [...document.querySelectorAll('.discourse-tag')].map(x => x.textContent.trim());
+        return { title, content, views, tags };
       });
-      results.push({ id, content: data.substring(0, 300) });
+      results.push({ id, ...data });
     } catch (e) {
       results.push({ id, error: e.message.substring(0, 100) });
     }
@@ -369,10 +493,19 @@ async (page) => {
 ```
 
 **批量抓取策略**：
-- 每批 20 帖，每帖等待 2 秒
-- 每批耗时约 40-60 秒
-- 全部 500 帖约需 25 批 × 50 秒 ≈ 20 分钟
+- 每批 20 帖，每帖等待 1.5 秒
+- 每批耗时约 30-40 秒
 - 如果触发连接限制（`ERR_CONNECTION_CLOSED`），立即停止，进入恢复流程
+
+### 1.6 跳过已存在帖子
+
+抓取前检查 `data/posts/{id}.json` 是否已存在，已存在的跳过：
+
+```python
+import os
+def should_fetch(pid):
+    return not os.path.exists(f'data/posts/{pid}.json')
+```
 
 ### 1.5 连接恢复流程
 
@@ -406,12 +539,12 @@ Source B 中不在 Source A 的独立帖子也需抓取正文。
 
 ## Agent 2: Topic Merger（主题合并器）
 
-**职责**：合并两个数据源的帖子，去重并按主题聚类。
+**职责**：合并两个数据源的帖子，去重，过滤公益站，按主题聚类。
 
 ### 2.1 读取数据
 
-- 读取 `data/daily/{date}.json` 中的所有帖子
-- 或直接从 Agent 1 输出获取帖子列表
+- 读取 Agent 1 输出的帖子列表（已含时间戳和正文）
+- 读取 `data/posts/*.json` 获取已抓取的帖子详情
 
 ### 2.2 去重处理
 
@@ -419,7 +552,40 @@ Source B 中不在 Source A 的独立帖子也需抓取正文。
 - 按帖子 ID 去重，保留首次抓取的数据
 - 记录帖子来源（sources 字段可包含多个源）
 
-### 2.3 主题聚类
+### 2.3 公益站过滤（必须执行）
+
+过滤掉以下类型的帖子：
+
+```python
+GONGYI_KEYWORDS = ['公益站', '公益推广', 'LDC', 'ldc', 'cdk', '签到', '白嫖', '薅羊毛', '薅秃', '兑换码', '免费额度', '号池', '号商']
+
+def is_gongyi(post):
+    title = post.get('title', '')
+    tags = post.get('tags', [])
+    content = post.get('content', '')
+    all_text = title + ' ' + content + ' ' + ' '.join(tags)
+    return any(kw in all_text for kw in GONGYI_KEYWORDS)
+```
+
+**过滤范围**：标题、标签、内容中出现任一关键词即过滤。
+
+### 2.4 历史去重（必须执行）
+
+扫描所有历史日报 Markdown 文件，提取已报道的帖子 ID：
+
+```python
+import re, os
+prev_ids = set()
+for f in os.listdir('data/reports'):
+    if f.endswith('.md') and f != f'{today}.md':
+        with open(f'data/reports/{f}') as fh:
+            ids = re.findall(r'\[(\d{7,})\]', fh.read())
+            prev_ids.update(ids)
+```
+
+已存在于 `prev_ids` 中的帖子不再纳入今日日报。
+
+### 2.5 主题聚类
 
 按以下维度对帖子进行分组：
 - **关键词匹配**：标题和内容中的技术关键词
@@ -427,18 +593,22 @@ Source B 中不在 Source A 的独立帖子也需抓取正文。
 - **热度排序**：每组内按 views + replies 排序
 
 建议的主题分组（可根据实际内容调整）：
-- OpenAI/ChatGPT 生态
-- Codex 生态
-- Claude 生态
+- OpenAI/ChatGPT/Codex 生态
+- Claude/Anthropic 生态
 - MiniMax/MiMo 与国产模型
-- Agent 与工具
+- Google/Gemini 生态
+- 开源模型与发布
+- AI 编程工具与 Agent
+- AI 视频与图像生成
 - 行业动态与新闻
-- 公益站与中转站
-- 支付与接码
+- 支付、订阅与账号
+- 技术讨论与问答
 
-### 2.4 输出
+**注意**：不再包含"公益站与中转站"分组（已在 2.3 步骤过滤）。
 
-返回合并后的帖子列表，包含分组信息。
+### 2.6 输出
+
+返回过滤、去重、分组后的帖子列表。
 
 ---
 
@@ -481,33 +651,45 @@ Source B 中不在 Source A 的独立帖子也需抓取正文。
 
 ```markdown
 # linux.do 人工智能 技术日报
-**{date}** | 发布于 {time} UTC+8 | 新帖 {N} 篇 | 数据来源：linux.do #人工智能 + 前沿快讯
+**{date}** | 发布于 {time} UTC+8 | 新帖 {N} 篇（过滤公益站后）
+数据来源：linux.do #人工智能 + 前沿快讯
 
 ## 今日亮点
-（3-5 条高亮，每条一句话概括，包含关键数据如点赞数、回复数）
+（3-5 条高亮，每条一句话概括，包含关键数据如浏览量）
 
 ## 新内容
 
-### OpenAI/ChatGPT 生态
-- **帖子标题** — 摘要（浏览 X / 回复 Y）
+### OpenAI/ChatGPT/Codex 生态
+- **帖子标题** — 摘要（浏览 X）
 
-### Codex 生态
-- **帖子标题** — 摘要（浏览 X / 回复 Y）
+### Claude/Anthropic 生态
+- **帖子标题** — 摘要（浏览 X）
 
-（按主题分组，每组 3-8 个帖子，覆盖所有有实质内容的帖子）
+（按主题分组，每组 3-10 个帖子，覆盖所有有实质内容的帖子）
 
 ## 数据概览
 | 指标 | 数值 |
 |------|------|
-| Source A 原始帖数 | ... |
-| Source B 原始帖数 | ... |
+| Source A (#人工智能) 抓取帖数 | ... |
+| Source B (前沿快讯) 抓取帖数 | ... |
 | Source B AI 过滤后 | ... |
 | 合并去重后总数 | ... |
-| 抓取正文帖数 | ... |
+| 去除已报道帖子后 | ... |
+| 过滤公益站后 | {最终数量} |
+| 24小时范围内 | {最终数量} |
 
 ## 今日技术趋势
 （来自 Agent 3 的趋势分析，3-5 条）
 ```
+
+### 4.2 过滤流程（Writer 必须执行）
+
+生成日报前，按以下顺序执行过滤：
+
+1. **去除已报道帖子**：扫描 `data/reports/*.md` 提取历史帖子 ID，排除已报道的
+2. **过滤公益站**：按 2.3 节规则过滤公益站相关帖子
+3. **24小时筛选**：只保留 `created_at` 在今日 UTC+8 00:00-24:00 范围内的帖子
+4. **统计并输出**：在数据概览中报告各步骤的过滤数量
 
 ### 4.2 输出
 
@@ -707,17 +889,30 @@ async (page) => {
 
 ## 注意事项
 
+### 浏览器与抓取
 - **必须使用 Playwright MCP 浏览器工具抓取**，不要使用 curl/JSON API，避免触发 Cloudflare 保护
-- **必须批量抓取正文**：每批 20 帖，每帖等待 2 秒，禁止逐条抓取
+- **开始前必须预授权**：先关闭旧浏览器实例（`pkill -f "mcp-chrome"`），再导航触发新实例
+- **必须批量抓取正文**：每批 20 帖，每帖等待 1.5 秒，禁止逐条抓取
 - 滚动加载至少 15 次，确保帖子数 > 400
-- 动态判断今日帖子 ID 范围（`ls data/posts/*.json | sort -n | tail -5` 获取最大 ID）
 - 如果触发连接限制（`ERR_CONNECTION_CLOSED`），导航到主页恢复后用小批次继续
-- 如果触发 Cloudflare 挑战页，通知用户进行人工验证
+- 如果触发 Cloudflare 挑战页，先 `browser_wait_for → time: 8` 等待自动通过
 - 每个数据源最多抓取 500 帖
-- 抓取前检查历史记录，避免重复抓取
-- Source B 需按 AI 标签过滤
 - Cookies 通过 Playwright MCP 的 `page.context().cookies()` 持久化到 `data/cookies.json`
-- 列表页帖子的 like_count 显示为 0（Discourse 显示问题），实际点赞数需从详情页获取
+
+### 日期与过滤
+- **不能用 ID 阈值判断日期**：Discourse ID 不按日期顺序（跨分类），必须用 JSON API 获取 `created_at`
+- **24小时时间窗口**：今日 UTC+8 00:00 至 24:00（即 UTC 前一天 16:00 至今日 16:00）
+- **必须过滤公益站**：公益站、LDC、cdk、签到、白嫖、薅羊毛、兑换码、免费额度、号池、号商
+- **必须历史去重**：扫描 `data/reports/*.md` 提取已报道帖子 ID，避免重复
+- Source B 需按 AI 标签过滤
+
+### 数据格式
+- 列表页帖子的 like_count 显示为 0（Discourse 显示问题），实际点赞数需从 JSON API 获取
 - 正文从 `.cooked` 元素提取，最长 500 字符
 - Typst 中 `$` 符号需转义为 `\$`
 - PDF 生成使用 Typst，需确保已安装 typst CLI
+
+### 流程完整性
+- **必须按顺序完成所有 Agent**：Crawler → Topic Merger → Trend Analyzer → Writer → Press Writer → PDF Builder
+- **Press Writer 和 PDF Builder 不可跳过**：即使用户没有明确要求，也必须生成
+- 每个 Agent 完成后保存中间结果，确保流程可中断恢复
