@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.10.0
+version: 1.9.2
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.10.0
+# AI News Factory — 日报短视频自动生成 v1.9.1
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → B站上传。
 
@@ -13,31 +13,6 @@ version: 1.10.0
 ## ⚡ 权限预授权（必须在执行前完成）
 
 **在开始 Pipeline 之前，必须先获得用户的一次性预授权。执行过程中不再逐个询问权限。**
-
-### 🔴 重要：配置 Claude Code 自动授权
-
-**Pipeline 执行过程中会调用大量工具（Bash、Playwright、文件操作），如果每次都弹出权限确认会严重中断流程。**
-
-**建议用户在开始前配置自动授权：**
-
-```
-方法1：使用 --dangerously-skip-permissions 启动 Claude Code
-  claude --dangerously-skip-permissions
-
-方法2：在 Claude Code 设置中配置自动批准
-  输入 /permissions 添加规则：
-  - Bash(mimo-tts.sh*) → allow
-  - Bash(ffprobe*) → allow
-  - Bash(npx remotion*) → allow
-  - Bash(python3*) → allow
-  - Bash(curl*) → allow
-  - Bash(ls*) → allow
-  - Bash(cp*) → allow
-  - Bash(mkdir*) → allow
-  - Bash(cat*) → allow
-  - Bash(pkill*) → allow
-  - Bash(rm*) → allow
-```
 
 ### 预授权检查清单
 
@@ -57,22 +32,16 @@ version: 1.10.0
   ☐ 调用 mimo-tts.sh 生成配音（逐场景串行）
   ☐ 调用 ffprobe 获取音频时长
   ☐ 调用 npx remotion render 渲染视频
-  ☐ 调用 python3 执行图片生成脚本
-  ☐ 调用 curl 下载图片
 
 🌐 API 调用
   ☐ 图片生成 API（用户提供 URL + Key）
   ☐ TTS API（mimo-tts）
 
-🖥️ 浏览器操作（上传时）
-  ☐ Playwright MCP 打开B站/公众号/视频号/抖音上传页面
+🖥️ 浏览器操作（Phase 12 上传时）
+  ☐ Playwright MCP 打开B站上传页面
   ☐ 自动填写标题、简介、标签
   ☐ 自动上传视频和封面
-  ☐ 自动点击投稿/保存草稿
-
-⚠️ 重要提示：
-  为避免执行过程中频繁弹出权限确认，
-  建议先配置自动授权（见上方说明）。
+  ☐ 自动点击投稿
 
 请回复「确认」或「全部授权」开始执行。
 ```
@@ -338,6 +307,52 @@ def generate_image(prompt, output_path):
 - **必须从 JSON 文件读取 Prompt**，不能用简化版本
 - 每张图片生成后重试一次（如果失败）
 
+### Phase 5.5: 异步生成封面（与 TTS 并行）
+
+**🔴 重要优化：封面生成耗时较长（每个约 30-60s），应与 TTS 配音并行执行！**
+
+在 Phase 5 图片生成完成后，使用 `Agent` 工具异步生成所有封面：
+
+```python
+# 使用 Agent 工具异步执行封面生成
+# 这样可以与 Phase 6 TTS 配音并行，节省总时间
+
+# 封面生成脚本（在 agent 中执行）
+import json, subprocess, base64
+
+API_URL = "https://ai.prism.uno"
+API_KEY = "用户提供的 API Key"
+MODEL = "gpt-image-2"
+
+COVER_PROMPT = """A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, {ratio} aspect ratio."""
+
+# 封面配置
+COVERS = [
+    {"name": "cover.png", "size": "1536x1024", "ratio": "16:9"},           # 通用封面
+    {"name": "bilibili-4-3.png", "size": "1536x1152", "ratio": "4:3"},     # B站
+    {"name": "wechat-21-9.png", "size": "1536x659", "ratio": "21:9"},     # 公众号
+    {"name": "douyin-horizontal-4-3.png", "size": "1536x1152", "ratio": "4:3"},  # 抖音横版
+    {"name": "douyin-vertical-3-4.png", "size": "1152x1536", "ratio": "3:4"},    # 抖音竖版
+]
+```
+
+**执行方式**：
+```bash
+# 在主流程中启动异步 agent 生成封面
+Agent(
+    description="生成所有平台封面",
+    prompt="执行封面生成脚本...",
+    run_in_background=True  # 异步执行
+)
+
+# 同时继续执行 Phase 6 TTS 配音
+# 两者并行，节省约 3-5 分钟
+```
+
+**优势**：
+- 封面生成（5个，约 3-5 分钟）与 TTS 配音（9个，约 2-3 分钟）并行
+- 总时间从串行的 6-8 分钟缩短到并行的 3-5 分钟
+
 ### Phase 6: TTS 配音
 
 根据视频脚本逐场景生成配音：
@@ -368,88 +383,137 @@ for i in 1 2 3 4 5 6 7; do
 done
 ```
 
-### Phase 7: 字幕生成（字数比例估算）
+### Phase 7: 字幕生成（FunASR + ffprobe 比例调整）
 
-**v1.4.0 方案：字数比例估算为主，FunASR 为备选。**
+**v2.0.0 方案：FunASR 语音识别 + ffprobe 时长比例调整。**
 
-> **经验教训**：FunASR 逐句对齐在实际使用中匹配率偏低（部分场景仅 1/7），字数比例估算更稳定可靠。
+> **经验教训**：纯字数比例估算会导致字幕与音频不同步（越到后面偏差越大）。使用 FunASR token 级时间戳 + ffprobe 时长比例调整，可确保字幕与音频精确对齐。
 
-#### 7.1 语义拆句（8-18 字小句）
+#### 7.1 FunASR 识别 + ffprobe 时长调整
 
 ```python
-def smart_split(text, min_chars=8, max_chars=20):
-    """Split text preserving English terms and ensuring min duration."""
-    sentences = re.split(r"[。！？]", text)
-    sentences = [s.strip() for s in sentences if s.strip()]
-    result = []
-    for sent in sentences:
-        if len(sent) <= max_chars:
-            result.append(sent)
+import json, subprocess, re
+from funasr import AutoModel
+
+def get_audio_duration(wav_path):
+    """获取音频实际时长（毫秒）"""
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", wav_path],
+        capture_output=True, text=True
+    )
+    return float(result.stdout.strip()) * 1000
+
+def generate_captions(base_dir, scene_count=9):
+    """生成精确对齐的字幕"""
+    model = AutoModel(
+        model="paraformer-zh",
+        vad_model="fsmn-vad",
+        punc_model="ct-punc",
+        device="cpu"
+    )
+
+    all_captions = []
+    global_offset_ms = 0
+
+    for scene_num in range(1, scene_count + 1):
+        wav_path = f"{base_dir}/voiceover/scene{scene_num}.wav"
+
+        # 获取音频实际时长
+        audio_duration_ms = get_audio_duration(wav_path)
+
+        # FunASR 识别
+        result = model.generate(input=wav_path, batch_size_s=300)
+        res = result[0]
+        text = res.get("text", "")
+        timestamps = res.get("timestamp", [])
+
+        if not timestamps:
+            global_offset_ms += audio_duration_ms
             continue
-        parts = re.split(r"([，、——]+)", sent)
-        segments = []
-        i = 0
-        while i < len(parts):
-            seg = parts[i]
-            if i + 1 < len(parts) and re.match(r"^[，、——]+$", parts[i + 1]):
-                seg = seg + parts[i + 1]
-                i += 2
-            else:
-                i += 1
-            if seg.strip():
-                segments.append(seg.strip())
-        merged = []
-        buf = ""
-        for seg in segments:
-            if buf and len(buf) + len(seg) > max_chars:
-                merged.append(buf)
-                buf = seg
-            else:
-                buf = (buf + seg) if buf else seg
-        if buf:
-            merged.append(buf)
-        result.extend(merged)
-    final = []
-    for s in result:
-        if final and len(s) < min_chars and len(final[-1]) + len(s) <= max_chars:
-            final[-1] = final[-1] + s
-        else:
-            final.append(s)
-    return final
+
+        # token 时间戳的时长
+        token_start = timestamps[0][0]
+        token_end = timestamps[-1][1]
+        token_duration_ms = token_end - token_start
+
+        # 计算比例因子：实际时长 / token 时长
+        scale = audio_duration_ms / token_duration_ms if token_duration_ms > 0 else 1
+
+        # 按标点分割文本
+        sentences = re.split(r'(?<=[。！？])', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        # 按字符比例分配时间
+        char_counts = [len(s.replace(" ", "")) for s in sentences]
+        total_chars = sum(char_counts) if char_counts else 1
+
+        relative_ms = 0
+        for sent, chars in zip(sentences, char_counts):
+            token_duration = token_duration_ms * chars / total_chars
+
+            # 转换为实际时间（关键：用比例因子调整）
+            actual_start = global_offset_ms + (token_start + relative_ms) * scale
+            actual_end = global_offset_ms + (token_start + relative_ms + token_duration) * scale
+
+            all_captions.append({
+                "text": sent,
+                "startMs": actual_start,
+                "endMs": actual_end
+            })
+            relative_ms += token_duration
+
+        global_offset_ms += audio_duration_ms
+
+    return all_captions
 ```
 
-#### 7.2 字数比例时间轴估算
+#### 7.2 识别错误修正
 
 ```python
-def generate_captions(sentences, scene_duration_ms, offset_ms):
-    """Generate captions with char-ratio timing, min 1.5s per caption."""
-    total_chars = sum(len(s.replace(" ", "")) for s in sentences)
-    raw_durations = []
-    for sent in sentences:
-        chars = len(sent.replace(" ", ""))
-        dur = scene_duration_ms * chars / total_chars if total_chars > 0 else scene_duration_ms / len(sentences)
-        raw_durations.append(max(dur, 1500))  # 最小 1.5s
-
-    total_adj = sum(raw_durations)
-    scale = scene_duration_ms / total_adj if total_adj > 0 else 1
-
-    captions = []
-    current_ms = offset_ms
-    for i, sent in enumerate(sentences):
-        dur = int(raw_durations[i] * scale)
-        captions.append({"text": sent, "startMs": current_ms, "endMs": current_ms + dur})
-        current_ms += dur
-    if captions:
-        captions[-1]["endMs"] = offset_ms + scene_duration_ms
-    return captions
+def fix_recognition_errors(text):
+    """修正 FunASR 常见识别错误"""
+    fixes = {
+        "GPP team": "GPT Team",
+        "GPT teen": "GPT Team",
+        "open AI": "OpenAI",
+        "Open AI": "OpenAI",
+        "cloud": "Claude",
+        "clock": "Claude",
+        "小米一梦": "小米MiMo",
+        "togins": "tokens",
+        "洋报": "羊报",
+        "codex": "Codex",
+        "Ai行业": "AI行业",
+        "air i道": "AI赛道",
+        "s杠一": "S-1",
+        "非盈利": "非营利",
+        "盈利": "营利",
+        "artras b": "ultra speed",
+        "一t": "1T",
+        "GTT team": "GPT Team",
+        "open ee e市": "OpenAI上市",
+        "class": "Claude",
+        "AL每天": "AI每天",
+        "一二点五pro": "v2.5 pro",
+    }
+    for wrong, right in fixes.items():
+        text = text.replace(wrong, right)
+    return text
 ```
 
 #### 7.3 完整流程
 
 ```
-脚本文本 → 语义拆句(8-20字) → 字数比例估算时间轴
-    → 最小 duration 约束(1.5s) → 缩放到场景时长 → 输出 captions.json
+TTS音频 → FunASR识别(token时间戳) → ffprobe获取实际时长
+    → 计算比例因子(scale) → 按标点分割文本 → 按字符比例+scale分配时间
+    → 修正识别错误 → 输出 captions.json
 ```
+
+**关键点**：
+- **必须用 ffprobe 获取音频实际时长**，不能只用 token 时间戳
+- **比例因子 scale = audio_duration / token_duration**，确保总时长对齐
+- **识别错误需要手动修正**，FunASR 对专业术语识别率偏低
 
 **字体使用规范**：
 - 使用系统字体：`"PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif`
@@ -501,17 +565,19 @@ cd video-project && npx remotion render AINewsVideo "out/【今日羊报AI】{�
 
 ### Phase 10: 封面、发布信息与公众号图文
 
-#### 10.1 生成多平台封面
+> **注意**：如果已在 Phase 5.5 异步生成封面，此步骤可跳过封面生成，直接使用已生成的文件。
+
+#### 10.1 生成多平台封面（如未异步生成）
 
 使用图片生成 API 为各平台生成不同比例的封面：
 
-| 平台 | 比例 | 尺寸 | 输出文件 |
-|------|------|------|----------|
-| 通用/视频封面 | 16:9 | 1536x1024 | `cover.png` |
-| B站 | 4:3 | 1536x1152 | `bilibili-4-3.png` |
-| 公众号 | 21:9 | 1536x659 | `wechat-21-9.png` |
-| 抖音横版 | 4:3 | 1536x1152 | `douyin-horizontal-4-3.png` |
-| 抖音竖版 | 3:4 | 1152x1536 | `douyin-vertical-3-4.png` |
+| 平台 | 比例 | 尺寸 | 输出文件 | 用途 |
+|------|------|------|----------|------|
+| 通用/视频封面 | 16:9 | 1536x1024 | `cover.png` | 视频封面、B站默认 |
+| B站 | 4:3 | 1536x1152 | `bilibili-4-3.png` | B站投稿封面 |
+| 公众号 | 21:9 | 1536x659 | `wechat-21-9.png` | 公众号文章封面 |
+| 抖音横版 | 4:3 | 1536x1152 | `douyin-horizontal-4-3.png` | 抖音视频封面 |
+| 抖音竖版 | 3:4 | 1152x1536 | `douyin-vertical-3-4.png` | 抖音个人主页卡片 |
 
 **封面模板 Prompt**：
 ```
@@ -1683,6 +1749,38 @@ news-pipeline/
 
 ## 已知坑与经验教训
 
+### 🔴 字幕与音频不同步（v2.0.0 新增）
+
+**问题**：使用字数比例估算字幕时间轴时，由于 TTS 语速不均匀，越到后面字幕偏差越大。用户反馈"52秒开始字幕和语音对不上"。
+
+**根因分析**：
+1. 字数比例估算假设语速恒定，但实际 TTS 语速会变化
+2. 纯 FunASR token 时间戳不能直接使用，因为 token 时长与音频时长有偏差
+3. 需要用 ffprobe 获取音频实际时长，再用比例因子调整 token 时间戳
+
+**解决方案**：
+```python
+# 1. 用 ffprobe 获取音频实际时长
+audio_duration_ms = get_audio_duration(wav_path)
+
+# 2. 用 FunASR 获取 token 时间戳
+token_start = timestamps[0][0]
+token_end = timestamps[-1][1]
+token_duration_ms = token_end - token_start
+
+# 3. 计算比例因子
+scale = audio_duration_ms / token_duration_ms
+
+# 4. 用比例因子调整所有时间戳
+actual_start = global_offset_ms + (token_start + relative_ms) * scale
+actual_end = global_offset_ms + (token_start + relative_ms + token_duration) * scale
+```
+
+**关键点**：
+- **必须用 ffprobe 获取音频实际时长**，不能只用 token 时间戳
+- **比例因子 scale = audio_duration / token_duration**，确保总时长对齐
+- **识别错误需要手动修正**，FunASR 对专业术语识别率偏低
+
 ### 🔴 TTS 并发冲突
 **问题**：`mimo-tts.sh` 内部使用 `mktemp /tmp/mimo-tts-request-XXXXXX.json` 生成临时文件。并行调用时多个进程竞争同一文件名，导致 `mktemp: mkstemp failed: File exists` 错误，TTS 静默失败不生成音频。
 
@@ -2275,66 +2373,6 @@ await input.setInputFiles('news-pipeline/weekly/.../wechat-21-9.png');
 **问题**：周报上传到B站时，合集「羊报AI周刊」可能不会自动选择。
 
 **解决**：合集选择器是自定义 Vue 组件，建议手动选择或跳过。如果需要自动化，使用 `page.getByText('「羊报AI周刊」', { exact: true })` 精确匹配。
-
-### 🔴 视频号封面上传 file input 被分离（v1.10.0 新增）
-**问题**：视频号封面编辑弹窗中的 file input 是动态创建的，使用 `page.$('input[type="file"]')` 获取后，元素可能已被分离（detached），导致 `setInputFiles` 失败。
-
-**解决**：跳过视频号封面自动上传，建议手动设置封面后发布。
-
-### 🔴 视频号短标题字数限制（v1.10.0 新增）
-**问题**：视频号短标题限制 16 个中文字符，超出会报错「标题超过16字限制」。
-
-**解决**：短标题控制在 16 字以内，如「AI日报0608」、「Notion打脸Anthropic」（17字会超限）。
-
-### 🔴 公众号合集选择器简化流程（v1.10.0 更新）
-**问题**：之前的合集选择流程（hover + class 选择器）不稳定。
-
-**已验证的更简单流程**：
-1. 点击「合集」→「未添加」打开弹窗
-2. 在搜索框输入「今日羊报」
-3. 等待搜索结果出现
-4. 直接点击 `page.getByText('「今日羊报 AI」')` 选择
-5. 点击「确认」
-
-**关键点**：
-- 搜索框可以直接输入文字搜索，不需要先 hover
-- 搜索结果会自动出现，等待 1 秒即可
-- 不需要用 `exact: true`，直接 `getByText` 即可
-
-### 🔴 执行过程中权限确认中断流程（v1.10.0 新增）
-**问题**：Pipeline 执行过程中会调用大量工具（Bash、Playwright、文件操作），每次都会弹出权限确认，严重中断流程。用户需要反复点击「确认」。
-
-**解决**：
-1. **最佳方案**：使用 `claude --dangerously-skip-permissions` 启动 Claude Code
-2. **替代方案**：在 Claude Code 设置中配置自动批准规则（`/permissions`）
-3. **临时方案**：用户在预授权阶段明确表示「全部授权」，并在每次弹出确认时快速点击
-
-### 🟡 公众号图片上传到正文（v1.10.0 更新）
-**问题**：之前的方法（工具栏「图片」→「本地上传」）需要多步操作，且 file chooser 可能不触发。
-
-**已验证的更可靠流程**：
-1. 直接使用 `input.setInputFiles()` 上传图片到素材库
-2. 图片会自动插入到正文光标位置
-3. 然后通过「从正文选择」设置封面
-
-**关键代码**：
-```javascript
-const input = await page.$('input[type="file"][accept*="image"]');
-await input.setInputFiles('/path/to/image.png');
-```
-
-### 🟡 视频号短标题自动填充（v1.10.0 更新）
-**问题**：视频号短标题是 contenteditable div，之前用坐标点击 + 键盘输入的方式不稳定。
-
-**已验证的更可靠流程**：
-1. 点击短标题输入框获取 focus
-2. 使用 `browser_type` 直接输入（Playwright 会自动处理 contenteditable）
-3. 如果输入超长，会自动截断或报错
-
-**关键点**：
-- 不需要用 `browser_evaluate` + JS 修改
-- 直接用 `browser_type` 即可
-- 但必须控制在 16 字以内
 
 ## 注意事项
 
