@@ -1,14 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 1.9.2
+version: 2.0.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v1.9.1
+# AI News Factory — 日报短视频自动生成 v2.0.0
 
-将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → B站上传。
+将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。
 
-**核心原则：字数比例估算字幕时间轴（TTS 语速稳定，字数比例比 ASR 更可靠）。**
+**核心原则：FunASR 语音识别 + ffprobe 时长校准确保字幕与音频精确对齐。**
 
 ## ⚡ 权限预授权（必须在执行前完成）
 
