@@ -81,14 +81,19 @@ version: 4.1.0
 
 ## 目录结构
 
+**数据输出目录**：`/Users/youngsdream/Documents/learn-claude-code/data/`（项目目录，非 skill 目录）
+
 ```
-data/
+/Users/youngsdream/Documents/learn-claude-code/data/
 ├── daily/{date}.json          # 每日抓取原始数据（合并后）
 ├── posts/{id}.json            # 单帖详情（含 scrape_history）
 ├── reports/{date}.md          # 生成的 Markdown 日报
 ├── reports/{date}_press.md    # 生成的专业新闻稿
 ├── reports/{date}.pdf         # 生成的 PDF 日报
 ├── reports/{date}.typ         # Typst 源文件
+├── weekly/{week}.md           # 周报 Markdown
+├── weekly/{week}_press.md     # 周报新闻稿
+├── weekly/{week}.pdf          # 周报 PDF
 └── cookies.json               # 浏览器 cookies（需登录时用）
 ```
 

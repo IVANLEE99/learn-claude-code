@@ -1562,77 +1562,75 @@ browser_run_code_unsafe("""async (page) => {
 }""")
 ```
 
-#### 13.6 发布视频
+#### 13.6 上传封面和短标题（在 iframe 中操作）
+
+**🔴 视频号页面内容在 iframe 中，必须用 `page.frame({ name: 'content' })` 操作！**
+
+##### 13.6.1 检测 iframe 结构
 
 ```javascript
 browser_run_code_unsafe("""async (page) => {
-  // 确保定时发表为「不定时」
-  const radio = page.locator('text=不定时').first();
-  if (await radio.isVisible()) await radio.click();
-  
-  // 点击发表按钮
-  const publishBtn = page.locator('button:has-text("发表")');
-  await publishBtn.click();
-  await page.waitForTimeout(3000);
-  return 'published';
+  const frames = page.frames();
+  const frameInfo = frames.map(f => ({ url: f.url().substring(0, 80), name: f.name() }));
+  return JSON.stringify(frameInfo);
 }""")
 ```
 
-**发布后自动跳转到视频列表页，URL 变为 `/platform/post/list`。**
+**常见 iframe 结构**：
+- 主页面：`https://channels.weixin.qq.com/platform/post/create`
+- 内容 iframe：`name="content"`, URL 包含 `/micro/content/post/...`
 
-#### 13.7 修改封面和短标题（发布后）
+##### 13.6.2 上传封面（在 iframe 中操作）
 
-**🔴 视频发布后仍可修改封面和短标题，但「仅支持修改一次，修改后不可撤回」！**
-
-##### 13.7.1 进入编辑页
-
-```
-# 从列表页点击视频标题进入编辑页
-browser_run_code_unsafe("""async (page) => {
-  const title = page.locator('text=视频标题关键词').first();
-  await title.click();
-  await page.waitForTimeout(3000);
-  return page.url();  # 应跳转到 /platform/post/coverEdit?objectId=...
-}""")
-```
-
-##### 13.7.2 上传封面（在 iframe 中操作）
-
-**🔴 封面编辑弹窗在 iframe 中，必须用 `page.frame({ name: 'content' })` 操作：**
+**🔴 封面编辑在 iframe 中，通过「编辑」按钮触发 file chooser：**
 
 ```javascript
 // 上传 3:4 个人主页卡片封面
 browser_run_code_unsafe("""async (page) => {
-  // 1. 点击第一个「编辑」按钮
-  const editBtn = page.locator('.edit-btn').first();
-  await editBtn.click({ force: true });
-  await page.waitForTimeout(1000);
+  const frame = page.frame({ name: 'content' });
+  if (!frame) return 'frame not found';
   
-  // 2. 点击「+」上传区域触发 file chooser
-  await page.mouse.click(680, 585);  // +号按钮坐标
-  await page.waitForTimeout(1000);
-  return 'ready for upload';
+  // 1. 找到「编辑」按钮并点击（触发 file chooser）
+  const [fileChooser] = await Promise.all([
+    page.waitForEvent('filechooser', { timeout: 5000 }),
+    frame.locator('.edit-btn, [class*="edit"]').first().click({ force: true })
+  ]);
+  
+  // 2. 上传 3:4 封面文件
+  await fileChooser.setFiles('news-pipeline/YYYY-MM-DD/douyin-vertical-3-4.png');
+  await page.waitForTimeout(2000);
+  return 'cover uploaded';
 }""")
 
-# 上传文件
-browser_file_upload("news-pipeline/YYYY-MM-DD/cover-vertical.png")  # 3:4 封面
-
-# 确认
+# 确认封面
 browser_run_code_unsafe("""async (page) => {
-  const confirmBtn = page.getByRole('button', { name: '确认' }).first();
-  await confirmBtn.click();
+  const frame = page.frame({ name: 'content' });
+  if (frame) {
+    await frame.evaluate(() => {
+      const buttons = document.querySelectorAll('button');
+      for (const btn of buttons) {
+        if (btn.textContent.trim() === '确认' && btn.offsetParent !== null) {
+          btn.click();
+          return;
+        }
+      }
+    });
+  }
   await page.waitForTimeout(2000);
-  return 'confirmed';
+  return 'cover confirmed';
 }""")
 ```
 
 **封面尺寸**：
-- 个人主页卡片：3:4（1024×1536）→ `cover-vertical.png`
-- 分享卡片：4:3（1536×1024）→ `cover-horizontal.png`
+- 个人主页卡片：3:4（1024×1536）→ `douyin-vertical-3-4.png`
+- 分享卡片：4:3（1536×1024）→ `douyin-horizontal-4-3.png`
 
-##### 13.7.3 修改短标题（在 iframe 中操作）
+##### 13.6.3 填写短标题（在 iframe 中操作）
+
+**🔴 短标题是 contenteditable div（`.edit-shorttitle-content`），不是标准 input：**
 
 ```javascript
+// 方法1：在 iframe 内用 JS 直接修改（推荐）
 browser_run_code_unsafe("""async (page) => {
   const frame = page.frame({ name: 'content' });
   if (!frame) return 'frame not found';
@@ -1640,7 +1638,7 @@ browser_run_code_unsafe("""async (page) => {
   const result = await frame.evaluate(() => {
     const div = document.querySelector('.edit-shorttitle-content');
     if (div) {
-      div.textContent = '新短标题内容';
+      div.textContent = '短标题内容（最多16字）';
       div.dispatchEvent(new Event('input', { bubbles: true }));
       return 'updated: ' + div.textContent;
     }
@@ -1648,50 +1646,43 @@ browser_run_code_unsafe("""async (page) => {
   });
   return result;
 }""")
+
+// 方法2：坐标点击 + 键盘输入
+browser_run_code_unsafe("""async (page) => {
+  await page.mouse.click(990, 550);  // 短标题区域坐标
+  await page.waitForTimeout(300);
+  await page.keyboard.type('短标题内容');
+  return 'typed';
+}""")
 ```
 
-##### 13.7.4 保存修改
+**短标题限制**：最多 16 个中文字符，超过会报错。
+
+#### 13.7 保存草稿（不发布）
+
+**🔴 保存草稿后视频进入草稿箱，用户可手动确认发布。**
 
 ```javascript
-# 点击「完成」按钮
 browser_run_code_unsafe("""async (page) => {
   const frame = page.frame({ name: 'content' });
-  if (frame) {
-    await frame.evaluate(() => {
-      const buttons = document.querySelectorAll('button');
-      for (const btn of buttons) {
-        if (btn.textContent.trim() === '完成' && btn.offsetParent !== null) {
-          btn.click();
-          return;
-        }
-      }
-    });
-  }
-  await page.waitForTimeout(2000);
-  return 'clicked 完成';
-}""")
-
-# 弹出确认对话框：「仅支持修改一次，修改后不可撤回」
-# 点击「确认修改」
-browser_run_code_unsafe("""async (page) => {
-  const frame = page.frame({ name: 'content' });
-  if (frame) {
-    await frame.evaluate(() => {
-      const buttons = document.querySelectorAll('button');
-      for (const btn of buttons) {
-        if (btn.textContent.trim() === '确认修改' && btn.offsetParent !== null) {
-          btn.click();
-          return;
-        }
-      }
-    });
-  }
+  if (!frame) return 'frame not found';
+  
+  // 确保定时发表为「不定时」
+  const radio = frame.locator('text=不定时').first();
+  if (await radio.isVisible()) await radio.click();
+  
+  // 点击「保存草稿」按钮
+  const draftBtn = frame.locator('button:has-text("保存草稿"), button:has-text("存草稿")');
+  await draftBtn.first().click();
   await page.waitForTimeout(3000);
-  return 'modification confirmed';
+  return 'saved as draft';
 }""")
 ```
 
-**修改后自动跳转回视频列表页，显示「修改审核中，预计30分钟内审核完成」。**
+**保存草稿后**：
+- 视频进入草稿箱，URL 变为 `/platform/post/draft`
+- 用户可手动在草稿箱中确认发布
+- **不自动跳转到发布成功页面**
 
 #### 视频号上传组件操作总结（v1.7.0 实测）
 
