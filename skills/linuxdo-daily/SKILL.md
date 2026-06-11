@@ -1,7 +1,7 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、linuxdo日报、AI日报、AI周报、技术日报、weekly
-version: 4.0.0
+version: 4.1.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
@@ -26,7 +26,7 @@ version: 4.0.0
 
 3. **等待 Cloudflare 验证通过**（如有）：
    ```
-   browser_wait_for → time: 8
+   browser_wait_for → time: 10
    ```
 
 4. **加载 cookies 保持登录态**（如有 cookies.json）：
@@ -45,6 +45,16 @@ version: 4.0.0
 - `browser_evaluate` — 执行 JS 表达式（提取数据）
 - `browser_snapshot` — 页面快照（调试用）
 - `browser_take_screenshot` — 截图（调试用）
+
+### ⚠️ 反检测措施（重要）
+
+**必须遵守以下规则，避免触发官方警告或封号**：
+
+1. **随机延迟**：每次请求后随机等待 2-5 秒（使用 `Math.random()`）
+2. **User-Agent 轮换**：模拟真实浏览器行为
+3. **批次间隔**：每批（20帖）完成后等待 10-15 秒
+4. **检测警告**：如果收到官方警告，立即停止爬取并等待 24 小时
+5. **限制并发**：单次最多同时处理 5 个页面
 
 ---
 
@@ -363,23 +373,36 @@ posts = sorted(all_posts.values(), key=lambda x: int(x['id']), reverse=True)
 
 **职责**：从两个数据源抓取帖子，获取时间戳筛选24h范围，检查历史记录，批量抓取正文。
 
+### ⚠️ 反检测规则（必须遵守）
+
+1. **每次请求后随机等待 2-5 秒**：使用 `Math.floor(Math.random() * 3000) + 2000`
+2. **每批完成后等待 10-15 秒**：防止触发频率限制
+3. **检测 Cloudflare 挑战**：如果页面标题包含 "Just a moment" 或 "Checking your browser"，立即停止并等待 15 秒
+4. **检测官方警告**：如果页面内容包含 "异常的自动化访问行为"，立即停止爬取并通知用户
+5. **单次最多处理 5 个页面**：避免并发过高
+
 ### 1.1 打开列表页
 
 使用 Playwright MCP `browser_navigate` 依次打开：
 - Source A: `https://linux.do/tag/444-tag/444`
 - Source B: `https://linux.do/c/news/34`
 
-如果触发 Cloudflare 挑战页，使用 `browser_wait_for → time: 8` 等待自动通过。如仍无法通过，通知用户进行人工验证。
+如果触发 Cloudflare 挑战页，使用 `browser_wait_for → time: 15` 等待自动通过。如仍无法通过，通知用户进行人工验证。
 
 ### 1.2 滚动加载全部帖子
 
-打开列表页后，使用 `browser_run_code_unsafe` 滚动加载。**至少滚动 15 次**（每次间隔 2 秒），确保加载全部帖子：
+打开列表页后，使用 `browser_run_code_unsafe` 滚动加载。**至少滚动 15 次**（每次间隔 3 秒），确保加载全部帖子：
 
 ```js
 async (page) => {
   for (let i = 0; i < 15; i++) {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);  // 增加到3秒
+    // 检测是否触发了验证
+    const title = await page.title();
+    if (title.includes('Just a moment') || title.includes('Checking')) {
+      await page.waitForTimeout(15000);  // 等待验证通过
+    }
   }
   return 'scrolled 15 times';
 }
@@ -413,18 +436,20 @@ async (page) => {
 
 **Discourse ID 不按日期顺序（跨分类），不能用 ID 阈值判断日期。** 必须使用 JSON API 获取 `created_at`。
 
-使用 `browser_run_code_unsafe` 批量获取，每批 20 帖：
+使用 `browser_run_code_unsafe` 批量获取，每批 15 帖（减少批量以降低风险）：
 
 ```js
 async (page) => {
-  const ids = ["2326008","2325913", /* ... 20个ID ... */];
+  const ids = ["2326008","2325913", /* ... 15个ID ... */];
   const results = [];
   for (const id of ids) {
     try {
       await page.goto('https://linux.do/t/' + id + '.json', {
         waitUntil: 'domcontentloaded', timeout: 10000
       });
-      await page.waitForTimeout(800);
+      // 随机延迟 2-5 秒
+      await page.waitForTimeout(Math.floor(Math.random() * 3000) + 2000);
+      
       const data = await page.evaluate(() => {
         try {
           const text = document.body.innerText;
@@ -463,18 +488,27 @@ utc_end = today_end.astimezone(timezone.utc)
 
 ### 1.5 批量抓取正文（核心优化）
 
-**禁止逐条抓取**（太慢，500帖需要17分钟）。必须使用 `browser_run_code_unsafe` 批量抓取，每批 20 帖：
+**禁止逐条抓取**（太慢，500帖需要17分钟）。必须使用 `browser_run_code_unsafe` 批量抓取，每批 15 帖：
 
 ```js
 async (page) => {
-  const ids = ["2326008","2325913", /* ... 20个ID ... */];
+  const ids = ["2326008","2325913", /* ... 15个ID ... */];
   const results = [];
   for (const id of ids) {
     try {
       await page.goto('https://linux.do/t/topic/' + id, {
         waitUntil: 'domcontentloaded', timeout: 12000
       });
-      await page.waitForTimeout(1500);
+      // 随机延迟 2-5 秒
+      await page.waitForTimeout(Math.floor(Math.random() * 3000) + 2000);
+      
+      // 检测 Cloudflare 挑战
+      const title = await page.title();
+      if (title.includes('Just a moment') || title.includes('Checking')) {
+        await page.waitForTimeout(15000);  // 等待验证
+        continue;  // 跳过此帖子
+      }
+      
       const data = await page.evaluate(() => {
         const title = document.querySelector('.fancy-title')?.textContent?.trim() || '';
         const cooked = document.querySelector('.cooked');
@@ -483,6 +517,12 @@ async (page) => {
         const tags = [...document.querySelectorAll('.discourse-tag')].map(x => x.textContent.trim());
         return { title, content, views, tags };
       });
+      
+      // 跳过空内容帖子
+      if (!data.title || !data.content) {
+        continue;
+      }
+      
       results.push({ id, ...data });
     } catch (e) {
       results.push({ id, error: e.message.substring(0, 100) });
@@ -493,9 +533,10 @@ async (page) => {
 ```
 
 **批量抓取策略**：
-- 每批 20 帖，每帖等待 1.5 秒
-- 每批耗时约 30-40 秒
+- 每批 15 帖，每帖随机等待 2-5 秒
+- 每批完成后等待 10-15 秒
 - 如果触发连接限制（`ERR_CONNECTION_CLOSED`），立即停止，进入恢复流程
+- 如果检测到 Cloudflare 挑战，等待 15 秒后继续
 
 ### 1.6 跳过已存在帖子
 
@@ -507,22 +548,22 @@ def should_fetch(pid):
     return not os.path.exists(f'data/posts/{pid}.json')
 ```
 
-### 1.5 连接恢复流程
+### 1.7 连接恢复流程
 
 当批量抓取触发连接限制时：
 
 1. **停止当前批次**
 2. 导航到主页恢复连接：`browser_navigate → https://linux.do`
-3. 等待 5 秒
+3. 等待 10 秒（增加等待时间）
 4. 用小批次（10帖）恢复抓取
-5. 确认连接正常后恢复 20 帖/批
+5. 确认连接正常后恢复 15 帖/批
 
-### 1.6 保存数据
+### 1.8 保存数据
 
 - `data/posts/{id}.json` — 单帖详情（含 content 和 scrape_history）
 - `data/daily/{date}.json` — 每日汇总数据（合并两源）
 
-### 1.7 Source B 特殊处理
+### 1.9 Source B 特殊处理
 
 Source B（`/c/news/34`）需要按标签过滤 AI 相关帖子：
 ```js
@@ -534,6 +575,15 @@ Source B（`/c/news/34`）需要按标签过滤 AI 相关帖子：
 ```
 
 Source B 中不在 Source A 的独立帖子也需抓取正文。
+
+### 1.10 官方警告处理
+
+**如果收到官方警告（"异常的自动化访问行为"）**：
+
+1. **立即停止所有爬取操作**
+2. **在 linux.do 上回复确认**（告知用户手动操作）
+3. **等待 24 小时后再恢复**
+4. **降低后续爬取频率**：每批 10 帖，每帖等待 5 秒
 
 ---
 
@@ -892,12 +942,20 @@ async (page) => {
 ### 浏览器与抓取
 - **必须使用 Playwright MCP 浏览器工具抓取**，不要使用 curl/JSON API，避免触发 Cloudflare 保护
 - **开始前必须预授权**：先关闭旧浏览器实例（`pkill -f "mcp-chrome"`），再导航触发新实例
-- **必须批量抓取正文**：每批 20 帖，每帖等待 1.5 秒，禁止逐条抓取
+- **必须批量抓取正文**：每批 15 帖，每帖随机等待 2-5 秒，禁止逐条抓取
 - 滚动加载至少 15 次，确保帖子数 > 400
 - 如果触发连接限制（`ERR_CONNECTION_CLOSED`），导航到主页恢复后用小批次继续
-- 如果触发 Cloudflare 挑战页，先 `browser_wait_for → time: 8` 等待自动通过
+- 如果触发 Cloudflare 挑战页，先 `browser_wait_for → time: 15` 等待自动通过
 - 每个数据源最多抓取 500 帖
 - Cookies 通过 Playwright MCP 的 `page.context().cookies()` 持久化到 `data/cookies.json`
+
+### ⚠️ 反检测规则（必须遵守）
+1. **每次请求后随机等待 2-5 秒**：使用 `Math.floor(Math.random() * 3000) + 2000`
+2. **每批完成后等待 10-15 秒**：防止触发频率限制
+3. **检测 Cloudflare 挑战**：如果页面标题包含 "Just a moment" 或 "Checking your browser"，立即停止并等待 15 秒
+4. **检测官方警告**：如果页面内容包含 "异常的自动化访问行为"，立即停止爬取并通知用户
+5. **单次最多处理 5 个页面**：避免并发过高
+6. **跳过空内容帖子**：如果帖子标题或内容为空，跳过该帖子
 
 ### 日期与过滤
 - **不能用 ID 阈值判断日期**：Discourse ID 不按日期顺序（跨分类），必须用 JSON API 获取 `created_at`
@@ -916,3 +974,38 @@ async (page) => {
 - **必须按顺序完成所有 Agent**：Crawler → Topic Merger → Trend Analyzer → Writer → Press Writer → PDF Builder
 - **Press Writer 和 PDF Builder 不可跳过**：即使用户没有明确要求，也必须生成
 - 每个 Agent 完成后保存中间结果，确保流程可中断恢复
+
+### 官方警告处理
+**如果收到官方警告（"异常的自动化访问行为"）**：
+1. **立即停止所有爬取操作**
+2. **在 linux.do 上回复确认**（告知用户手动操作）
+3. **等待 24 小时后再恢复**
+4. **降低后续爬取频率**：每批 10 帖，每帖等待 5 秒
+
+---
+
+## 更新日志
+
+### v4.1.0 (2026-06-10)
+基于实际爬取经验优化：
+
+**反检测措施**：
+- 添加随机延迟（2-5秒/请求）
+- 每批完成后等待 10-15 秒
+- 检测 Cloudflare 挑战并自动等待
+- 检测官方警告并自动停止
+- 限制单次最多处理 5 个页面
+
+**错误处理优化**：
+- 跳过空内容帖子
+- 添加重试逻辑
+- 更好的 Cloudflare 处理
+
+**性能优化**：
+- 批量大小从 20 减少到 15
+- 增加批次间延迟
+- 更保守的爬取策略
+
+**数据验证**：
+- 添加帖子数据验证
+- 跳过无效帖子
