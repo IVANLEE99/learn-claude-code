@@ -537,6 +537,74 @@ async () => {
 
 **⚠️ 限流处理**：如果返回 429 错误，等待 30 秒后重试。降低并发到 2 个/批。
 
+### 1.5b 热帖全回复抓取（新增 `/raw/{id}` 端点）
+
+**用途**：对热帖（浏览量 Top 10）额外抓取全部回复，用于日报"社区讨论"板块。
+
+**端点对比**：
+
+| 维度 | `/t/{id}.json` | `/raw/{id}` |
+|------|----------------|-------------|
+| 响应时间 | ~350ms | ~300ms |
+| 返回格式 | 结构化 JSON | 纯文本/Markdown |
+| 内容范围 | 仅主楼（首帖） | **全部回复**（主楼+所有回帖） |
+| 元数据 | ✅ title, views, posts_count, like_count, tags | ❌ 无元数据 |
+| 内容处理 | `cooked` 是 HTML，需 strip | 直接纯文本，无需处理 |
+
+**选择策略**：
+- **JSON API**：需要元数据（浏览量、点赞、标签），只需主楼内容 → 用于所有帖子
+- **Raw API**：需要全部回复内容，不需元数据 → 仅用于热帖 Top 10
+
+**Raw API 抓取代码**：
+
+```js
+async () => {
+  const hotIds = ["2380214","2380040","2380540","2380182","2380400",
+                   "2379691","2380404","2379813","2380364","2380431"];
+  const results = [];
+  for (const tid of hotIds) {
+    try {
+      const r = await fetch('/raw/' + tid);
+      if (!r.ok) { results.push({id: tid, error: r.status}); continue; }
+      const text = await r.text();
+      // 解析回复: 格式为 "用户名 | 时间 | #N 正文"
+      const parts = text.split(/-------------------------/);
+      const replies = [];
+      for (let i = 1; i < parts.length && i <= 10; i++) {
+        const match = parts[i].match(/\|\s*#(\d+)\s+([\s\S]*?)$/);
+        if (match) {
+          replies.push({
+            floor: parseInt(match[1]),
+            content: match[2].trim().substring(0, 200)
+          });
+        }
+      }
+      results.push({ id: tid, total_replies: parts.length - 1, top_replies: replies });
+    } catch(e) {
+      results.push({id: tid, error: e.message.substring(0, 50)});
+    }
+    // 反检测：批次间等待 3-5 秒
+    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000) + 3000));
+  }
+  return results;
+}
+```
+
+**保存格式**：`data/posts/{id}_replies.json`
+
+```json
+{
+  "id": "2380040",
+  "title": "claude-fable-5模型到底怎么样",
+  "views": 846,
+  "total_replies": 26,
+  "top_replies": [
+    {"floor": 4, "content": "很不错,同科研党..."},
+    {"floor": 9, "content": "可比5.5强太多了..."}
+  ]
+}
+```
+
 ### 1.6 跳过已存在帖子
 
 抓取前检查 `data/posts/{id}.json` 是否已存在，已存在的跳过：
@@ -985,6 +1053,23 @@ async (page) => {
 ---
 
 ## 更新日志
+
+### v4.3.0 (2026-06-12)
+新增 Raw API 端点，热帖全回复抓取：
+
+**新增 `/raw/{id}` 端点（1.5b 节）**
+- 对热帖（浏览量 Top 10）额外抓取全部回复
+- Raw API 返回纯文本，包含全部回帖，无需 HTML 解析
+- 与 JSON API 互补：JSON 取元数据+主楼，Raw 取全部回复
+- 保存格式：`data/posts/{id}_replies.json`
+
+**端点对比**
+- JSON API (`/t/{id}.json`)：~350ms，结构化 JSON，仅主楼，有元数据
+- Raw API (`/raw/{id}`)：~300ms，纯文本，全部回复，无元数据
+
+**选择策略**
+- 所有帖子：JSON API 获取主楼+元数据
+- 热帖 Top 10：额外 Raw API 获取全部回复，用于日报"社区讨论"板块
 
 ### v4.2.0 (2026-06-11)
 基于实际爬取经验大幅优化：
