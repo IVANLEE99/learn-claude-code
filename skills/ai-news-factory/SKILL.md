@@ -1,18 +1,20 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 2.0.0
+version: 2.1.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v2.0.0
+# AI News Factory — 日报短视频自动生成 v2.1.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。
 
-**核心原则：FunASR 语音识别 + ffprobe 时长校准确保字幕与音频精确对齐。**
+**核心原则：原始脚本文本 + ffprobe 时长比例对齐，确保字幕 100% 准确且与音频精确同步。**
 
 ## ⚡ 权限预授权（必须在执行前完成）
 
 **在开始 Pipeline 之前，必须先获得用户的一次性预授权。执行过程中不再逐个询问权限。**
+
+**🔴 重要：预授权覆盖所有阶段（内容生成 + 全部平台上传），一次确认后全程不再询问。**
 
 ### 预授权检查清单
 
@@ -37,13 +39,25 @@ version: 2.0.0
   ☐ 图片生成 API（用户提供 URL + Key）
   ☐ TTS API（mimo-tts）
 
-🖥️ 浏览器操作（Phase 12 上传时）
-  ☐ Playwright MCP 打开B站上传页面
-  ☐ 自动填写标题、简介、标签
-  ☐ 自动上传视频和封面
-  ☐ 自动点击投稿
+🖥️ 浏览器操作（全部平台上传）
+  ☐ B站：自动上传视频、封面、填写标题/简介/标签、选择合集、投稿
+  ☐ 抖音：自动上传视频、封面、填写描述、选择合集、发布
+  ☐ 视频号：自动上传视频、封面、填写描述/短标题、选择合集
+  ☐ 公众号：自动创建文章、填写标题/正文、上传封面、设置原创/赞赏、选择合集
 
 请回复「确认」或「全部授权」开始执行。
+```
+
+### 用户输入收集
+
+在预授权时一并收集以下信息（避免中途打断）：
+
+```
+需要你提供：
+1. 📄 日报文件路径（默认: data/reports/YYYY-MM-DD.md）
+2. 🖼️ 图片生成 API URL
+3. 🔑 图片生成 API Key
+4. 📤 上传平台（默认: 全部；可指定如「B站+公众号」）
 ```
 
 ## 触发条件
@@ -111,14 +125,14 @@ A professional Chinese AI news studio weekly cover image. A male news anchor in 
 
 ### Phase 0: 获取用户输入
 
-向用户确认以下信息（可在预授权时一并收集）：
+**在预授权阶段已收集以下信息，直接使用：**
 
-```
-需要你提供：
-1. 📄 日报文件路径（默认: data/reports/YYYY-MM-DD.md）
-2. 🖼️ 图片生成 API URL（如 https://ai.prism.uno）
-3. 🔑 图片生成 API Key
-```
+- `REPORT_PATH`: 日报文件路径
+- `API_URL`: 图片生成 API URL
+- `API_KEY`: 图片生成 API Key
+- `UPLOAD_PLATFORMS`: 上传平台列表
+
+如信息不完整，在此处补充询问。
 
 ### Phase 1: 输入、去重与事件切分
 
@@ -177,6 +191,8 @@ Hook：{开场钩子，5秒内抓住注意力}
 
 结尾：{CTA 引导互动}
 ```
+
+**🔴 重要：保存每个场景的 TTS 文本**，Phase 7 字幕生成需要直接使用这些文本（不用 ASR 识别）。
 
 **参考模板**: `templates/script-template.md`
 
@@ -383,17 +399,16 @@ for i in 1 2 3 4 5 6 7; do
 done
 ```
 
-### Phase 7: 字幕生成（FunASR + ffprobe 比例调整）
+### Phase 7: 字幕生成（原始脚本文本 + ffprobe 比例对齐）
 
-**v2.0.0 方案：FunASR 语音识别 + ffprobe 时长比例调整。**
+**v2.1.0 方案：使用原始脚本文本 + ffprobe 时长比例对齐（默认方案）。**
 
-> **经验教训**：纯字数比例估算会导致字幕与音频不同步（越到后面偏差越大）。使用 FunASR token 级时间戳 + ffprobe 时长比例调整，可确保字幕与音频精确对齐。
+> **🔴 经验教训（2026-06-12）**：FunASR 对专业术语识别极差（GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末），修正字典永远追不上新术语。**直接使用原始 TTS 脚本文本 + ffprobe 时长比例分配，字幕 100% 准确。**
 
-#### 7.1 FunASR 识别 + ffprobe 时长调整
+#### 7.1 默认方案：原始脚本文本 + ffprobe 对齐
 
 ```python
-import json, subprocess, re
-from funasr import AutoModel
+import json, subprocess, re, os
 
 def get_audio_duration(wav_path):
     """获取音频实际时长（毫秒）"""
@@ -404,116 +419,75 @@ def get_audio_duration(wav_path):
     )
     return float(result.stdout.strip()) * 1000
 
-def generate_captions(base_dir, scene_count=9):
-    """生成精确对齐的字幕"""
-    model = AutoModel(
-        model="paraformer-zh",
-        vad_model="fsmn-vad",
-        punc_model="ct-punc",
-        device="cpu"
-    )
+# 原始脚本文本（从 Phase 2 视频脚本中提取每个场景的 TTS 文本）
+SCENE_TEXTS = {
+    1: "场景1的TTS文本...",
+    2: "场景2的TTS文本...",
+    # ... 每个场景的完整 TTS 文本
+}
 
+def split_by_punctuation(text):
+    """按中文标点分割文本，标点保留在前一句"""
+    parts = re.split(r'(?<=[。！？，；：])', text)
+    return [p.strip() for p in parts if p.strip()]
+
+def generate_captions_from_script(base_dir, scene_count=8):
+    """使用原始脚本文本 + ffprobe 时长比例生成字幕"""
     all_captions = []
     global_offset_ms = 0
 
     for scene_num in range(1, scene_count + 1):
-        wav_path = f"{base_dir}/voiceover/scene{scene_num}.wav"
+        wav_path = os.path.join(base_dir, "voiceover", f"scene{scene_num}.wav")
+        if not os.path.exists(wav_path):
+            continue
 
-        # 获取音频实际时长
+        # 获取实际音频时长
         audio_duration_ms = get_audio_duration(wav_path)
 
-        # FunASR 识别
-        result = model.generate(input=wav_path, batch_size_s=300)
-        res = result[0]
-        text = res.get("text", "")
-        timestamps = res.get("timestamp", [])
-
-        if not timestamps:
+        # 使用原始脚本文本（100% 准确）
+        text = SCENE_TEXTS.get(scene_num, "")
+        if not text:
             global_offset_ms += audio_duration_ms
             continue
 
-        # token 时间戳的时长
-        token_start = timestamps[0][0]
-        token_end = timestamps[-1][1]
-        token_duration_ms = token_end - token_start
+        # 按标点分割
+        sentences = split_by_punctuation(text)
+        if not sentences:
+            global_offset_ms += audio_duration_ms
+            continue
 
-        # 计算比例因子：实际时长 / token 时长
-        scale = audio_duration_ms / token_duration_ms if token_duration_ms > 0 else 1
-
-        # 按标点分割文本
-        sentences = re.split(r'(?<=[。！？])', text)
-        sentences = [s.strip() for s in sentences if s.strip()]
-
-        # 按字符比例分配时间
-        char_counts = [len(s.replace(" ", "")) for s in sentences]
-        total_chars = sum(char_counts) if char_counts else 1
+        # 按字符比例分配时间（排除标点计算比例）
+        char_counts = [len(re.sub(r'[。！？，；：、]', '', s).replace(" ", "")) for s in sentences]
+        total_chars = sum(char_counts) if sum(char_counts) > 0 else len(sentences)
 
         relative_ms = 0
         for sent, chars in zip(sentences, char_counts):
-            token_duration = token_duration_ms * chars / total_chars
-
-            # 转换为实际时间（关键：用比例因子调整）
-            actual_start = global_offset_ms + (token_start + relative_ms) * scale
-            actual_end = global_offset_ms + (token_start + relative_ms + token_duration) * scale
+            proportion = chars / total_chars
+            duration = audio_duration_ms * proportion
 
             all_captions.append({
                 "text": sent,
-                "startMs": actual_start,
-                "endMs": actual_end
+                "startMs": round(global_offset_ms + relative_ms),
+                "endMs": round(global_offset_ms + relative_ms + duration)
             })
-            relative_ms += token_duration
+            relative_ms += duration
 
         global_offset_ms += audio_duration_ms
 
     return all_captions
 ```
 
-#### 7.2 识别错误修正
-
-```python
-def fix_recognition_errors(text):
-    """修正 FunASR 常见识别错误"""
-    fixes = {
-        "GPP team": "GPT Team",
-        "GPT teen": "GPT Team",
-        "open AI": "OpenAI",
-        "Open AI": "OpenAI",
-        "cloud": "Claude",
-        "clock": "Claude",
-        "小米一梦": "小米MiMo",
-        "togins": "tokens",
-        "洋报": "羊报",
-        "codex": "Codex",
-        "Ai行业": "AI行业",
-        "air i道": "AI赛道",
-        "s杠一": "S-1",
-        "非盈利": "非营利",
-        "盈利": "营利",
-        "artras b": "ultra speed",
-        "一t": "1T",
-        "GTT team": "GPT Team",
-        "open ee e市": "OpenAI上市",
-        "class": "Claude",
-        "AL每天": "AI每天",
-        "一二点五pro": "v2.5 pro",
-    }
-    for wrong, right in fixes.items():
-        text = text.replace(wrong, right)
-    return text
-```
-
-#### 7.3 完整流程
+#### 7.2 完整流程
 
 ```
-TTS音频 → FunASR识别(token时间戳) → ffprobe获取实际时长
-    → 计算比例因子(scale) → 按标点分割文本 → 按字符比例+scale分配时间
-    → 修正识别错误 → 输出 captions.json
+视频脚本(Phase 2) → 提取每个场景TTS文本 → ffprobe获取每个音频实际时长
+    → 按标点分割文本 → 按字符比例分配时间 → 输出 captions.json
 ```
 
 **关键点**：
-- **必须用 ffprobe 获取音频实际时长**，不能只用 token 时间戳
-- **比例因子 scale = audio_duration / token_duration**，确保总时长对齐
-- **识别错误需要手动修正**，FunASR 对专业术语识别率偏低
+- **直接使用原始脚本文本**，不需要 ASR 识别，字幕 100% 准确
+- **必须用 ffprobe 获取音频实际时长**，按比例分配确保总时长对齐
+- **标点分割后按字符比例分配**，每个场景内部时间轴精确
 
 **字体使用规范**：
 - 使用系统字体：`"PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif`
@@ -682,7 +656,7 @@ cp news-pipeline/video-project/out/【今日羊报AI】*.mp4 news-pipeline/YYYY-
 
 ### Phase 11: B站自动上传（Playwright MCP）
 
-**⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
+**权限已在预授权阶段获得，直接执行。**
 
 #### 11.0 处理浏览器锁
 
@@ -820,7 +794,7 @@ browser_wait_for("text=稿件投递成功")
 
 ### Phase 12: 微信公众号自动上传（Playwright MCP）
 
-**⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
+**权限已在预授权阶段获得，直接执行。**
 
 **🔴 重要经验：公众号编辑器使用 ProseMirror + 自定义 Vue 组件，自动化难度较高。封面选择、合集选择等需要特殊处理。**
 
@@ -1429,7 +1403,7 @@ browser_click(target={确认按钮ref})
 
 ### Phase 13: 微信视频号自动上传（Playwright MCP）
 
-**⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
+**权限已在预授权阶段获得，直接执行。**
 
 **🔴 重要经验：视频号编辑器使用 iframe + 自定义 React 组件，自动化难度较高。必须先检测 iframe 结构。**
 
@@ -1740,37 +1714,40 @@ news-pipeline/
 
 ## 已知坑与经验教训
 
-### 🔴 字幕与音频不同步（v2.0.0 新增）
+### 🔴 字幕与音频不同步（v2.0.0 → v2.1.0 修复）
 
-**问题**：使用字数比例估算字幕时间轴时，由于 TTS 语速不均匀，越到后面字幕偏差越大。用户反馈"52秒开始字幕和语音对不上"。
+**问题**：使用字数比例估算字幕时间轴时，由于 TTS 语速不均匀，越到后面字幕偏差越大。
 
-**根因分析**：
-1. 字数比例估算假设语速恒定，但实际 TTS 语速会变化
-2. 纯 FunASR token 时间戳不能直接使用，因为 token 时长与音频时长有偏差
-3. 需要用 ffprobe 获取音频实际时长，再用比例因子调整 token 时间戳
+**v2.0.0 方案（已废弃）**：FunASR 语音识别 + ffprobe 比例调整
+- FunASR 对专业术语识别极差：GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末
+- 修正字典永远追不上新术语，每次都要手动添加大量修正规则
+- 识别错误导致字幕内容完全不可用
 
-**解决方案**：
+**v2.1.0 方案（当前默认）**：原始脚本文本 + ffprobe 时长比例对齐
 ```python
-# 1. 用 ffprobe 获取音频实际时长
+# 1. 直接使用 Phase 2 视频脚本中的原始 TTS 文本（100% 准确）
+text = SCENE_TEXTS[scene_num]
+
+# 2. 用 ffprobe 获取音频实际时长
 audio_duration_ms = get_audio_duration(wav_path)
 
-# 2. 用 FunASR 获取 token 时间戳
-token_start = timestamps[0][0]
-token_end = timestamps[-1][1]
-token_duration_ms = token_end - token_start
+# 3. 按标点分割文本
+sentences = split_by_punctuation(text)
 
-# 3. 计算比例因子
-scale = audio_duration_ms / token_duration_ms
+# 4. 按字符比例分配时间（排除标点计算比例）
+char_counts = [len(re.sub(r'[。！？，；：、]', '', s).replace(" ", "")) for s in sentences]
+total_chars = sum(char_counts)
 
-# 4. 用比例因子调整所有时间戳
-actual_start = global_offset_ms + (token_start + relative_ms) * scale
-actual_end = global_offset_ms + (token_start + relative_ms + token_duration) * scale
+# 5. 按比例分配音频时长
+for sent, chars in zip(sentences, char_counts):
+    duration = audio_duration_ms * chars / total_chars
+    # 添加到字幕列表...
 ```
 
 **关键点**：
-- **必须用 ffprobe 获取音频实际时长**，不能只用 token 时间戳
-- **比例因子 scale = audio_duration / token_duration**，确保总时长对齐
-- **识别错误需要手动修正**，FunASR 对专业术语识别率偏低
+- **直接使用原始脚本文本**，不需要 ASR 识别，字幕 100% 准确
+- **必须用 ffprobe 获取音频实际时长**，按比例分配确保总时长对齐
+- **标点分割后按字符比例分配**，每个场景内部时间轴精确
 
 ### 🔴 TTS 并发冲突
 **问题**：`mimo-tts.sh` 内部使用 `mktemp /tmp/mimo-tts-request-XXXXXX.json` 生成临时文件。并行调用时多个进程竞争同一文件名，导致 `mktemp: mkstemp failed: File exists` 错误，TTS 静默失败不生成音频。
@@ -2018,7 +1995,7 @@ await inputs[1].setInputFiles('cover.png');  // 设置封面
 
 ### Phase 14: 抖音自动上传（Playwright MCP）
 
-**⚠️ 执行前需要用户确认（风险操作）。权限已在预授权阶段获得。**
+**权限已在预授权阶段获得，直接执行。**
 
 **🔴 重要经验：抖音创作者中心使用自定义组件，封面上传需要用 force click，发布需要短信验证码。**
 
@@ -2367,14 +2344,15 @@ await input.setInputFiles('news-pipeline/weekly/.../wechat-21-9.png');
 
 ## 注意事项
 
-- **权限预授权是第一步**，必须在执行前完成
+- **权限预授权是第一步**，覆盖内容生成 + 全部平台上传，一次确认后全程不再询问
 - 每个 Phase 完成后向用户展示中间结果，确认后继续
 - 图片生成失败时自动重试一次
 - TTS 使用 mimo-tts，推荐音色「阿根」
 - **TTS 必须串行执行，禁止并行！**
-- 视频总时长建议 60-120 秒（可适当放宽）
+- 视频总时长建议 60-120 秒（可适当放宽到 150s）
 - 事件数量建议 4-6 个
 - **Phase 1 去重是强制步骤，不可跳过**
 - **Phase 8（渲染前校验）是强制步骤，不可跳过**
-- **Phase 11（B站上传）需要用户确认后执行**
+- **字幕必须使用原始脚本文本 + ffprobe 对齐**，不用 FunASR（专业术语识别率太低）
 - **B站自定义下拉框必须用 JS evaluate，不能用 browser_click 文本匹配**
+- **封面生成应与 TTS 并行执行**（用 Agent 异步），节省 3-5 分钟
