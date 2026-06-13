@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 2.1.0
+version: 2.2.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v2.1.0
+# AI News Factory — 日报短视频自动生成 v2.2.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。
 
@@ -15,6 +15,13 @@ version: 2.1.0
 **在开始 Pipeline 之前，必须先获得用户的一次性预授权。执行过程中不再逐个询问权限。**
 
 **🔴 重要：预授权覆盖所有阶段（内容生成 + 全部平台上传），一次确认后全程不再询问。**
+
+### 预授权原则
+
+1. **一次授权，全程执行**：用户确认后，后续所有操作（文件读写、API调用、浏览器操作）不再询问
+2. **信息一并收集**：在预授权时同时收集 API URL、Key、上传平台等信息
+3. **失败自动重试**：API 调用失败自动重试一次，不询问用户
+4. **浏览器锁自动处理**：检测到浏览器锁时自动清理，不询问用户
 
 ### 预授权检查清单
 
@@ -308,9 +315,9 @@ def generate_image(prompt, output_path):
 | 优先级 | 名称 | URL | 模型 | 说明 |
 |--------|------|-----|------|------|
 | 1 | 用户提供 | 用户提供 | gpt-image-2 | 优先使用用户提供的 API |
-| 2 | prism | https://ai.prism.uno | gpt-image-2 | 2026-06-05 验证可用 |
-| 3 | luka77 | http://api.luka77.cc | gpt-image-2 | 2026-06-04 验证可用 |
-| 4 | windhub | https://windhub.cc | gpt-image-1 | 需检查配额 |
+| 2 | openrouter | https://eo.ioll.pp.ua | gpt-image-2 | 2026-06-13 验证可用 |
+| 3 | prism | https://ai.prism.uno | gpt-image-2 | 2026-06-13 超时，可能需要 VPN |
+| 4 | luka77 | http://api.luka77.cc | gpt-image-2 | 2026-06-04 验证可用 |
 
 **API 选择逻辑**：
 1. 优先使用用户提供的 API
@@ -334,9 +341,9 @@ def generate_image(prompt, output_path):
 # 这样可以与 Phase 6 TTS 配音并行，节省总时间
 
 # 封面生成脚本（在 agent 中执行）
-import json, subprocess, base64
+import json, subprocess, base64, tempfile, os, time
 
-API_URL = "https://ai.prism.uno"
+API_URL = "用户提供的 API URL"  # 优先使用 eo.ioll.pp.ua
 API_KEY = "用户提供的 API Key"
 MODEL = "gpt-image-2"
 
@@ -350,6 +357,53 @@ COVERS = [
     {"name": "douyin-horizontal-4-3.png", "size": "1536x1152", "ratio": "4:3"},  # 抖音横版
     {"name": "douyin-vertical-3-4.png", "size": "1152x1536", "ratio": "3:4"},    # 抖音竖版
 ]
+
+def generate_cover(prompt, output_path, size):
+    """生成单张封面，带重试机制"""
+    for attempt in range(2):  # 最多重试1次
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            result = subprocess.run([
+                "curl", "-s", "-X", "POST", f"{API_URL}/v1/images/generations",
+                "-H", f"Authorization: Bearer {API_KEY}",
+                "-H", "Content-Type: application/json",
+                "-d", json.dumps({"model": MODEL, "prompt": prompt, "size": size, "n": 1}),
+                "-o", tmp_path,
+                "--max-time", "120"
+            ], capture_output=True, text=True, timeout=130)
+
+            with open(tmp_path) as f:
+                resp = json.load(f)
+
+            if "error" in resp:
+                if attempt == 0:
+                    time.sleep(2)
+                    continue
+                return False, resp["error"].get("message", str(resp["error"]))
+
+            img_b64 = resp["data"][0].get("b64_json", "")
+            if img_b64:
+                with open(output_path, "wb") as f:
+                    f.write(base64.b64decode(img_b64))
+                return True, "OK"
+
+            img_url = resp["data"][0].get("url", "")
+            if img_url:
+                subprocess.run(["curl", "-s", "-o", output_path, img_url], timeout=60)
+                if os.path.getsize(output_path) > 1000:
+                    return True, "OK (from URL)"
+
+            return False, "No image data"
+        except Exception as e:
+            if attempt == 0:
+                time.sleep(2)
+                continue
+            return False, str(e)
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+    return False, "Max retries exceeded"
 ```
 
 **执行方式**：
@@ -365,9 +419,17 @@ Agent(
 # 两者并行，节省约 3-5 分钟
 ```
 
+**封面生成验证**：
+```bash
+# 生成完成后验证所有封面文件
+ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
+# 应该输出 5（cover.png, bilibili-4-3.png, wechat-21-9.png, douyin-horizontal-4-3.png, douyin-vertical-3-4.png）
+```
+
 **优势**：
 - 封面生成（5个，约 3-5 分钟）与 TTS 配音（9个，约 2-3 分钟）并行
 - 总时间从串行的 6-8 分钟缩短到并行的 3-5 分钟
+- 每张封面自动重试一次，提高成功率
 
 ### Phase 6: TTS 配音
 
@@ -537,6 +599,21 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
 cd video-project && npx remotion render AINewsVideo "out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" --codec h264 --crf 18
 ```
 
+**🔴 视频合成后自动归档**：
+
+视频渲染完成后，必须立即将视频复制到日报目录：
+
+```bash
+# 复制视频到日报目录
+cp "news-pipeline/video-project/out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" \
+   "news-pipeline/YYYY-MM-DD/video/"
+
+# 验证复制成功
+ls -la "news-pipeline/YYYY-MM-DD/video/"
+```
+
+**归档时机**：视频合成完成后立即执行，不要等到上传阶段再复制。
+
 ### Phase 10: 封面、发布信息与公众号图文
 
 > **注意**：如果已在 Phase 5.5 异步生成封面，此步骤可跳过封面生成，直接使用已生成的文件。
@@ -658,9 +735,9 @@ cp news-pipeline/video-project/out/【今日羊报AI】*.mp4 news-pipeline/YYYY-
 
 **权限已在预授权阶段获得，直接执行。**
 
-#### 11.0 处理浏览器锁
+#### 11.0 处理浏览器锁（自动处理，不询问用户）
 
-如果 Playwright MCP 报错 "Browser is already in use"：
+如果 Playwright MCP 报错 "Browser is already in use" 或 "Target page, context or browser has been closed"：
 
 ```bash
 # 1. 关闭现有浏览器进程
@@ -670,6 +747,8 @@ sleep 2
 # 2. 删除锁文件
 rm -f ~/Library/Caches/ms-playwright/mcp-chrome-*/SingletonLock
 ```
+
+**🔴 重要：浏览器锁是常见问题，自动处理不需要询问用户。**
 
 #### 11.1 打开上传页面
 
@@ -2341,6 +2420,58 @@ await input.setInputFiles('news-pipeline/weekly/.../wechat-21-9.png');
 **问题**：周报上传到B站时，合集「羊报AI周刊」可能不会自动选择。
 
 **解决**：合集选择器是自定义 Vue 组件，建议手动选择或跳过。如果需要自动化，使用 `page.getByText('「羊报AI周刊」', { exact: true })` 精确匹配。
+
+### 🔴 API 连接超时问题（v2.2.0 新增，2026-06-13）
+**问题**：prism API（ai.prism.uno）在某些网络环境下连接超时，curl 显示 "Failed to connect to ai.prism.uno port 443 after 30001 ms: Timeout was reached"。
+
+**原因**：可能是 DNS 解析问题或网络限制（GFW、企业防火墙等）。
+
+**解决**：
+1. 优先使用 eo.ioll.pp.ua（OpenRouter）作为备选 API
+2. 如果用户提供的 API 不可用，自动尝试备选 API
+3. 不需要询问用户，直接切换
+
+**API 源优先级**：
+1. 用户提供的 API
+2. eo.ioll.pp.ua（OpenRouter）- 2026-06-13 验证可用
+3. ai.prism.uno - 可能需要 VPN
+4. api.luka77.cc
+
+### 🔴 视频归档遗漏（v2.2.0 新增，2026-06-13）
+**问题**：视频渲染完成后没有自动复制到日报目录，导致上传时找不到视频文件。
+
+**解决**：Phase 9 视频合成完成后，立即执行归档：
+```bash
+cp "news-pipeline/video-project/out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" \
+   "news-pipeline/YYYY-MM-DD/video/"
+```
+
+**归档时机**：视频合成完成后立即执行，不要等到上传阶段再复制。
+
+### 🔴 封面生成不完整（v2.2.0 新增，2026-06-13）
+**问题**：异步生成封面时，只生成了部分封面（2/5），其余封面因 API 超时或错误未生成。
+
+**解决**：
+1. 每张封面生成后自动重试一次
+2. 生成完成后验证所有封面文件
+3. 如果封面不完整，同步补生成缺失的封面
+
+**验证方法**：
+```bash
+ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
+# 应该输出 5（cover.png, bilibili-4-3.png, wechat-21-9.png, douyin-horizontal-4-3.png, douyin-vertical-3-4.png）
+```
+
+### 🔴 公益站内容过滤（v2.2.0 新增，2026-06-13）
+**问题**：日报视频中不应包含公益站、中转站、倒卖相关内容。
+
+**解决**：Phase 1 事件筛选时，主动过滤以下类型内容：
+- 公益站上架/开通/故障
+- 中转站价格/稳定性讨论
+- 邀请码/兑换码分享
+- 倒卖/交易相关内容
+
+**选择事件时只保留**：模型发布、公司动态、安全事件、开源模型、行业政策、技术突破等。
 
 ## 注意事项
 
