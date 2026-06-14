@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 2.2.0
+version: 2.3.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v2.2.0
+# AI News Factory — 日报短视频自动生成 v2.3.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。
 
@@ -200,6 +200,13 @@ Hook：{开场钩子，5秒内抓住注意力}
 ```
 
 **🔴 重要：保存每个场景的 TTS 文本**，Phase 7 字幕生成需要直接使用这些文本（不用 ASR 识别）。
+
+**🔴 禁止使用的词汇**：文案和字幕中不得出现以下词汇，需替换为通用称呼：
+- 「佬友」→「大家」「朋友们」
+- 「Linuxdo」→「社区」「论坛」
+- 「L站」→「社区」「论坛」
+
+**🔴 用户审核步骤**：脚本生成后，必须将完整脚本展示给用户审核，获得确认后才能进入 Phase 3。用户可能要求修改某些场景的文案。
 
 **参考模板**: `templates/script-template.md`
 
@@ -595,22 +602,44 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
 
 ### Phase 9: 视频合成
 
+**🔴 重要：渲染目录和命令**
+
+渲染视频时必须使用以下命令（从项目根目录执行）：
+
 ```bash
-cd video-project && npx remotion render AINewsVideo "out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" --codec h264 --crf 18
+/Users/youngsdream/Documents/learn-claude-code/news-pipeline/video-project/node_modules/.bin/remotion render \
+  /Users/youngsdream/Documents/learn-claude-code/news-pipeline/video-project/src/index.ts \
+  AINewsVideo \
+  "out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" \
+  --codec h264 --crf 18 \
+  --public-dir /Users/youngsdream/Documents/learn-claude-code/news-pipeline/video-project/public
 ```
 
-**🔴 视频合成后自动归档**：
+**关键参数说明**：
+- `node_modules/.bin/remotion`：使用 video-project 下的本地 remotion
+- `src/index.ts`：必须指定入口点文件路径
+- `--public-dir`：必须指定 public 目录的绝对路径
 
-视频渲染完成后，必须立即将视频复制到日报目录：
+**🔴 渲染输出位置（必须记住）**：
+- 视频渲染到：`/Users/youngsdream/Documents/learn-claude-code/out/`
+- **不是** `news-pipeline/video-project/out/`
+
+**🔴 视频合成后自动归档（必须执行）**：
+
+视频渲染完成后，必须立即将视频从根目录 `out/` 复制到日报目录：
 
 ```bash
-# 复制视频到日报目录
-cp "news-pipeline/video-project/out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" \
-   "news-pipeline/YYYY-MM-DD/video/"
+# 复制视频到日报目录（从根目录 out/ 复制）
+cp "/Users/youngsdream/Documents/learn-claude-code/out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" \
+   "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/YYYY-MM-DD/video/"
 
 # 验证复制成功
-ls -la "news-pipeline/YYYY-MM-DD/video/"
+ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/YYYY-MM-DD/video/"
 ```
+
+**⚠️ 常见错误**：
+- 错误：从 `news-pipeline/video-project/out/` 复制（旧文件）
+- 正确：从 `/Users/youngsdream/Documents/learn-claude-code/out/` 复制（新文件）
 
 **归档时机**：视频合成完成后立即执行，不要等到上传阶段再复制。
 
