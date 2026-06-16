@@ -1,7 +1,7 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、linuxdo日报、AI日报、AI周报、技术日报、weekly
-version: 5.0.0
+version: 6.0.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
@@ -433,77 +433,26 @@ async (page) => {
 }
 ```
 
-### 1.4 批量获取时间戳（关键步骤）
+### 1.4 批量抓取完整数据（三级重试策略）
 
-**⚠️ 关键发现（2026-06-12 验证）**：
+**核心原则**：一次 fetch 获取全部字段（title + content + created_at + views + tags），**先抓数据，后筛时间窗口**。
 
-JSON API `/tag/444-tag/444.json` **按最后活跃时间排序，不是按创建时间**。这意味着：
-- 今天创建但回复少的帖子会被排到很后面
-- 扫描 30 页（900 帖）只能找到 22 个今日帖子
-- 而 HTML 滚动提取能找到 28 个（完整）
+**JSON API `/t/{id}.json` 单次请求即可返回**：
+- `title` — 帖子标题
+- `content` — 正文（从 `cooked` HTML 提取纯文本）
+- `created_at` — 创建时间
+- `views` / `posts_count` / `like_count` — 统计数据
+- `tags` — 标签列表
 
-**正确策略**：**帖子发现必须用 HTML 滚动提取**（1.2-1.3 节），然后用 JSON API 批量获取元数据和时间戳进行 32h 筛选。
-
-**Discourse ID 不按日期顺序（跨分类），不能用 ID 阈值判断日期。** 必须使用 JSON API 获取 `created_at`。
-
-**推荐方式：使用 `fetch()` 在页面内直接调用 JSON API**（比 `page.goto()` 快 10 倍，不会触发 Cloudflare）。
-
-使用 `browser_evaluate` 批量获取，**并行 3-5 个请求**：
-
-```js
-async () => {
-  const ids = ["2326008","2325913", /* ... 帖子ID列表 ... */];
-  const results = [];
-  // 每批 3 个并行请求（批次大小 20，分 7 组并行）
-  for (let i = 0; i < ids.length; i += 3) {
-    const batch = ids.slice(i, i + 3);
-    const batchResults = await Promise.all(batch.map(async (tid) => {
-      try {
-        const r = await fetch('/t/' + tid + '.json');
-        if (!r.ok) return { id: tid, error: r.status };
-        const json = await r.json();
-        return {
-          id: tid,
-          created_at: json.post_stream?.posts?.[0]?.created_at || json.created_at || '',
-          views: json.views,
-          posts_count: json.posts_count,
-          like_count: json.post_stream?.posts?.[0]?.like_count || 0
-        };
-      } catch(e) {
-        return { id: tid, error: e.message.substring(0, 50) };
-      }
-    }));
-    results.push(...batchResults);
-    // 批次间等待 3-5 秒，避免 429 限流
-    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000) + 3000));
-  }
-  return results;
-}
-```
-
-**⚠️ 限流处理**：如果返回 429 错误，等待 30 秒后重试。降低并发到 2 个/批。
-
-**32小时时间窗口**：当前时间往前 32 小时
-
-筛选代码：
-```python
-from datetime import datetime, timezone, timedelta
-cst = timezone(timedelta(hours=8))
-today_start = datetime.now(cst).replace(hour=0, minute=0, second=0, microsecond=0)
-today_end = today_start + timedelta(days=1)
-# 转为 UTC 用于比较
-utc_start = today_start.astimezone(timezone.utc)
-utc_end = today_end.astimezone(timezone.utc)
-# 筛选: utc_start <= created_at < utc_end
-```
-
-### 1.5 批量抓取正文（三级重试策略）
-
-**核心流程**：JSON API → Raw API → 浏览器抓取
+**批次规则**：
+- 每批 **20 个 ID**，每批 3 个并行请求
+- 每批完成后 **立即保存到文件**（`data/batch_{序号}.json`），使用 `browser_evaluate` 的 `filename` 参数
+- 批次间隔 **固定 5 秒**
+- 页面 URL 必须是 `https://linux.do/...`（不能是 `about:blank`），否则 `fetch('/t/...')` 会报错
 
 #### 第一级：JSON API 批量抓取
 
-使用 `browser_evaluate` 在页面内直接调用 JSON API，**每批 20 个 ID，间隔 5 秒，立即保存**：
+使用 `browser_evaluate` 在页面内直接调用 JSON API：
 
 ```js
 async () => {
@@ -513,38 +462,37 @@ async () => {
     const batch = ids.slice(i, i + 3);
     const batchResults = await Promise.all(batch.map(async (tid) => {
       try {
-        const r = await fetch('/t/' + tid + '.json');
+        const r = await fetch('https://linux.do/t/' + tid + '.json');
         if (!r.ok) return { id: tid, error: r.status };
-        const json = await r.json();
-        const cooked = json.post_stream?.posts?.[0]?.cooked || '';
+        const j = await r.json();
+        const cooked = j.post_stream?.posts?.[0]?.cooked || '';
         const content = cooked.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 500);
         return {
           id: tid,
-          title: json.title,
+          title: j.title,
           content,
-          views: json.views,
-          posts_count: json.posts_count,
-          like_count: json.post_stream?.posts?.[0]?.like_count || 0,
-          created_at: json.post_stream?.posts?.[0]?.created_at || json.created_at || '',
-          tags: (json.tags || []).map(t => typeof t === 'string' ? t : t.name || '')
+          views: j.views,
+          posts_count: j.posts_count,
+          like_count: j.post_stream?.posts?.[0]?.like_count || 0,
+          created_at: j.post_stream?.posts?.[0]?.created_at || j.created_at || '',
+          tags: (j.tags || []).map(t => typeof t === 'string' ? t : t.name || '')
         };
       } catch(e) {
-        return { id: tid, error: e.message.substring(0, 50) };
+        return { id: tid, error: e.message.substring(0, 80) };
       }
     }));
     results.push(...batchResults);
+    await new Promise(r => setTimeout(r, 2000));
   }
   return JSON.stringify(results);
 }
 ```
 
-**保存策略**：每批 20 个 ID 抓取完成后，立即用 `filename` 参数保存到 `data/batch_{序号}.json`，然后等待 5 秒再处理下一批。
-
-**JSON API 优势**：
-- 无需导航到每个帖子页面，速度快 10 倍
-- 不会触发 Cloudflare 挑战
-- `cooked` 字段直接返回 HTML 正文，strip HTML 即可
-- 自动包含 `views`、`posts_count`、`like_count`、`created_at` 等元数据
+**保存策略**：使用 `browser_evaluate` 的 `filename` 参数直接保存到项目目录：
+```
+browser_evaluate(filename="data/batch_0.json", function=...)
+```
+注意：`filename` 路径相对于项目根目录，不能用 `/tmp` 等外部路径。
 
 #### 第二级：Raw API 重试失败帖子
 
@@ -556,7 +504,7 @@ async () => {
   const results = [];
   for (const tid of failedIds) {
     try {
-      const r = await fetch('/raw/' + tid);
+      const r = await fetch('https://linux.do/raw/' + tid);
       if (!r.ok) { results.push({id: tid, error: r.status}); continue; }
       const text = await r.text();
       const content = text.substring(0, 500).replace(/\n+/g, ' ').trim();
@@ -564,15 +512,11 @@ async () => {
     } catch(e) {
       results.push({ id: tid, error: e.message.substring(0, 50) });
     }
+    await new Promise(r => setTimeout(r, 2000));
   }
   return JSON.stringify(results);
 }
 ```
-
-**Raw API 特点**：
-- 返回纯文本/Markdown，无需 HTML 解析
-- 无元数据（views, tags 等），需要后续补充
-- 部分 JSON API 失败的帖子可以通过 Raw API 获取
 
 #### 第三级：浏览器抓取最终失败帖子
 
@@ -593,109 +537,78 @@ browser_evaluate → () => {
 }
 ```
 
-**浏览器抓取特点**：
-- 最慢但最可靠
-- 可以获取完整元数据
-- 仅用于最终失败的帖子（通常 < 20 个）
+### 1.5 数据合并与时间窗口筛选
 
-### 1.6 数据合并与筛选
-
-将三级抓取的数据合并，筛选 32h 窗口内的帖子：
+**先合并全部数据，再按时间筛选**（不是先筛时间再抓内容）。
 
 ```python
-import json, os
+import json, os, glob
 from datetime import datetime, timezone, timedelta
 
+# 1. 合并所有批次（注意双层 JSON 解析）
+all_posts = {}
+for path in sorted(glob.glob('data/batch_*.json')):
+    with open(path) as f:
+        raw = json.load(f)
+    posts = json.loads(raw) if isinstance(raw, str) else raw
+    for p in posts:
+        if p.get('error'):
+            continue
+        pid = str(p.get('id', ''))
+        if pid and pid not in all_posts:
+            all_posts[pid] = p
+print(f'合并后总数: {len(all_posts)}')
+
+# 2. 历史去重（扫描 data/reports/*.md）
+import re
+prev_ids = set()
+for f in os.listdir('data/reports'):
+    if f.endswith('.md'):
+        with open(f'data/reports/{f}') as fh:
+            ids = re.findall(r'\[(\d{7,})\]', fh.read())
+            prev_ids.update(ids)
+
+# 3. 32h 时间窗口筛选
 cst = timezone(timedelta(hours=8))
 now = datetime.now(cst)
-cutoff = now - timedelta(hours=32)
-cutoff_str = cutoff.isoformat()
+cutoff = (now - timedelta(hours=32)).isoformat()
 
-# 合并所有批次数据
-all_posts = {}
-for batch_file in ['data/batch_*.json', 'data/retry_raw_*.json']:
-    # 读取并合并...
+in_window = {}
+for pid, p in all_posts.items():
+    if pid in prev_ids:
+        continue  # 历史去重
+    if p.get('created_at', '') >= cutoff:
+        in_window[pid] = p
 
-# 筛选 32h 窗口
-in_window = [p for p in all_posts.values() if p.get('created_at', '') >= cutoff_str]
+print(f'32h 窗口内: {len(in_window)} 帖')
+
+# 4. 保存
+with open(f'data/daily/{date}.json', 'w') as f:
+    json.dump({'date': date, 'total': len(in_window), 'posts': list(in_window.values())}, f, ensure_ascii=False, indent=2)
 ```
 
-### 1.5b 热帖全回复抓取（新增 `/raw/{id}` 端点）
+**⚠️ Discourse ID 不按日期顺序（跨分类），不能用 ID 阈值判断日期。** 必须使用 JSON API 获取的 `created_at` 字段筛选。
+
+### 1.5b 热帖全回复抓取（可选）
 
 **用途**：对热帖（浏览量 Top 10）额外抓取全部回复，用于日报"社区讨论"板块。
 
-**端点对比**：
+使用 `/raw/{id}` 端点获取全部回复（纯文本格式），保存到 `data/posts/{id}_replies.json`。
 
-| 维度 | `/t/{id}.json` | `/raw/{id}` |
-|------|----------------|-------------|
-| 响应时间 | ~350ms | ~300ms |
-| 返回格式 | 结构化 JSON | 纯文本/Markdown |
-| 内容范围 | 仅主楼（首帖） | **全部回复**（主楼+所有回帖） |
-| 元数据 | ✅ title, views, posts_count, like_count, tags | ❌ 无元数据 |
-| 内容处理 | `cooked` 是 HTML，需 strip | 直接纯文本，无需处理 |
+### 1.6 公益站过滤
 
-**选择策略**：
-- **JSON API**：需要元数据（浏览量、点赞、标签），只需主楼内容 → 用于所有帖子
-- **Raw API**：需要全部回复内容，不需元数据 → 仅用于热帖 Top 10
-
-**Raw API 抓取代码**：
-
-```js
-async () => {
-  const hotIds = ["2380214","2380040","2380540","2380182","2380400",
-                   "2379691","2380404","2379813","2380364","2380431"];
-  const results = [];
-  for (const tid of hotIds) {
-    try {
-      const r = await fetch('/raw/' + tid);
-      if (!r.ok) { results.push({id: tid, error: r.status}); continue; }
-      const text = await r.text();
-      // 解析回复: 格式为 "用户名 | 时间 | #N 正文"
-      const parts = text.split(/-------------------------/);
-      const replies = [];
-      for (let i = 1; i < parts.length && i <= 10; i++) {
-        const match = parts[i].match(/\|\s*#(\d+)\s+([\s\S]*?)$/);
-        if (match) {
-          replies.push({
-            floor: parseInt(match[1]),
-            content: match[2].trim().substring(0, 200)
-          });
-        }
-      }
-      results.push({ id: tid, total_replies: parts.length - 1, top_replies: replies });
-    } catch(e) {
-      results.push({id: tid, error: e.message.substring(0, 50)});
-    }
-    // 反检测：批次间等待 3-5 秒
-    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000) + 3000));
-  }
-  return results;
-}
-```
-
-**保存格式**：`data/posts/{id}_replies.json`
-
-```json
-{
-  "id": "2380040",
-  "title": "claude-fable-5模型到底怎么样",
-  "views": 846,
-  "total_replies": 26,
-  "top_replies": [
-    {"floor": 4, "content": "很不错,同科研党..."},
-    {"floor": 9, "content": "可比5.5强太多了..."}
-  ]
-}
-```
-
-### 1.6 跳过已存在帖子
-
-抓取前检查 `data/posts/{id}.json` 是否已存在，已存在的跳过：
+在时间窗口筛选后、生成日报前，执行公益站过滤：
 
 ```python
-import os
-def should_fetch(pid):
-    return not os.path.exists(f'data/posts/{pid}.json')
+GONGYI_KEYWORDS = ['公益站', '公益推广', 'LDC', 'ldc', 'cdk', '签到', '白嫖',
+                   '薅羊毛', '薅秃', '兑换码', '免费额度', '号池', '号商', '充值额度']
+
+def is_gongyi(post):
+    title = post.get('title', '')
+    content = post.get('content', '')[:200]
+    tags = ' '.join(post.get('tags', []))
+    all_text = f'{title} {content} {tags}'
+    return any(kw in all_text for kw in GONGYI_KEYWORDS)
 ```
 
 ### 1.7 连接恢复流程
@@ -1221,3 +1134,31 @@ async (page) => {
 **数据验证**：
 - 添加帖子数据验证
 - 跳过无效帖子
+
+### v6.0.0 (2026-06-16)
+基于 2026-06-16 实战经验重构抓取流程：
+
+**核心变更：合并时间戳检查与内容抓取**
+- 旧流程：先批量检查时间戳（只取 created_at）→ 再批量抓内容 → 每帖被请求 2 次
+- 新流程：一次 fetch 获取全部字段（title + content + created_at + views + tags）→ 每帖只请求 1 次
+- 效率提升约 50%，减少一半的 API 请求量
+
+**流程顺序调整**
+- 旧：发现帖子 → 检查时间戳 → 筛选窗口 → 抓内容
+- 新：发现帖子 → 去重（源间+历史）→ 抓全部数据 → 筛选时间窗口 → 过滤公益站
+- 原因：JSON API `/t/{id}.json` 一次返回所有字段，没必要分两步
+
+**数据立即落盘**
+- 每批 20 帖抓取完成后，立即用 `browser_evaluate` 的 `filename` 参数保存到 `data/batch_{N}.json`
+- 避免页面关闭或会话中断导致数据丢失
+- 注意：`filename` 路径必须在项目目录内（Playwright MCP 安全限制）
+
+**三级重试策略保留**
+- 第一级：JSON API `/t/{id}.json`（主力，~350ms/帖）
+- 第二级：Raw API `/raw/{id}`（重试失败帖，无元数据）
+- 第三级：浏览器逐页抓取（最终兜底，最慢但最可靠）
+
+**batch 文件双层 JSON 问题**
+- `browser_evaluate` 返回的 JSON 字符串被 `filename` 参数保存为字符串类型的 JSON
+- 读取时需要 `json.loads(raw)` 解析两次：`json.load(f)` → `json.loads(raw)`
+- 合并脚本必须处理此问题
