@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 2.4.0
+version: 2.5.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v2.4.0
+# AI News Factory — 日报短视频自动生成 v2.5.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。
 
@@ -179,6 +179,7 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 对每个选中事件，按模板生成脚本。
 
 **风格要求**:
+- **🔴 说人话！** 像跟朋友聊天一样，不要播音腔、不要堆砌术语、口语化、有温度
 - 像 B站 AI 科技 UP 主
 - 快节奏、有情绪、不书面
 - 总时长 60-120 秒（可适当放宽到 150s）
@@ -322,9 +323,10 @@ def generate_image(prompt, output_path):
 | 优先级 | 名称 | URL | 模型 | 说明 |
 |--------|------|-----|------|------|
 | 1 | 用户提供 | 用户提供 | gpt-image-2 | 优先使用用户提供的 API |
-| 2 | openrouter | https://eo.ioll.pp.ua | gpt-image-2 | 2026-06-13 验证可用 |
-| 3 | prism | https://ai.prism.uno | gpt-image-2 | 2026-06-13 超时，可能需要 VPN |
-| 4 | luka77 | http://api.luka77.cc | gpt-image-2 | 2026-06-04 验证可用 |
+| 2 | openrouter | https://eo.ioll.pp.ua | gpt-image-2 | 2026-06-16 验证可用，稳定性最好 |
+| 3 | jiuuij | https://jiuuij.de5.net | gpt-image-2 | 2026-06-16 验证可用 |
+| 4 | prism | https://ai.prism.uno | gpt-image-2 | 可能需要 VPN |
+| 5 | luka77 | http://api.luka77.cc | gpt-image-2 | 备选 |
 
 **API 选择逻辑**：
 1. 优先使用用户提供的 API
@@ -415,15 +417,15 @@ def generate_cover(prompt, output_path, size):
 
 **执行方式**：
 ```bash
-# 在主流程中启动异步 agent 生成封面
-Agent(
-    description="生成所有平台封面",
-    prompt="执行封面生成脚本...",
-    run_in_background=True  # 异步执行
-)
+# 🔴 重要：不要用 Agent 工具异步生成封面！Agent 会遇到 Bash 权限问题导致失败。
+# 直接在主线程中用 Python 脚本生成封面，与 TTS 串行执行即可。
+# 如果时间紧张，可以先生成封面再生成 TTS，或者反过来。
 
-# 同时继续执行 Phase 6 TTS 配音
-# 两者并行，节省约 3-5 分钟
+# 在主流程中直接执行封面生成 Python 脚本
+python3 -c "
+import json, subprocess, base64, tempfile, os, time
+# ... 封面生成代码 ...
+"
 ```
 
 **封面生成验证**：
@@ -445,15 +447,17 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 ```bash
 bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
   --text "配音文本" \
-  --profile "阿根" \
-  --style "兴奋 新闻播报" \
+  --profile "白桦" \
+  --style "新闻播报" \
   --output "news-pipeline/YYYY-MM-DD/voiceover/sceneN.wav"
 ```
 
 **🔴 关键限制：mimo-tts.sh 使用 `mktemp` 生成临时文件，并行调用会导致文件名冲突和静默失败。必须逐场景串行执行！**
 
 **配音要求**:
-- 推荐音色: 阿根
+- 推荐音色: **白桦**（预置音色，效果最佳）
+- **🔴 重要：优先使用预置音色（白桦/苏打/冰糖/茉莉），不要使用克隆音色（曼波/阿根）！克隆音色在新闻播报场景下听起来太机械、不自然。**
+- **🔴 TTS API 直接调用**：如果 mimo-tts.sh 报错缺少 MIMO_TTS_API_KEY，直接用 Python+curl 调用 MiMo TTS API（见下方代码）
 - **必须逐场景串行生成**（不要并行！）
 - 按场景生成音频文件（scene1.wav, scene2.wav, ...）
 - 每个场景的文本来自视频脚本对应段落
@@ -467,6 +471,42 @@ for i in 1 2 3 4 5 6 7; do
   echo "scene${i}: ${duration}s"
 done
 ```
+
+**TTS API 直接调用（备选方案）**:
+
+如果 mimo-tts.sh 报错 `MIMO_TTS_API_KEY not found`，直接用 Python 调用 MiMo TTS API：
+
+```python
+import json, subprocess, base64, tempfile, os, time
+
+API_URL = "https://token-plan-cn.xiaomimimo.com"  # 用户提供
+API_KEY = "用户提供的 TTS API Key"
+OUTPUT_DIR = "news-pipeline/YYYY-MM-DD/voiceover"
+
+SCENES = [
+    {"num": 1, "text": "场景1文本...", "style": "新闻播报"},
+    # ... 每个场景
+]
+
+def generate_tts(scene):
+    num = scene["num"]
+    text = scene["text"]
+    style = scene["style"]
+    output_path = os.path.join(OUTPUT_DIR, f"scene{num}.wav")
+    content = f"({style}){text}" if style else text
+    body = {
+        "model": "mimo-v2.5-tts",  # 预置音色用这个模型
+        "messages": [
+            {"role": "user", "content": ""},
+            {"role": "assistant", "content": content}
+        ],
+        "audio": {"format": "wav", "voice": "白桦"}  # 推荐白桦
+    }
+    # 用 curl 调用 API，解析 base64 音频数据
+    # 详见 news-pipeline/2026-06-16 的实际实现
+```
+
+**🔴 重要**：预置音色用 `mimo-v2.5-tts` 模型 + `voice: "白桦"`。克隆音色用 `mimo-v2.5-tts-voiceclone` 模型 + base64 音频，但效果差，不推荐。
 
 ### Phase 7: 字幕生成（原始脚本文本 + ffprobe 比例对齐）
 
@@ -2560,12 +2600,55 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 **Why:** 抖音页面有复杂的前端路由和弹窗拦截，Playwright 导航可能被中断
 **How to apply:** 导航失败时自动重试，不询问用户
 
+### 🔴 Agent 工具生成封面失败（v2.5.0 新增，2026-06-16）
+
+**问题**：使用 `Agent(run_in_background=True)` 异步生成封面时，Agent 遇到 Bash 权限被拒绝，无法执行 curl 和 Python 脚本。
+
+**解决方案**：不要用 Agent 工具生成封面。直接在主线程中用 Python 脚本串行生成所有封面。封面生成（5个，约 3-5 分钟）和 TTS 配音（7个，约 2-3 分钟）串行执行总时间约 8 分钟，可以接受。
+
+**Why:** Agent 工具在执行 Bash 命令时会遇到权限问题，无法完成 API 调用和文件操作
+**How to apply:** 封面生成直接用 `Bash` 工具执行 Python 脚本，不用 Agent
+
+### 🔴 克隆音色太机械（v2.5.0 新增，2026-06-16）
+
+**问题**：使用曼波/阿根的克隆音色（voiceclone）生成的 TTS 在新闻播报场景下听起来太机械、不自然，用户反馈"配音太机械"。
+
+**解决方案**：使用 MiMo 预置音色「白桦」（男性，中文），效果远好于克隆音色。其他可选预置音色：苏打（男）、冰糖（女）、茉莉（女）。
+
+**Why:** 克隆音色在短句和新闻播报场景下表现不佳，预置音色经过专业调优
+**How to apply:** TTS 默认使用 `mimo-v2.5-tts` 模型 + `voice: "白桦"`，不要用 `mimo-v2.5-tts-voiceclone`
+
+### 🟡 MIMO_TTS_API_KEY 未配置（v2.5.0 新增，2026-06-16）
+
+**问题**：mimo-tts.sh 脚本报错 `MIMO_TTS_API_KEY not found`，因为 ~/.claude/settings.json 的 env 中没有配置该变量。
+
+**解决方案**：
+1. 在预授权阶段向用户收集 TTS API URL 和 Key
+2. 如果 mimo-tts.sh 失败，直接用 Python+curl 调用 MiMo TTS API
+3. API 格式：`POST {API_URL}/v1/chat/completions`，body 格式见 mimo-tts.sh 源码
+
+**Why:** TTS API Key 和图片 API Key 是分开的，需要分别收集
+**How to apply:** 预授权时额外收集 TTS API URL + Key，或在 Phase 6 遇到错误时询问用户
+
+### 🟡 脚本风格必须"说人话"（v2.5.0 新增，2026-06-16）
+
+**问题**：默认生成的脚本风格偏播音腔、书面化，用户反馈"观众要求说人话"。
+
+**解决方案**：脚本生成时强调口语化、像跟朋友聊天、不要堆砌术语。具体要求：
+- 不要"各位观众大家好"式的开场
+- 用"说白了"、"这谁不爱"、"怕是要来了"等口语表达
+- 保留情绪感但不要夸张
+- 每段不超过 80 字
+
+**Why:** B站观众更喜欢自然、真实的表达方式
+**How to apply:** Phase 2 脚本生成时，风格要求第一条改为"说人话"
+
 ## 注意事项
 
 - **权限预授权是第一步**，覆盖内容生成 + 全部平台上传，一次确认后全程不再询问
 - 每个 Phase 完成后向用户展示中间结果，确认后继续
 - 图片生成失败时自动重试一次
-- TTS 使用 mimo-tts，推荐音色「阿根」
+- TTS 使用 mimo-tts，推荐预置音色「白桦」（不要用克隆音色！）
 - **TTS 必须串行执行，禁止并行！**
 - 视频总时长建议 60-120 秒（可适当放宽到 150s）
 - 事件数量建议 4-6 个
