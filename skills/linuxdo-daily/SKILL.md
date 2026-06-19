@@ -1,57 +1,48 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、linuxdo日报、AI日报、AI周报、技术日报、weekly
-version: 7.0.0
+version: 8.0.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报。
 
-## ⚡ 权限预授权（必须最先执行）
+## ⚡ 权限预授权（必须最先执行，一次性完成）
 
 **开始抓取前，必须一次性授权所有 Playwright MCP 工具**，避免中途反复弹出授权窗口。
 
-### 预授权步骤
+### 预授权步骤（按顺序执行，用户只需点击"允许"一次）
 
-按顺序执行以下 3 步，用户点击"允许"一次即可：
+```
+步骤 1: pkill -f "mcp-chrome" 2>/dev/null; sleep 2
+步骤 2: browser_navigate → https://linux.do
+步骤 3: browser_evaluate → () => document.title
+```
 
-1. **关闭旧浏览器实例**（如存在）：
-   ```bash
-   pkill -f "mcp-chrome" 2>/dev/null; sleep 2
-   ```
+完成以上 3 步后，所有 Playwright MCP 工具已获得授权，后续抓取不再需要逐次授权。
 
-2. **导航到目标页面触发浏览器启动**（触发第一次授权弹窗）：
-   ```
-   browser_navigate → https://linux.do/tag/444-tag/444
-   ```
+### 需要预授权的工具清单
 
-3. **执行一个简单的 JS 调用**（触发后续工具授权）：
-   ```
-   browser_evaluate → () => document.title
-   ```
+| 工具 | 用途 | 必须 |
+|------|------|------|
+| `browser_navigate` | 页面导航 | ✅ |
+| `browser_run_code_unsafe` | 执行 JS（滚动、批量抓取） | ✅ |
+| `browser_evaluate` | 执行 JS 表达式（提取数据） | ✅ |
+| `browser_wait_for` | 等待加载 | ✅ |
+| `browser_snapshot` | 页面快照 | 可选 |
+| `browser_take_screenshot` | 截图 | 可选 |
 
-4. **此时所有 Playwright MCP 工具已获得授权**，后续抓取不再需要逐次授权。
-
-> **注意**：不需要加载 cookies，不需要登录态。匿名访问即可获取公开帖子数据。
-
-### 权限检查清单
-
-以下工具在抓取过程中会用到，确保全部已授权：
-- `browser_navigate` — 页面导航
-- `browser_wait_for` — 等待加载
-- `browser_run_code_unsafe` — 执行 JS 代码（滚动、批量抓取）
-- `browser_evaluate` — 执行 JS 表达式（提取数据）
-- `browser_snapshot` — 页面快照（调试用）
-- `browser_take_screenshot` — 截图（调试用）
+> **不需要登录态**：匿名访问即可获取公开帖子数据。
 
 ### ⚠️ 反检测措施（重要）
 
 **必须遵守以下规则，避免触发官方警告或封号**：
 
-1. **批次间隔**：每批（20帖）完成后固定等待 5 秒
-2. **检测警告**：如果收到官方警告，立即停止爬取并等待 24 小时
-3. **限制并发**：单次最多同时处理 5 个页面
+1. **浏览器 fetch API 间隔**：每批（50帖）完成后等待 1.5 秒
+2. **逐帖浏览间隔**：每帖之间等待 1.5 秒
+3. **检测警告**：如果收到官方警告，立即停止爬取并等待 24 小时
+4. **限制并发**：单次最多同时处理 5 个请求
 
 ---
 
@@ -377,10 +368,11 @@ posts = sorted(all_posts.values(), key=lambda x: int(x['id']), reverse=True)
 
 ### ⚠️ 反检测规则（必须遵守）
 
-1. **Python requests 间隔**：每个请求间隔 1.5 秒（比浏览器方式更快更稳定）
-2. **检测 Cloudflare 挑战**：如果页面标题包含 "Just a moment" 或 "Checking your browser"，立即停止并等待 15 秒
-3. **检测官方警告**：如果页面内容包含 "异常的自动化访问行为"，立即停止爬取并通知用户
-4. **429 限流处理**：如果 Python requests 返回 429，改用浏览器打开帖子页面抓取
+1. **浏览器 fetch API 间隔**：每批完成后等待 1.5 秒
+2. **逐帖浏览间隔**：每帖之间等待 1.5 秒
+3. **检测 Cloudflare 挑战**：如果页面标题包含 "Just a moment" 或 "Checking your browser"，立即停止并等待 15 秒
+4. **检测官方警告**：如果页面内容包含 "异常的自动化访问行为"，立即停止爬取并通知用户
+5. **429 限流处理**：记录失败 ID，改用浏览器逐帖浏览抓取
 
 ### 1.1 打开列表页
 
@@ -453,9 +445,9 @@ browser_evaluate(filename="data/source_b.json", function=() => {
 })
 ```
 
-### 1.4 批量抓取完整数据（Python requests 三级重试策略）
+### 1.4 批量抓取完整数据（浏览器 fetch API 方案）
 
-**核心原则**：使用 Python `requests` 库直接调用 Discourse JSON API，比 browser_evaluate 快 10 倍且更稳定。
+**核心原则**：使用浏览器 `page.evaluate` + `fetch()` 调用 Discourse JSON API。**Python requests 会被 403 拦截**，必须用浏览器方式。
 
 **⚠️ 合并时间戳检查与内容抓取**：JSON API `/t/{id}.json` 一次返回所有字段（title + content + created_at + views + tags），每帖只请求 1 次。
 
@@ -477,123 +469,91 @@ with open('data/merged_ids.json', 'w') as f:
 print(f'Source A: {len(ids_a)}, Source B: {len(ids_b)}, Merged: {len(merged)}')
 ```
 
-#### 第二级：Python requests 批量抓取（主力方案）
+#### 第二级：浏览器 fetch API 批量抓取（主力方案）
 
-**使用后台 Bash 任务运行 Python 脚本**，避免阻塞主会话：
-
-```bash
-python3 << 'PYEOF'
-import json, requests, time, os, re
-from datetime import datetime, timezone, timedelta
-
-with open('data/merged_ids.json') as f:
-    ids = json.load(f)
-
-session = requests.Session()
-session.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-    'Accept': 'application/json'
-})
-
-results = []
-batch_num = 0
-
-for idx, tid in enumerate(ids):
-    try:
-        r = session.get(f'https://linux.do/t/{tid}.json', timeout=10)
-        if r.status_code == 429:
-            results.append({'id': tid, 'error': 429})
-        elif r.status_code == 404:
-            results.append({'id': tid, 'error': 404})
-        elif r.status_code != 200:
-            results.append({'id': tid, 'error': r.status_code})
-        else:
-            j = r.json()
-            cooked = j.get('post_stream', {}).get('posts', [{}])[0].get('cooked', '')
-            content = re.sub(r'<[^>]+>', '', cooked).replace('&nbsp;', ' ').replace('\n', ' ').strip()[:500]
-            results.append({
-                'id': tid, 'title': j.get('title', ''), 'content': content,
-                'views': j.get('views', 0), 'posts_count': j.get('posts_count', 0),
-                'like_count': j.get('post_stream', {}).get('posts', [{}])[0].get('like_count', 0),
-                'created_at': j.get('post_stream', {}).get('posts', [{}])[0].get('created_at', '') or j.get('created_at', ''),
-                'tags': [t if isinstance(t, str) else t.get('name', '') for t in (j.get('tags') or [])]
-            })
-    except Exception as e:
-        results.append({'id': tid, 'error': str(e)[:80]})
-    
-    # 每 20 帖保存一次
-    if len(results) >= 20:
-        with open(f'data/batch_{batch_num}.json', 'w') as f:
-            json.dump(results, f, ensure_ascii=False)
-        print(f'Batch {batch_num}: saved {len(results)} posts (idx {idx+1}/{len(ids)})')
-        results = []
-        batch_num += 1
-    
-    time.sleep(1.5)  # 1.5 秒间隔
-
-# 保存剩余
-if results:
-    with open(f'data/batch_{batch_num}.json', 'w') as f:
-        json.dump(results, f, ensure_ascii=False)
-    print(f'Batch {batch_num}: saved {len(results)} posts')
-print('Done')
-PYEOF
-```
-
-**关键注意事项**：
-- 使用 `run_in_background: true` 运行，避免超时
-- Python requests 比 browser_evaluate 的 fetch() 快 10 倍
-- 1.5 秒间隔足够安全，不会触发 429
-- 如果收到 429，记录到 errors 列表，后续用浏览器重试
-
-#### 第二级：浏览器打开帖子页面（429 重试）
-
-Python requests 收到 429 的帖子，用浏览器逐个打开抓取：
+**使用 `browser_run_code_unsafe` 在浏览器内批量调用 JSON API**，每批 50 帖，5 并发：
 
 ```js
-// 导航到帖子页面
-browser_navigate → https://linux.do/t/topic/{id}
-
-// 提取内容
-browser_evaluate → () => {
-  const post = document.querySelector('.topic-post:first-child');
-  if (!post) return JSON.stringify({ error: 'no post found' });
-  const cooked = post.querySelector('.cooked');
-  const content = cooked ? cooked.textContent.trim().substring(0, 500) : '';
-  const title = document.querySelector('.fancy-title')?.textContent?.trim() || '';
-  return JSON.stringify({ id: '{id}', title, content, source: 'browser' });
+async (page) => {
+  const ids = /* 从 merged_ids.json 读取 */;
+  const results = [];
+  for (let i = 0; i < ids.length; i += 5) {
+    const batch = ids.slice(i, i + 5);
+    const promises = batch.map(async (tid) => {
+      try {
+        const data = await page.evaluate(async (id) => {
+          const r = await fetch('/t/' + id + '.json');
+          if (!r.ok) return { id: id, error: r.status };
+          const j = await r.json();
+          const posts = j.post_stream?.posts || [];
+          const first = posts[0] || {};
+          const cooked = first.cooked || '';
+          return {
+            id: id, title: j.title || '',
+            content: cooked.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\n/g, ' ').trim().substring(0, 500),
+            views: j.views || 0, posts_count: j.posts_count || 0,
+            like_count: first.like_count || 0,
+            created_at: first.created_at || j.created_at || '',
+            tags: (j.tags || []).map(function(t) { return typeof t === 'string' ? t : t.name || ''; })
+          };
+        }, tid);
+        results.push(data);
+      } catch (e) {
+        results.push({ id: tid, error: String(e).substring(0, 80) });
+      }
+    });
+    await Promise.all(promises);
+    if (i + 5 < ids.length) await page.waitForTimeout(1500);
+  }
+  return JSON.stringify({ count: results.length, data: results });
 }
 ```
 
-#### 第三级：Raw API 重试（最终兜底）
+**关键注意事项**：
+- **Python requests 会被 403 拦截**，必须用浏览器 fetch API
+- 浏览器 fetch 利用已有 session/cookies，不会被拦截
+- 每批 50 帖，5 并发，1.5 秒间隔
+- 返回 JSON 字符串，用 Write 工具保存到文件
 
-浏览器也失败的帖子，使用 `/raw/{id}` 端点：
+#### 第二级：逐帖浏览器浏览（fetch 失败重试）
 
-```python
-import requests, json, time
-failed_ids = [...]  # 前两级失败的 ID
-results = []
-session = requests.Session()
-for tid in failed_ids:
-    try:
-        r = session.get(f'https://linux.do/raw/{tid}', timeout=10)
-        if r.ok:
-            content = r.text[:500].replace('\n', ' ').strip()
-            results.append({'id': tid, 'content': content, 'source': 'raw'})
-        else:
-            results.append({'id': tid, 'error': r.status_code})
-    except Exception as e:
-        results.append({'id': tid, 'error': str(e)[:50]})
-    time.sleep(1.5)
+浏览器 fetch API 失败的帖子，逐个打开页面提取数据：
+
+```js
+async (page) => {
+  const failed_ids = /* 前一级失败的 ID */;
+  const results = [];
+  for (const tid of failed_ids) {
+    try {
+      await page.goto('https://linux.do/t/topic/' + tid, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.waitForTimeout(2000);
+      const data = await page.evaluate(() => {
+        const title = document.querySelector('.fancy-title')?.textContent?.trim() || '';
+        const cooked = document.querySelector('.topic-post:first-child .cooked');
+        const content = cooked ? cooked.textContent.trim().substring(0, 500) : '';
+        const views = document.querySelector('.views .number')?.textContent?.trim() || '0';
+        const tags = Array.from(document.querySelectorAll('.discourse-tag')).map(t => t.textContent.trim());
+        return { title, content, views, tags };
+      });
+      results.push({ id: tid, ...data });
+      await page.goto('https://linux.do/tag/444-tag/444', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.waitForTimeout(1500);
+    } catch (e) {
+      results.push({ id: tid, error: String(e).substring(0, 100) });
+    }
+  }
+  return JSON.stringify({ count: results.length, data: results });
+}
 ```
 
-#### 三级重试优先级总结
+**注意**：逐帖浏览方式**无法提取 `created_at` 时间戳**（页面 `<time>` 元素不显示完整日期），32h 筛选将失效。
+
+#### 重试优先级总结
 
 | 优先级 | 方法 | 速度 | 成功率 | 适用场景 |
 |--------|------|------|--------|----------|
-| 1️⃣ | Python requests `/t/{id}.json` | ~350ms/帖 | ~85% | 主力方案 |
-| 2️⃣ | 浏览器打开帖子页面 | ~3s/帖 | ~95% | 429 重试 |
-| 3️⃣ | Python requests `/raw/{id}` | ~300ms/帖 | ~90% | 最终兜底 |
+| 1️⃣ | 浏览器 fetch API `/t/{id}.json` | ~500ms/帖 | ~95% | 主力方案 |
+| 2️⃣ | 逐帖浏览器浏览 | ~3.5s/帖 | ~90% | fetch 失败重试 |
 
 ### 1.5 数据合并与时间窗口筛选
 
@@ -1073,23 +1033,25 @@ async (page) => {
 ## 注意事项
 
 ### 浏览器与抓取
-- **主力方案：Python requests**：直接调用 `/t/{id}.json`，比 browser_evaluate 快 10 倍
-- **浏览器仅用于**：滚动加载列表页、提取帖子列表、429 时逐帖抓取
+- **主力方案：浏览器 fetch API**：`page.evaluate` + `fetch('/t/{id}.json')`，利用浏览器 session 避免 403
+- **Python requests 会被 403 拦截**：linux.do 对直接 Python 请求做了限制，必须用浏览器方式
+- **浏览器仅用于**：滚动加载列表页、提取帖子列表、fetch 失败时逐帖浏览
 - **Source B API 限制**：`/c/34.json` 不返回帖子列表，必须浏览器滚动
 - **开始前必须预授权**：先关闭旧浏览器实例，再导航触发新实例，用户点击一次"允许"即可
-- **Python requests 间隔 1.5 秒**：足够安全，不会触发 429
-- **后台运行 Python 脚本**：使用 `run_in_background: true`，避免超时阻塞
+- **浏览器 fetch API 间隔 1.5 秒**：足够安全，不会触发 429
 - 滚动加载至少 15 次，确保帖子数 > 400
 - 如果触发连接限制（`ERR_CONNECTION_CLOSED`），等待 30 秒后重试
-- 如果触发 429 限流，改用浏览器打开帖子页面抓取
+- 如果触发 429 限流，改用浏览器逐帖浏览抓取
 - 每个数据源最多抓取 500 帖
 - 不需要登录态，匿名访问即可获取公开帖子数据
+- **created_at 提取**：浏览器 fetch API 可以从 JSON API 获取 `created_at`；逐帖浏览器浏览无法获取
 
 ### ⚠️ 反检测规则（必须遵守）
-1. **Python requests 间隔 1.5 秒**：每个请求之间固定等待 1.5 秒
-2. **检测 Cloudflare 挑战**：如果页面标题包含 "Just a moment" 或 "Checking your browser"，立即停止并等待 15 秒
-3. **检测官方警告**：如果页面内容包含 "异常的自动化访问行为"，立即停止爬取并通知用户
-4. **429 限流处理**：记录失败 ID，改用浏览器逐帖抓取
+1. **浏览器 fetch API 间隔 1.5 秒**：每批完成后固定等待 1.5 秒
+2. **逐帖浏览间隔 1.5 秒**：每帖之间固定等待 1.5 秒
+3. **检测 Cloudflare 挑战**：如果页面标题包含 "Just a moment" 或 "Checking your browser"，立即停止并等待 15 秒
+4. **检测官方警告**：如果页面内容包含 "异常的自动化访问行为"，立即停止爬取并通知用户
+5. **429 限流处理**：记录失败 ID，改用浏览器逐帖浏览抓取
 
 ### 日期与过滤
 - **不能用 ID 阈值判断日期**：Discourse ID 不按日期顺序（跨分类），必须用 JSON API 获取 `created_at`
@@ -1119,6 +1081,29 @@ async (page) => {
 ---
 
 ## 更新日志
+
+### v8.0.0 (2026-06-18)
+基于 2026-06-18 实战经验，Python requests 被 403 拦截，切换到浏览器 fetch API：
+
+**核心变更：Python requests → 浏览器 fetch API**
+- 旧方案：Python requests 直接调用 `/t/{id}.json` → 被 linux.do 403 拦截
+- 新方案：浏览器 `page.evaluate` + `fetch()` → 利用浏览器 session/cookies，成功率 95%+
+- 原因：linux.do 对直接 Python requests 做了 UA/IP 限制，必须通过浏览器发起请求
+
+**抓取流程调整**
+- 主力方案：`browser_run_code_unsafe` 批量调用 fetch API（每批 50 帖，5 并发）
+- 备选方案：逐帖浏览器浏览（打开页面提取数据，但无法获取 created_at）
+- 移除 Python requests 作为主力方案（403 问题无法解决）
+
+**权限预授权优化**
+- 简化为 3 步：关闭旧实例 → 导航触发 → 一次授权
+- 明确列出需要预授权的工具清单
+- 强调不需要登录态
+
+**已知限制**
+- 逐帖浏览器浏览方式无法提取 `created_at` 时间戳（页面 `<time>` 元素不显示完整日期）
+- 如果部分帖子通过逐帖浏览抓取，32h 时间窗口筛选可能不完整
+- 浏览器 fetch API 可以从 JSON API 获取 `created_at`，是推荐的主力方案
 
 ### v7.0.0 (2026-06-17)
 基于 2026-06-17 实战经验，将主力抓取方式从 browser_evaluate 切换到 Python requests：
