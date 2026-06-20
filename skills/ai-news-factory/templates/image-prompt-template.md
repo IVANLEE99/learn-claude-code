@@ -86,3 +86,52 @@ AI News
 - [ ] 写实风格，非过度幻想
 - [ ] 无文字/水印污染画面
 - [ ] 情绪与脚本匹配
+
+---
+
+## 破格模式 Prompt 变体
+
+破格模式下，在标准 prompt 末尾追加反差视觉描述。
+
+### 追加格式
+
+```
+[标准 prompt] + The image conveys a sense of [破格类型]:
+- [反差视觉元素1]
+- [反差视觉元素2]
+- unexpected contrast between [A] and [B]
+```
+
+### 各类型示例
+
+**身份破格**：
+```
+... The image conveys a sense of unexpected role:
+- a figure in [身份A] performing [行为B]
+- contrast between formal/informal, powerful/vulnerable
+- grounded, realistic setting that highlights the mismatch
+```
+
+**场景破格**：
+```
+... The image conveys a sense of environment mismatch:
+- [行为A] happening in unexpected [环境B]
+- surreal but photorealistic location
+- visual tension between subject and surroundings
+```
+
+**道具破格**：
+```
+... The image conveys a sense of creative misuse:
+- [日常物品A] being used for [非常规目的B]
+- close-up on the repurposed object
+- warm, grounded lighting despite the absurdity
+```
+
+**角色破格**：
+```
+... The image conveys a sense of role reversal:
+- [角色A] behaving like [角色B]
+- reversed hierarchy or expectation
+- split composition showing both roles
+```

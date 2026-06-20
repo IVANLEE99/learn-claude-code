@@ -73,6 +73,7 @@ version: 2.5.0
 - "日报视频", "生成日报视频", "AI news video"
 - "把日报做成视频", "日报转视频"
 - "AI周报", "羊报AI周刊", "weekly report", "周报视频"
+- "破格模式", "破格元素", "破格风格", "元素破格"
 
 ## 周报模式
 
@@ -120,6 +121,44 @@ A professional Chinese AI news studio weekly cover image. A male news anchor in 
 - 行业政策与监管
 - 重大技术突破
 
+## 破格模式
+
+**当触发词包含"破格"时，开启破格模式。可与周报模式叠加使用。**
+
+### 什么是元素破格
+
+打破常规逻辑，制造**反差感**和**意外感**。6种维度：
+
+| 维度 | 含义 | 示例 |
+|------|------|------|
+| 身份破格 | 谁在做（身份×行为反差） | 保安跳霹雳舞 |
+| 场景破格 | 在哪做（行为×环境反差） | 农村走秀 |
+| 道具破格 | 用什么做（工具×目的反差） | 方便面写字 |
+| 语言破格 | 怎么说（风格×内容反差） | 英语卖农产品 |
+| 对象破格 | 对谁做（目标×行为反差） | 给鸡开会 |
+| 角色破格 | 谁是什么（设定×行为反差） | 猪会钓鱼 |
+
+### 破格模式与标准模式的区别
+
+| 项目 | 标准模式 | 破格模式 |
+|------|---------|---------|
+| 脚本风格 | 口播解说体 | 口播 + 破格标记 |
+| Hook | 悬念/冲突 | 必须用一种破格类型开场 |
+| 正文 | 纯信息传递 | 每个场景可标注破格类型 |
+| 图片Prompt | 写实新闻摄影 | 写实 + 破格视觉关键词 |
+| 分镜 | 标准镜头 | 增加倾斜构图/对比蒙太奇 |
+| TTS | 统一风格 | 可按场景切换风格 |
+| 其他阶段 | 不变 | 不变（TTS/字幕/渲染/上传） |
+
+### 破格模式规则
+
+1. **Hook 必须使用一种破格**（从6种中选）
+2. **正文至少使用2种不同破格**（同一视频不重复同一类型）
+3. **每种破格标注类型**（脚本中用 `[身份破格]` 标记）
+4. **图片 Prompt 反映破格视觉**（在 prompt 中加入反差关键词）
+5. **分镜增加破格镜头**（倾斜构图、对比蒙太奇等）
+6. **TTS 可选多风格**（不同场景用不同语调）
+
 ## 前置依赖
 
 - **mimo-tts skill**: 语音合成 (`~/Documents/learn-claude-code/skills/mimo-tts/`)
@@ -138,6 +177,7 @@ A professional Chinese AI news studio weekly cover image. A male news anchor in 
 - `API_URL`: 图片生成 API URL
 - `API_KEY`: 图片生成 API Key
 - `UPLOAD_PLATFORMS`: 上传平台列表
+- `STYLE_MODE`: 风格模式（standard / poge），默认 standard
 
 如信息不完整，在此处补充询问。
 
@@ -202,6 +242,29 @@ Hook：{开场钩子，5秒内抓住注意力}
 
 **🔴 重要：保存每个场景的 TTS 文本**，Phase 7 字幕生成需要直接使用这些文本（不用 ASR 识别）。
 
+**🔴 破格模式附加要求**（仅当 STYLE_MODE=poge 时生效）：
+
+在脚本中为每个场景标注破格类型：
+
+```
+标题：{标题}
+Hook：[破格类型] {开场，用破格制造意外感}
+
+正文：
+[身份破格] {段落1 - 引入事件}
+{段落2 - 核心信息，正常叙述}
+[语言破格] {段落3 - 争议/反转}
+{段落4 - 延伸}
+
+结尾：{CTA}
+```
+
+破格标记规范：
+- 用方括号标注：`[身份破格]`、`[场景破格]`、`[道具破格]`、`[语言破格]`、`[对象破格]`、`[角色破格]`
+- 标记放在段落开头
+- 同一视频至少使用 3 种不同破格类型
+- 参考模板：`templates/script-template.md`（破格模式模板）
+
 **🔴 禁止使用的词汇**：文案和字幕中不得出现以下词汇，需替换为通用称呼：
 - 「佬友」→「大家」「朋友们」
 - 「Linuxdo」→「社区」「论坛」
@@ -221,6 +284,19 @@ Hook：{开场钩子，5秒内抓住注意力}
 | 2 | 5s | 全景 | 科技新闻编辑室 | 事件标题 | 切换 |
 
 **参考模板**: `templates/storyboard-template.md`
+
+**🔴 破格模式分镜**（仅当 STYLE_MODE=poge 时生效）：
+
+在标准分镜基础上增加「破格镜头」列：
+
+| 破格类型 | 镜头技巧 | Prompt关键词 |
+|---------|---------|-------------|
+| 身份破格 | 身份与环境对比构图 | unexpected role, contrast, juxtaposition |
+| 场景破格 | 倾斜构图（Dutch angle） | dutch angle, tilted, surreal setting |
+| 道具破格 | 道具特写+反差背景 | unconventional object close-up, repurposed |
+| 语言破格 | （不影响镜头，影响TTS） | — |
+| 对象破格 | 荒诞目标特写 | absurd target, unexpected audience |
+| 角色破格 | 角色互换对比 | role reversal, character twist, split composition |
 
 ### Phase 4: 图片 Prompt 生成
 
@@ -271,6 +347,30 @@ Avoid:
   }
 ]
 ```
+
+**🔴 破格模式 Prompt 变体**（仅当 STYLE_MODE=poge 时生效）：
+
+在标准 prompt 末尾追加反差视觉描述：
+
+```
+[标准 prompt] + The image conveys a sense of [破格类型]:
+- [反差视觉元素1]
+- [反差视觉元素2]
+- unexpected contrast between [A] and [B]
+```
+
+破格类型→视觉关键词映射：
+
+| 破格类型 | 视觉关键词 |
+|---------|-----------|
+| 身份破格 | unexpected role, identity contrast, juxtaposition of status |
+| 场景破格 | surreal setting, environment mismatch, unexpected location |
+| 道具破格 | repurposed object, unconventional tool, creative misuse |
+| 语言破格 | (不影响图片) |
+| 对象破格 | absurd audience, unexpected target, comical mismatch |
+| 角色破格 | role reversal, character twist, reversed hierarchy |
+
+参考模板：`templates/image-prompt-template.md`（破格模式 Prompt 变体）
 
 ### Phase 5: 图片生成
 
