@@ -1,7 +1,7 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 2.5.0
+version: 2.6.0
 ---
 
 # AI News Factory — 日报短视频自动生成 v2.5.0
@@ -21,7 +21,8 @@ version: 2.5.0
 1. **一次授权，全程执行**：用户确认后，后续所有操作（文件读写、API调用、浏览器操作）不再询问
 2. **信息一并收集**：在预授权时同时收集 API URL、Key、上传平台等信息
 3. **失败自动重试**：API 调用失败自动重试一次，不询问用户
-4. **浏览器锁自动处理**：检测到浏览器锁时自动清理，不询问用户
+4. **浏览器锁自动处理**：检测到浏览器锁时自动清理（删除 SingletonLock + kill 旧进程），不询问用户
+5. **DNS 劫持自动绕过**：检测到 API 连接超时时，使用 `nslookup` 获取真实 IP + `curl --resolve` 绕过本地代理 DNS 劫持（198.18.x.x 网段），不询问用户
 
 ### 预授权检查清单
 
@@ -41,6 +42,7 @@ version: 2.5.0
   ☐ 调用 mimo-tts.sh 生成配音（逐场景串行）
   ☐ 调用 ffprobe 获取音频时长
   ☐ 调用 npx remotion render 渲染视频
+  ☐ kill 旧浏览器进程（如遇浏览器锁）
 
 🌐 API 调用
   ☐ 图片生成 API（用户提供 URL + Key）
@@ -50,7 +52,7 @@ version: 2.5.0
   ☐ B站：自动上传视频、封面、填写标题/简介/标签、选择合集、投稿
   ☐ 抖音：自动上传视频、封面、填写描述、选择合集、发布
   ☐ 视频号：自动上传视频、封面、填写描述/短标题、选择合集
-  ☐ 公众号：自动创建文章、填写标题/正文、上传封面、设置原创/赞赏、选择合集
+  ☐ 公众号：自动创建文章、填写标题/正文、上传封面、声明原创、选择合集
 
 请回复「确认」或「全部授权」开始执行。
 ```
@@ -423,10 +425,26 @@ def generate_image(prompt, output_path):
 | 优先级 | 名称 | URL | 模型 | 说明 |
 |--------|------|-----|------|------|
 | 1 | 用户提供 | 用户提供 | gpt-image-2 | 优先使用用户提供的 API |
-| 2 | openrouter | https://eo.ioll.pp.ua | gpt-image-2 | 2026-06-16 验证可用，稳定性最好 |
-| 3 | jiuuij | https://jiuuij.de5.net | gpt-image-2 | 2026-06-16 验证可用 |
-| 4 | prism | https://ai.prism.uno | gpt-image-2 | 可能需要 VPN |
-| 5 | luka77 | http://api.luka77.cc | gpt-image-2 | 备选 |
+| 2 | luka77 | http://api.luka77.cc | gpt-image-2 | **最稳定**（HTTP，无 SSL 问题，2026-06-21 验证） |
+| 3 | openrouter | https://eo.ioll.pp.ua | gpt-image-2 | 需要 DNS 绕过（198.18.x.x 劫持） |
+| 4 | jiuuij | https://jiuuij.de5.net | gpt-image-2 | 需要 DNS 绕过，响应较慢 |
+| 5 | prism | https://ai.prism.uno | gpt-image-2 | 需要 VPN，SSL 握手常超时 |
+
+**🔴 DNS 劫持检测与绕过**：
+
+如果 API 连接超时或 SSL 错误，检查 DNS 解析是否被本地代理工具劫持到 198.18.x.x 网段：
+
+```bash
+# 检查 DNS 解析
+nslookup api.luka77.cc
+# 如果返回 198.18.x.x，说明被劫持
+
+# 获取真实 IP 后用 --resolve 绕过
+REAL_IP=$(nslookup api.luka77.cc 8.8.8.8 | grep -A1 "Name:" | tail -1 | tr -d ' ')
+curl -s --resolve api.luka77.cc:443:$REAL_IP ...
+```
+
+**HTTP API 优先**：如果 API 支持 HTTP（如 luka77），优先使用 HTTP 避免 SSL 问题。
 
 **API 选择逻辑**：
 1. 优先使用用户提供的 API
@@ -438,6 +456,9 @@ def generate_image(prompt, output_path):
 - **必须逐张生成**：API 有并发限制
 - **必须从 JSON 文件读取 Prompt**，不能用简化版本
 - 每张图片生成后重试一次（如果失败）
+- **HTTP API 优先**：HTTP（如 luka77）比 HTTPS 更稳定，避免 SSL/DNS 问题
+- **超时设置**：图片生成可能需要 30-120 秒，`--max-time` 设为 300
+- **DNS 劫持**：如遇连接超时，用 `nslookup` + `curl --resolve` 绕过
 
 ### Phase 5.5: 异步生成封面（与 TTS 并行）
 
@@ -547,7 +568,7 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 ```bash
 bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
   --text "配音文本" \
-  --profile "白桦" \
+  --voice "白桦" \
   --style "新闻播报" \
   --output "news-pipeline/YYYY-MM-DD/voiceover/sceneN.wav"
 ```
@@ -556,6 +577,7 @@ bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
 
 **配音要求**:
 - 推荐音色: **白桦**（预置音色，效果最佳）
+- **🔴 重要：使用 `--voice "白桦"` 而非 `--profile "白桦"`！`--profile` 只能使用本地 profiles.json 中已保存的克隆音色（曼波/阿根），预置音色必须用 `--voice` 参数。**
 - **🔴 重要：优先使用预置音色（白桦/苏打/冰糖/茉莉），不要使用克隆音色（曼波/阿根）！克隆音色在新闻播报场景下听起来太机械、不自然。**
 - **🔴 TTS API 直接调用**：如果 mimo-tts.sh 报错缺少 MIMO_TTS_API_KEY，直接用 Python+curl 调用 MiMo TTS API（见下方代码）
 - **必须逐场景串行生成**（不要并行！）
