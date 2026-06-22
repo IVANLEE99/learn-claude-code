@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 2.6.0
+version: 2.7.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v2.5.0
+# AI News Factory — 日报短视频自动生成 v2.7.0
 
 将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。
 
@@ -2779,3 +2779,63 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 - **字幕必须使用原始脚本文本 + ffprobe 对齐**，不用 FunASR（专业术语识别率太低）
 - **B站自定义下拉框必须用 JS evaluate，不能用 browser_click 文本匹配**
 - **封面生成应与 TTS 并行执行**（用 Agent 异步），节省 3-5 分钟
+
+### imageId 偏移问题（v2.7.0 修复）
+
+Composition.tsx 中 imageId 与实际图片文件可能存在偏移。验证方法：
+```bash
+# 对比文件大小确认 public 目录的文件是否正确
+ls -la news-pipeline/video-project/public/images/scene*.png
+ls -la news-pipeline/weekly/.../images/scene*.png
+# 用 md5 验证
+for i in 1 2 3 4 5 6; do
+  src=$(md5 -q news-pipeline/weekly/.../images/scene${i}.png)
+  pub=$(md5 -q news-pipeline/video-project/public/images/scene${i}.png)
+  [ "$src" = "$pub" ] && echo "scene${i}: OK" || echo "scene${i}: MISMATCH"
+done
+```
+
+如果图片内容正确但视频中错位，修改 Composition.tsx 的 imageId 映射，而不是重新生成图片。
+常见原因：上次渲染的 sceneConfig 未更新，或 scene 数量变化导致 ID 整体偏移。
+
+### 公众号封面上传（自动方法）
+
+公众号编辑器上传图片有两种路径：
+
+**路径 A：工具栏「图片」按钮（推荐）**
+```javascript
+// 1. 点击正文区域获取 focus
+await page.evaluate(() => {
+  const editors = document.querySelectorAll('.ProseMirror');
+  if (editors[1]) editors[1].click();
+});
+// 2. 点击工具栏「图片」→「本地上传」
+// 3. 用 hidden file input 上传
+const input = await page.$('input[type="file"][accept*="image"]');
+await input.setInputFiles('/path/to/cover.png');
+```
+
+**路径 B：封面区域直接上传**
+```javascript
+// 1. 找到封面区域的 file input（可能有多个）
+const inputs = await page.$$('input[type="file"]');
+// 2. 筛选 accept 包含 image 的
+for (const input of inputs) {
+  const accept = await input.getAttribute('accept');
+  if (accept && accept.includes('image')) {
+    await input.setInputFiles('/path/to/cover.png');
+    break;
+  }
+}
+```
+
+### B站封面上传（自动方法）
+
+B站上传页面的封面选择器是隐藏的 file input：
+```javascript
+// 1. 先点击「更改封面」按钮
+// 2. 找到 hidden file input 并上传
+const input = await page.$('input[type="file"][accept*="image"]');
+await input.setInputFiles('/path/to/bilibili-cover.png');
+// 3. 等待上传完成，点击确认
+```
