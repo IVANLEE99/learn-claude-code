@@ -1,7 +1,7 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、linuxdo日报、AI日报、AI周报、技术日报、weekly
-version: 9.0.0
+version: 10.0.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
@@ -242,16 +242,75 @@ with open('data/merged_ids.json', 'w') as f:
 print(f'历史去重: {len(all_ids)} → {len(new_ids)}')
 ```
 
-### 1.6 逐帖浏览器浏览（核心抓取方案）
+### 1.6 时间戳提取（关键步骤）
+
+**⚠️ 2026-06-23 实测结论**：帖子页面没有 `<time>` 元素！`document.querySelector('time')` 返回空。
+
+**正确方法**：从列表页的 `td.activity` 元素的 `title` 属性提取创建时间。
+
+#### 从列表页提取时间戳
+
+列表页每个帖子行的 `<td class="activity">` 元素有 `title` 属性，格式为：
+```
+Created: Jun 22, 2026 9:53 pm\nLatest: Jun 23, 2026 11:31 am
+```
+
+使用 `browser_evaluate` 提取：
+
+```js
+// browser_evaluate 从列表页提取所有帖子的时间戳
+() => {
+  const rows = document.querySelectorAll('tr.topic-list-item');
+  const topics = [];
+  rows.forEach(row => {
+    const topicId = row.getAttribute('data-topic-id');
+    const activityCell = row.querySelector('td.activity');
+    const titleAttr = activityCell?.getAttribute('title') || '';
+    const createdMatch = titleAttr.match(/Created:\s*(.+?)(?:\n|$)/);
+    const created = createdMatch ? createdMatch[1].trim() : '';
+    topics.push({ id: topicId, created });
+  });
+  return JSON.stringify({ count: topics.length, topics });
+}
+```
+
+**重要**：必须先滚动加载全部帖子（步骤 1.2），然后再提取时间戳。时间戳格式为 `"Jun 22, 2026 9:53 pm"`，使用 `dateutil.parser.parse()` 解析。
+
+#### 时间戳文件保存
+
+```python
+# 保存时间戳到文件（使用 browser_evaluate 的 filename 参数）
+browser_evaluate(filename="data/topic_timestamps.json", function=<上面的JS代码>)
+
+# Python 中合并时间戳到帖子数据
+import json
+from dateutil import parser as dateparser
+from datetime import datetime, timezone, timedelta
+
+with open('data/topic_timestamps.json') as f:
+    content = f.read()
+    ts_data = json.loads(json.loads(content)) if content.startswith('"') else json.loads(content)
+timestamps = {str(t['id']): t['created'] for t in ts_data['topics']}
+
+# 合并到帖子数据
+for post in daily['posts']:
+    pid = str(post['id'])
+    if pid in timestamps:
+        post['created_at'] = timestamps[pid]
+```
+
+### 1.7 逐帖浏览器浏览（核心抓取方案）
 
 **必须使用此方案**，浏览器 fetch API 会被 429 限流。
 
-#### 抓取流程
+#### 抓取流程（模拟人类浏览）
 
-1. **直接打开帖子 URL**：`browser_navigate → https://linux.do/t/topic/{id}`
-2. **检测 Cloudflare**：如果标题包含 "Just a moment"，等待 15 秒
-3. **提取页面数据**：`browser_evaluate` 提取标题、正文、浏览量、标签、时间
-4. **继续下一个帖子**：直接导航到下一个帖子 URL（不回列表页）
+1. **打开列表页**：`browser_navigate → https://linux.do/tag/444-tag/444`
+2. **滚动加载全部帖子**：至少 20 次滚动，每次间隔 2.5 秒
+3. **提取帖子 ID 列表**：`browser_evaluate` 提取所有 `data-topic-id`
+4. **提取时间戳**：从 `td.activity[title]` 提取创建时间（见步骤 1.6）
+5. **逐帖浏览**：`browser_navigate` 打开帖子 → 提取数据 → **返回列表页** → 打开下一个
+6. **全部抓取完后再筛选 32 小时**
 
 #### 每帖提取数据
 
@@ -259,56 +318,58 @@ print(f'历史去重: {len(all_ids)} → {len(new_ids)}')
 // browser_evaluate 提取帖子数据
 () => {
   const title = document.querySelector('.fancy-title')?.textContent?.trim() || '';
-  const cooked = document.querySelector('.topic-post:first-child .cooked');
+  const cooked = document.querySelector('.topic-post .cooked');
   const content = cooked ? cooked.textContent.trim().substring(0, 500) : '';
   const views = document.querySelector('.views .number')?.textContent?.trim() || '0';
   const tags = Array.from(document.querySelectorAll('.discourse-tag')).map(t => t.textContent.trim());
-  const timeEl = document.querySelector('time');
-  const created_at = timeEl ? timeEl.getAttribute('datetime') || timeEl.textContent.trim() : '';
-  return { title, content, views, tags, created_at };
+  return { title, content, views, tags };
 }
 ```
 
-#### 批量抓取代码（每批 30 帖）
+**注意**：不要用 `document.querySelector('time')` 获取时间，帖子页面没有 `<time>` 元素！时间从列表页的 `td.activity[title]` 提取。
+
+#### 批量抓取代码（每批 20 帖，返回列表页）
 
 ```js
 async (page) => {
-  const ids = ["ID1", "ID2", /* ... 30个ID */];
+  const ids = ["ID1", "ID2", /* ... 20个ID */];
   const results = [];
-  for (const tid of ids) {
+  const listUrl = 'https://linux.do/tag/444-tag/444';
+  for (let i = 0; i < ids.length; i++) {
+    const tid = ids[i];
     try {
-      await page.goto('https://linux.do/t/topic/' + tid, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      // 检测 Cloudflare
-      let attempts = 0;
-      while (attempts < 3) {
-        const title = await page.title();
-        if (!title.includes('Just a moment') && !title.includes('Checking')) break;
-        await page.waitForTimeout(10000);
-        attempts++;
-      }
-      await page.waitForTimeout(1500);
+      await page.goto('https://linux.do/t/topic/' + tid, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await page.waitForTimeout(2000);
+      let pgTitle = await page.title();
+      if (pgTitle.includes('Just a moment') || pgTitle.includes('Checking')) await page.waitForTimeout(15000);
       const data = await page.evaluate(() => {
         const title = document.querySelector('.fancy-title')?.textContent?.trim() || '';
-        const cooked = document.querySelector('.topic-post:first-child .cooked');
+        const cooked = document.querySelector('.topic-post .cooked');
         const content = cooked ? cooked.textContent.trim().substring(0, 500) : '';
         const views = document.querySelector('.views .number')?.textContent?.trim() || '0';
         const tags = Array.from(document.querySelectorAll('.discourse-tag')).map(t => t.textContent.trim());
         return { title, content, views, tags };
       });
       results.push({ id: tid, ...data });
+      // 返回列表页（模拟人的浏览行为）
+      if (i < ids.length - 1) {
+        await page.goto(listUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.waitForTimeout(1500);
+      }
     } catch (e) {
-      results.push({ id: tid, error: String(e).substring(0, 80) });
+      results.push({ id: tid, error: String(e).substring(0, 100) });
     }
   }
-  return JSON.stringify(results);
+  return JSON.stringify({ batch: N, count: results.length, results });
 }
 ```
 
 #### 速度优化
 
-- **不回列表页**：直接从一个帖子导航到下一个帖子
-- **每批 30 帖**：处理完一批后保存，继续下一批
-- **每帖等待 1.5 秒**：避免触发限流
+- **每批 20 帖**：处理完一批后保存到 `data/batch_browser_N.json`
+- **每帖等待 2 秒**：帖子页加载后等待 2 秒再提取
+- **返回列表页等待 1.5 秒**：模拟人的浏览间隔
+- **超时 20 秒**：单帖加载超时 20 秒则跳过
 
 ### 1.7 数据保存
 
@@ -507,6 +568,34 @@ typst compile data/reports/{date}.typ data/reports/{date}.pdf
 ---
 
 ## 更新日志
+
+### v10.0.0 (2026-06-23)
+基于 2026-06-23 实战经验重构：
+
+**核心变更：时间戳提取方式**
+- 旧方案：`document.querySelector('time')` 从帖子页面提取 → **返回空！帖子页面没有 `<time>` 元素**
+- 新方案：从列表页 `td.activity[title]` 属性提取 `"Created: Jun 22, 2026 9:53 pm"` 格式
+- 原因：Discourse 帖子页使用相对时间显示（"14h"），不暴露 `<time>` 元素
+
+**抓取流程优化**
+- 用户要求模拟人类浏览：逐帖打开 → 返回列表页 → 打开下一帖
+- 每批 20 帖（原 30 帖），返回列表页间隔 1.5 秒
+- 全部抓取完后再做 32 小时筛选（不在抓取过程中筛选）
+- 超时 20 秒（原 15 秒）
+
+**时间戳合并流程**
+- 滚动加载列表页 → 提取 `td.activity[title]` → 保存到 `data/topic_timestamps.json`
+- 使用 `dateutil.parser.parse()` 解析 `"Jun 22, 2026 9:53 pm"` 格式
+- 合并时间戳到帖子数据后再做 32 小时筛选
+
+**公益站过滤优化**
+- 增加关键词：LDC、ldc、高级推广、富可敌国、中转站、抽奖
+- 同时检查标题、标签、内容前 200 字
+
+**实测数据**
+- 496 帖全部抓取，公益站过滤后 420 帖
+- 32 小时筛选后 253 帖纳入日报
+- 整体耗时约 50 分钟（含浏览器预授权）
 
 ### v9.0.0 (2026-06-21)
 基于 2026-06-21 实战经验重构：

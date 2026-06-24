@@ -268,9 +268,14 @@ Hook：[破格类型] {开场，用破格制造意外感}
 - 参考模板：`templates/script-template.md`（破格模式模板）
 
 **🔴 禁止使用的词汇**：文案和字幕中不得出现以下词汇，需替换为通用称呼：
-- 「佬友」→「大家」「朋友们」
+- 「佬友」→「大家」「朋友们」（包括「有佬友」等变体，必须全部替换）
 - 「Linuxdo」→「社区」「论坛」
 - 「L站」→「社区」「论坛」
+
+**🔴 脚本审核检查清单**：展示脚本给用户前，必须逐句检查：
+1. 是否包含禁止词汇（佬友/Linuxdo/L站）
+2. 破格类型标记是否完整（Hook 至少1种，正文至少2种不同破格）
+3. 口语化程度是否足够（不要播音腔）
 
 **🔴 用户审核步骤**：脚本生成后，必须将完整脚本展示给用户审核，获得确认后才能进入 Phase 3。用户可能要求修改某些场景的文案。
 
@@ -349,6 +354,20 @@ Avoid:
   }
 ]
 ```
+
+**🔴 图片-脚本映射铁律（v2.8.0 新增）**：
+
+图片 prompt JSON 中的 `scene` 编号必须与脚本场景编号严格 1:1 对应！
+
+常见错误：
+- ❌ Hook 场景（scene1）单独生成一张图片，第一条新闻（scene2）又生成一张详细图 → 导致后续所有图片偏移 +1
+- ❌ 图片按"新闻事件"编号而非"脚本场景"编号
+
+正确做法：
+- ✅ Hook 和第一条新闻合并为同一场景时，只生成 1 张图片（scene1）
+- ✅ 图片 prompt JSON 数组长度 = 脚本场景数（如6个脚本场景 = 6张图片）
+- ✅ `image-prompts.json` 中 scene 1-N 与 `voiceover-texts.json` 中 scene 1-N 一一对应
+- ✅ Phase 8 校验时必须确认：`len(imagePrompts) == len(scriptScenes)`
 
 **🔴 破格模式 Prompt 变体**（仅当 STYLE_MODE=poge 时生效）：
 
@@ -726,6 +745,21 @@ def generate_captions_from_script(base_dir, scene_count=8):
 - **禁止使用商用字体**（方正、汉仪、造字工房等）
 
 ### Phase 8: 渲染前校验（必须执行）
+
+#### Step 8.0: 图片-脚本映射校验（v2.8.0 新增，必须首先执行）
+
+```bash
+# 校验图片数量与脚本场景数是否一致
+IMAGES=$(ls news-pipeline/YYYY-MM-DD/images/scene*.png | wc -l)
+AUDIO=$(ls news-pipeline/YYYY-MM-DD/voiceover/scene*.wav | wc -l)
+echo "图片: $IMAGES, 音频: $AUDIO"
+# 两者必须相等！不等则说明图片-脚本映射有误
+```
+
+**如果不等，检查原因**：
+1. Hook 场景是否与第一条新闻共享了图片 → 合并图片 prompt
+2. 是否有重复或多余的图片 → 删除多余图片
+3. Composition.tsx 的 imageId 是否需要调整
 
 #### Step 8.1: 梳理对应关系表
 
@@ -2740,14 +2774,17 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 **Why:** 克隆音色在短句和新闻播报场景下表现不佳，预置音色经过专业调优
 **How to apply:** TTS 默认使用 `mimo-v2.5-tts` 模型 + `voice: "白桦"`，不要用 `mimo-v2.5-tts-voiceclone`
 
-### 🟡 MIMO_TTS_API_KEY 未配置（v2.5.0 新增，2026-06-16）
+### 🟡 MIMO_TTS_API_KEY 未配置（v2.5.0 新增，v2.8.0 更新）
 
 **问题**：mimo-tts.sh 脚本报错 `MIMO_TTS_API_KEY not found`，因为 ~/.claude/settings.json 的 env 中没有配置该变量。
+
+**v2.8.0 新发现**：settings.json 中 `MIMO_TTS_API_URL` 可能包含 `/anthropic` 后缀（如 `https://token-plan-cn.xiaomimimo.com/anthropic`），这是 **错误的**！正确 URL 格式为 `https://token-plan-cn.xiaomimimo.com/v1/chat/completions`（不带 `/anthropic`）。
 
 **解决方案**：
 1. 在预授权阶段向用户收集 TTS API URL 和 Key
 2. 如果 mimo-tts.sh 失败，直接用 Python+curl 调用 MiMo TTS API
-3. API 格式：`POST {API_URL}/v1/chat/completions`，body 格式见 mimo-tts.sh 源码
+3. **URL 校验**：如果 settings.json 中的 URL 以 `/anthropic` 结尾，需要去掉 `/anthropic` 再拼接 `/v1/chat/completions`
+4. API 格式：`POST {API_URL}/v1/chat/completions`，body 格式见 mimo-tts.sh 源码
 
 **Why:** TTS API Key 和图片 API Key 是分开的，需要分别收集
 **How to apply:** 预授权时额外收集 TTS API URL + Key，或在 Phase 6 遇到错误时询问用户
@@ -2780,16 +2817,16 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 - **B站自定义下拉框必须用 JS evaluate，不能用 browser_click 文本匹配**
 - **封面生成应与 TTS 并行执行**（用 Agent 异步），节省 3-5 分钟
 
-### imageId 偏移问题（v2.7.0 修复）
+### imageId 偏移问题（v2.7.0 修复，v2.8.0 补充）
 
 Composition.tsx 中 imageId 与实际图片文件可能存在偏移。验证方法：
 ```bash
 # 对比文件大小确认 public 目录的文件是否正确
 ls -la news-pipeline/video-project/public/images/scene*.png
-ls -la news-pipeline/weekly/.../images/scene*.png
+ls -la news-pipeline/YYYY-MM-DD/images/scene*.png
 # 用 md5 验证
 for i in 1 2 3 4 5 6; do
-  src=$(md5 -q news-pipeline/weekly/.../images/scene${i}.png)
+  src=$(md5 -q news-pipeline/YYYY-MM-DD/images/scene${i}.png)
   pub=$(md5 -q news-pipeline/video-project/public/images/scene${i}.png)
   [ "$src" = "$pub" ] && echo "scene${i}: OK" || echo "scene${i}: MISMATCH"
 done
@@ -2797,6 +2834,9 @@ done
 
 如果图片内容正确但视频中错位，修改 Composition.tsx 的 imageId 映射，而不是重新生成图片。
 常见原因：上次渲染的 sceneConfig 未更新，或 scene 数量变化导致 ID 整体偏移。
+
+**v2.8.0 补充**：偏移最常见的根因是 Hook 场景独立生成了一张图片，而脚本中 Hook 与第一条新闻是同一个场景。
+预防措施：Phase 4 生成 prompt 时，图片数量必须与脚本场景数一致（见 Phase 4 图片-脚本映射铁律）。
 
 ### 公众号封面上传（自动方法）
 
