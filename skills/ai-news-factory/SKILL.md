@@ -875,7 +875,7 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
     "bilibili": {
       "title": "【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD",
       "tags": ["今日羊报AI", "AI日报", "..."],
-      "description": "B站简介，含 hashtag"
+      "description": "B站简介，含 hashtag\n\n🔴 注意：简介中数字不能太多（会被检测为违规推广），版本号简化，数字用中文替代"
     },
     "douyin": {
       "title": "{核心标题}｜今日羊报AI YYYY-MM-DD",
@@ -2073,7 +2073,84 @@ for sent, chars in zip(sentences, char_counts):
 
 **解决**：用 `browser_evaluate` 注入 `innerHTML` 到 `.ql-editor`，然后 dispatch `input` 事件。
 
-### 🟡 API 地址不固定
+### 🔴 B站简介数字检测误判（v2.9.0 新增，2026-06-24）
+**问题**：B站简介中包含大量数字（如 `21天37TB`、`2.5`、`2.1 Pro`、`4.6`、`5.6`、`5.2`）会被系统检测为「违规推广内容」（疑似QQ号/微信号），稿件直接被移除。
+
+**解决**：B站简介必须减少数字密度：
+- 版本号去掉或简化：`Seedance 2.5` → `Seedance`、`豆包2.1 Pro` → `豆包新模型`、`Opus 4.6` → `Opus`
+- 数量用中文替代：`21天` → `二十一天`、`30秒` → `三十秒`、`37TB` → 不写具体数字
+- 不要在简介区放 `#标签`（B站简介区的 hashtag 也容易触发检测）
+- 结尾用频道引导语替代 hashtag：`今日羊报AI，每天带你速览AI圈最热新闻。`
+
+**示例（安全版简介）**：
+```
+Codex后台疯狂写日志，SSD直接被写报废！
+
+字节火山引擎大会连放大招，Seedance一次生成三十秒四K短片，豆包新模型编码能力对标Opus，特斯拉中国要用豆包。GPT新版本因Anthropic举报可能延期。GLM新版本实测好评，智谱市值破万亿。微信内测AI助手帮你操作微信。
+
+今日羊报AI，每天带你速览AI圈最热新闻。
+```
+
+**Why:** B站的反垃圾系统对连续数字串非常敏感，`213756` 这样的模式会被误判为联系方式
+**How to apply:** Phase 10 生成 B站简介时，自动将版本号简化、数字用中文替代、去掉 hashtag 行
+
+### 🔴 TTS API 多节点故障转移（v2.9.0 新增，2026-06-24）
+**问题**：MiMo TTS API 主节点（token-plan-cn.xiaomimimo.com）配额用完后返回 `quota exhausted` (429)。
+
+**解决**：支持多节点故障转移：
+1. 主节点 CN：`https://token-plan-cn.xiaomimimo.com/v1/chat/completions`
+2. 备用节点 AMS：`https://token-plan-ams.xiaomimimo.com/v1/chat/completions`（2026-06-24 验证可用）
+3. 如果主节点返回 429，自动切换到备用节点
+
+**TTS API URL 修正**：settings.json 中的 `MIMO_TTS_API_URL` 可能包含 `/anthropic` 后缀，必须去掉再拼接 `/v1/chat/completions`：
+```python
+url = settings['MIMO_TTS_API_URL']
+if url.endswith('/anthropic'):
+    url = url[:-len('/anthropic')]
+url = url.rstrip('/') + '/v1/chat/completions'
+```
+
+**Why:** 不同节点的配额是独立的，CN 节点用完后 AMS 节点可能还有余额
+**How to apply:** Phase 6 TTS 生成时，先尝试主节点，429 错误自动切换备用节点
+
+### 🟡 voiceover-texts.json 引号问题（v2.9.0 新增，2026-06-24）
+**问题**：脚本中的中文引号（如 `"吃"硬盘`、`"卡脖子"`、`"小微"`）在 JSON 文件中会导致解析失败，因为 `"` 字符与 JSON 字符串分隔符冲突。
+
+**解决**：生成 voiceover-texts.json 时：
+- 将中文引号替换为无引号：`"吃"硬盘` → `吃硬盘`
+- 或使用中文书名号：`「吃」硬盘`
+- 生成后立即用 `python3 -c "import json; json.load(open(...))"` 验证
+
+**Why:** Write 工具直接写入的文件中，中文引号 `""` 可能被转义为 ASCII `""` 导致 JSON 无效
+**How to apply:** Phase 2 生成脚本后，保存 voiceover-texts.json 时自动处理引号，保存后立即验证
+
+### 🟡 公众号 ProseMirror 编辑器索引（v2.9.0 更新，2026-06-24）
+**问题**：公众号编辑器中 `document.querySelectorAll('.ProseMirror')` 只返回标题编辑器（index 0），正文编辑器需要用 `document.querySelectorAll('[contenteditable="true"]')` 获取，且正文在 index 2（不是 index 1）。
+
+**正确索引**：
+```javascript
+const editables = document.querySelectorAll('[contenteditable="true"]');
+// index 0: 标题（ProseMirror，placeholder="请在这里输入标题"）
+// index 1: 原创声明输入框（original_primary_tips_input）
+// index 2: 正文（ProseMirror ProseMirror-focused）
+const titleEditor = editables[0];
+const bodyEditor = editables[2];  // 不是 index 1！
+```
+
+**Why:** `.ProseMirror` 选择器可能只匹配部分编辑器，`[contenteditable="true"]` 更全面
+**How to apply:** Phase 14 公众号上传时，用 `[contenteditable="true"]` 获取所有编辑器，正文在 index 2
+
+### 🟡 抖音标题 fill() 方法（v2.9.0 新增，2026-06-24）
+**问题**：抖音作品描述输入框用 JS `input.value = '...'` + `dispatchEvent('input')` 不生效，页面显示 0/30 字。
+
+**解决**：使用 Playwright 的 `fill()` 方法：
+```javascript
+const titleInput = page.getByRole('textbox', { name: '填写作品标题，为作品获得更多流量' });
+await titleInput.fill('代码偷吃SSD+豆包对标Opus｜今日羊报AI');
+```
+
+**Why:** 抖音的输入框使用 React 受控组件，直接修改 `value` 属性不会触发 React 的状态更新
+**How to apply:** Phase 12 抖音上传时，标题用 `fill()` 而非 JS `value` 赋值
 **问题**：不同用户可能使用不同的图片生成 API 服务，不能硬编码 API URL。
 
 **解决**：Phase 0 中向用户收集 API URL + Key，优先使用用户提供的 API。

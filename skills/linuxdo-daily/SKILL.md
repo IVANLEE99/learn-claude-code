@@ -1,12 +1,14 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、linuxdo日报、AI日报、AI周报、技术日报、weekly
-version: 10.0.0
+version: 11.0.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报。
+
+> **v11 核心改进**：滚动策略优化（35 次可加载 1000+ 帖）、批量抓取可提前终止（100-150 帖即可出高质量日报）、Typst 模板修复、主题分类不需要完整正文。
 
 ## ⚡ 权限预授权（必须最先执行，一次性完成）
 
@@ -146,7 +148,14 @@ for f in os.listdir('data/reports'):
 
 ### 1.2 滚动加载全部帖子
 
-打开列表页后，使用 `browser_run_code_unsafe` 滚动加载。**至少滚动 15 次**（每次间隔 2.5 秒），确保加载全部帖子：
+打开列表页后，使用 `browser_run_code_unsafe` 滚动加载。**采用递增滚动策略**，每轮后检查数量：
+
+| 轮次 | 滻动次数 | 间隔 | 预期加载量 |
+|------|---------|------|-----------|
+| 第 1 轮 | 15 次 | 2.5s | ~450 帖 |
+| 第 2 轮 | 10 次 | 2.5s | ~750 帖 |
+| 第 3 轮 | 5 次 | 2.5s | ~900 帖 |
+| 第 4 轮（可选） | 5 次 | 2.5s | ~1050 帖 |
 
 ```js
 async (page) => {
@@ -163,14 +172,16 @@ async (page) => {
 }
 ```
 
-滚动完成后用 `browser_evaluate` 检查帖子数量。如果帖子数 < 400，再追加 10 次滚动。
+**终止条件**：每轮滚动后检查数量，如果 < 400 则追加一轮。通常 35 次滚动（3 轮）可加载 1000+ 帖，足够日报使用。
 
-### 1.3 提取帖子列表并保存
+### 1.3 提取帖子列表（含时间戳）并保存
+
+> **v11 优化**：时间戳提取合并到此步骤，无需单独提取。从 `td.activity[title]` 一次提取完成。
 
 使用 `browser_evaluate` 的 `filename` 参数直接保存帖子列表到文件：
 
 ```js
-// Source A: 保存全部帖子
+// Source A: 保存全部帖子（含时间戳）
 browser_evaluate(filename="data/source_a.json", function=() => {
   const rows = document.querySelectorAll('tr.topic-list-item');
   const posts = [];
@@ -181,12 +192,16 @@ browser_evaluate(filename="data/source_a.json", function=() => {
     const views = row.querySelector('.views .number')?.textContent?.trim() || '0';
     const replies = row.querySelector('.posts .number')?.textContent?.trim() || '0';
     const tags = Array.from(row.querySelectorAll('.discourse-tag')).map(t => t.textContent.trim());
-    posts.push({ id: topicId, title, views, replies, tags });
+    const activityCell = row.querySelector('td.activity');
+    const titleAttr = activityCell?.getAttribute('title') || '';
+    const createdMatch = titleAttr.match(/Created:\s*(.+?)(?:\n|$)/);
+    const created = createdMatch ? createdMatch[1].trim() : '';
+    posts.push({ id: topicId, title, views, replies, tags, created });
   });
   return JSON.stringify({ source: 'A', count: posts.length, ids: posts.map(p => p.id), posts });
 })
 
-// Source B: 保存 AI 标签过滤后的帖子
+// Source B: 保存 AI 标签过滤后的帖子（含时间戳）
 browser_evaluate(filename="data/source_b.json", function=() => {
   const rows = document.querySelectorAll('tr.topic-list-item');
   const aiPosts = [];
@@ -197,13 +212,19 @@ browser_evaluate(filename="data/source_b.json", function=() => {
     const views = row.querySelector('.views .number')?.textContent?.trim() || '0';
     const replies = row.querySelector('.posts .number')?.textContent?.trim() || '0';
     const tags = Array.from(row.querySelectorAll('.discourse-tag')).map(t => t.textContent.trim());
+    const activityCell = row.querySelector('td.activity');
+    const titleAttr = activityCell?.getAttribute('title') || '';
+    const createdMatch = titleAttr.match(/Created:\s*(.+?)(?:\n|$)/);
+    const created = createdMatch ? createdMatch[1].trim() : '';
     if (tags.some(t => /人工智能|ai/i.test(t))) {
-      aiPosts.push({ id: topicId, title, views, replies, tags });
+      aiPosts.push({ id: topicId, title, views, replies, tags, created });
     }
   });
   return JSON.stringify({ source: 'B', total: rows.length, aiFiltered: aiPosts.length, ids: aiPosts.map(p => p.id), posts: aiPosts });
 })
 ```
+
+时间戳格式为 `"Jun 22, 2026 9:53 pm"`，后续用 `dateutil.parser.parse()` 解析。
 
 ### 1.4 合并两源 ID 列表
 
@@ -242,75 +263,64 @@ with open('data/merged_ids.json', 'w') as f:
 print(f'历史去重: {len(all_ids)} → {len(new_ids)}')
 ```
 
-### 1.6 时间戳提取（关键步骤）
+### 1.6 时间戳解析与 32h 筛选
 
-**⚠️ 2026-06-23 实测结论**：帖子页面没有 `<time>` 元素！`document.querySelector('time')` 返回空。
+> **v11 变更**：时间戳已在步骤 1.3 中从列表页 `td.activity[title]` 提取，此步骤仅做解析和筛选。
 
-**正确方法**：从列表页的 `td.activity` 元素的 `title` 属性提取创建时间。
-
-#### 从列表页提取时间戳
-
-列表页每个帖子行的 `<td class="activity">` 元素有 `title` 属性，格式为：
-```
-Created: Jun 22, 2026 9:53 pm\nLatest: Jun 23, 2026 11:31 am
-```
-
-使用 `browser_evaluate` 提取：
-
-```js
-// browser_evaluate 从列表页提取所有帖子的时间戳
-() => {
-  const rows = document.querySelectorAll('tr.topic-list-item');
-  const topics = [];
-  rows.forEach(row => {
-    const topicId = row.getAttribute('data-topic-id');
-    const activityCell = row.querySelector('td.activity');
-    const titleAttr = activityCell?.getAttribute('title') || '';
-    const createdMatch = titleAttr.match(/Created:\s*(.+?)(?:\n|$)/);
-    const created = createdMatch ? createdMatch[1].trim() : '';
-    topics.push({ id: topicId, created });
-  });
-  return JSON.stringify({ count: topics.length, topics });
-}
-```
-
-**重要**：必须先滚动加载全部帖子（步骤 1.2），然后再提取时间戳。时间戳格式为 `"Jun 22, 2026 9:53 pm"`，使用 `dateutil.parser.parse()` 解析。
-
-#### 时间戳文件保存
+**⚠️ 常识提醒**：帖子页面没有 `<time>` 元素！`document.querySelector('time')` 返回空。时间只能从列表页提取。
 
 ```python
-# 保存时间戳到文件（使用 browser_evaluate 的 filename 参数）
-browser_evaluate(filename="data/topic_timestamps.json", function=<上面的JS代码>)
-
-# Python 中合并时间戳到帖子数据
 import json
 from dateutil import parser as dateparser
 from datetime import datetime, timezone, timedelta
 
-with open('data/topic_timestamps.json') as f:
-    content = f.read()
-    ts_data = json.loads(json.loads(content)) if content.startswith('"') else json.loads(content)
-timestamps = {str(t['id']): t['created'] for t in ts_data['topics']}
+now = datetime.now(timezone(timedelta(hours=8)))
+cutoff = now - timedelta(hours=32)
 
-# 合并到帖子数据
+with open('data/daily/2026-06-24.json') as f:
+    daily = json.load(f)
+
+final_posts = []
 for post in daily['posts']:
-    pid = str(post['id'])
-    if pid in timestamps:
-        post['created_at'] = timestamps[pid]
+    created_str = post.get('created', '')
+    if not created_str:
+        continue
+    try:
+        created_dt = dateparser.parse(created_str)
+        if created_dt.tzinfo is None:
+            created_dt = created_dt.replace(tzinfo=timezone(timedelta(hours=8)))
+        if created_dt >= cutoff:
+            post['created_at'] = created_dt.isoformat()
+            final_posts.append(post)
+    except:
+        pass
+
+daily['posts'] = final_posts
+daily['total'] = len(final_posts)
+print(f'32h 筛选: {len(daily["posts"])} 帖')
 ```
 
 ### 1.7 逐帖浏览器浏览（核心抓取方案）
 
 **必须使用此方案**，浏览器 fetch API 会被 429 限流。
 
-#### 抓取流程（模拟人类浏览）
+#### ⚡ 提前终止策略（v11 新增）
+
+**不需要抓取全部帖子！** 实测表明，100-150 帖的正文数据已足够生成高质量日报。其余帖子仅使用标题+标签+浏览量即可完成主题分类。
+
+**推荐做法**：
+- 按浏览量降序排列待抓取列表（热门帖优先）
+- 抓取前 4-5 批（120-150 帖）后直接进入日报生成
+- 冷门帖子的标题和标签已包含足够信息用于主题分类
+
+#### 抓取流程
 
 1. **打开列表页**：`browser_navigate → https://linux.do/tag/444-tag/444`
-2. **滚动加载全部帖子**：至少 20 次滚动，每次间隔 2.5 秒
-3. **提取帖子 ID 列表**：`browser_evaluate` 提取所有 `data-topic-id`
-4. **提取时间戳**：从 `td.activity[title]` 提取创建时间（见步骤 1.6）
-5. **逐帖浏览**：`browser_navigate` 打开帖子 → 提取数据 → **返回列表页** → 打开下一个
-6. **全部抓取完后再筛选 32 小时**
+2. **滚动加载全部帖子**：见步骤 1.2（35 次滚动）
+3. **提取帖子列表含时间戳**：`browser_evaluate`（见步骤 1.3）
+4. **合并去重筛选**：历史去重 + 公益站过滤 + 32h 筛选
+5. **按浏览量排序**：热门帖优先抓取
+6. **批量抓取正文**：每批 30 帖，抓取 4-5 批后可提前终止
 
 #### 每帖提取数据
 
@@ -328,13 +338,12 @@ for post in daily['posts']:
 
 **注意**：不要用 `document.querySelector('time')` 获取时间，帖子页面没有 `<time>` 元素！时间从列表页的 `td.activity[title]` 提取。
 
-#### 批量抓取代码（每批 20 帖，返回列表页）
+#### 批量抓取代码（每批 30 帖，不回列表页）
 
 ```js
 async (page) => {
-  const ids = ["ID1", "ID2", /* ... 20个ID */];
+  const ids = ["ID1", "ID2", /* ... 30个ID */];
   const results = [];
-  const listUrl = 'https://linux.do/tag/444-tag/444';
   for (let i = 0; i < ids.length; i++) {
     const tid = ids[i];
     try {
@@ -351,11 +360,7 @@ async (page) => {
         return { title, content, views, tags };
       });
       results.push({ id: tid, ...data });
-      // 返回列表页（模拟人的浏览行为）
-      if (i < ids.length - 1) {
-        await page.goto(listUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(1500);
-      }
+      await page.waitForTimeout(1500);
     } catch (e) {
       results.push({ id: tid, error: String(e).substring(0, 100) });
     }
@@ -366,9 +371,9 @@ async (page) => {
 
 #### 速度优化
 
-- **每批 20 帖**：处理完一批后保存到 `data/batch_browser_N.json`
+- **每批 30 帖**：处理完一批后保存到 `data/batch_browser_N.json`
 - **每帖等待 2 秒**：帖子页加载后等待 2 秒再提取
-- **返回列表页等待 1.5 秒**：模拟人的浏览间隔
+- **帖间等待 1.5 秒**：避免触发限流（不回列表页，直接导航下一帖）
 - **超时 20 秒**：单帖加载超时 20 秒则跳过
 
 ### 1.7 数据保存
@@ -430,17 +435,17 @@ with open(f'data/daily/{date_str}.json', 'w') as f:
 
 ### 主题分类规则
 
-按以下维度对帖子进行分组：
-- **Claude/Anthropic 生态**：fable, mythos, opus, anthropic, claude code, claudecode
-- **OpenAI/ChatGPT/Codex 生态**：codex, chatgpt, gpt, openai
-- **GLM/智谱 生态**：glm, 智谱, zai
-- **MiMo/小米 生态**：mimo, 小米
-- **Google/Gemini 生态**：gemini, google
-- **DeepSeek 生态**：deepseek
-- **Kimi/月之暗面 生态**：kimi, 月之暗面
-- **AI 编程工具**：cursor, windsurf, trae
+按以下维度对帖子进行分组（按优先级匹配，命中第一个即归类）：
+- **OpenAI/ChatGPT/Codex 生态**：codex, chatgpt, gpt, openai, sub2api, plus, pro20, pro 5x
+- **Claude/Anthropic 生态**：fable, mythos, opus, anthropic, claude code, claudecode, cc-switch, max
+- **豆包/火山引擎 生态**：豆包, doubao, seed, 火山, seedance, 字节
+- **GLM/智谱 生态**：glm, 智谱, zai, glm5.2
+- **Grok 生态**：grok
+- **Kimi/月之暗面**：kimi, 月之暗面
+- **Google/Gemini 生态**：gemini, google, antigravity
+- **AI 编程工具**：cursor, windsurf, trae, hermes, opencode, kiro, minimax
 - **开源项目**：开源推广, 开源
-- **行业动态**：前沿快讯, 前沿, 转载
+- **行业动态**：前沿快讯, 前沿, 转载, 安全, 边界
 - **其他话题**：其余
 
 ---
@@ -526,11 +531,13 @@ with open(f'data/daily/{date_str}.json', 'w') as f:
 ```typst
 #set document(title: "linux.do AI 技术日报 - {date}")
 #set page(paper: "a4", margin: (top: 2cm, bottom: 2cm, left: 2cm, right: 2cm))
-#set text(font: ("PingFang SC", "Noto Sans CJK SC", "Noto Sans"), size: 10pt)
+#set text(font: ("PingFang SC", "Helvetica Neue", "Arial"), size: 10pt)
 #set heading(numbering: none)
 
 // 注意：Typst 中不能用 **bold** 语法，用 *斜体* 代替
 // 注意：Typst 中 $ 是数学模式符号，文本中的 $ 必须转义为 \$
+// 注意：Typst 中 # 是标记符号，文本中的 # 必须转义为 \#（如 \#人工智能）
+// 注意：macOS 字体只需 PingFang SC，Noto Sans CJK SC 未安装会报 warning
 ```
 
 ### 编译命令
@@ -546,9 +553,10 @@ typst compile data/reports/{date}.typ data/reports/{date}.pdf
 ### 浏览器与抓取
 - **必须使用浏览器逐帖浏览**：`browser_navigate` 打开帖子页面，不能用 fetch API
 - **Cloudflare 挑战**：每帖检测标题，包含 "Just a moment" 则等待 15 秒
-- **不回列表页**：直接从一个帖子导航到下一个帖子
+- **不回列表页**：直接从一个帖子导航到下一个帖子（v11 确认：省去返回列表页的 1.5s 等待）
 - **每帖等待 1.5 秒**：避免触发限流
-- **每批 30 帖**：处理完一批保存，继续下一批
+- **每批 30 帖**：处理完一批保存，继续下一批（v11：从 20 帖提升到 30 帖）
+- **提前终止**：抓取 100-150 帖后可直接生成日报，不需要全部抓完
 
 ### ⚠️ 反检测规则（必须遵守）
 1. **逐帖浏览间隔 1.5 秒**：每帖之间固定等待 1.5 秒
@@ -568,6 +576,49 @@ typst compile data/reports/{date}.typ data/reports/{date}.pdf
 ---
 
 ## 更新日志
+
+### v11.0.0 (2026-06-24)
+基于 2026-06-24 实战经验优化：
+
+**滚动策略优化**
+- 旧方案：固定 15 次滚动，不足再追加
+- 新方案：递增滚动 3 轮（15+10+5），35 次可加载 1000+ 帖
+- 每轮后检查数量决定是否继续
+
+**批量抓取提前终止（核心优化）**
+- 旧方案：必须抓取全部帖子正文
+- 新方案：100-150 帖正文 + 其余仅用标题/标签/浏览量即可生成高质量日报
+- 按浏览量降序优先抓取热门帖，4-5 批后可直接进入日报生成
+- 大幅缩短总耗时（从 50 分钟降至 ~25 分钟）
+
+**时间戳提取合并**
+- 旧方案：步骤 1.3 提取列表 + 步骤 1.6 单独提取时间戳
+- 新方案：步骤 1.3 一次性提取列表+时间戳（从 `td.activity[title]`）
+- 省去单独的时间戳提取步骤和 `data/topic_timestamps.json` 中间文件
+
+**批量抓取不回列表页**
+- 旧方案：每帖抓取后返回列表页（多 1.5s 等待 + 一次页面加载）
+- 新方案：直接从一个帖子导航到下一个帖子
+- 每帖节省约 3 秒，30 帖一批节省约 90 秒
+
+**批量大小调整**
+- 每批从 20 帖提升到 30 帖（减少批次切换开销）
+
+**Typst 模板修复**
+- 字体：`("PingFang SC", "Helvetica Neue", "Arial")`（移除未安装的 Noto Sans CJK SC）
+- 新增 `#` 转义提醒：文本中的 `#` 必须写成 `\#`
+
+**主题分类规则更新**
+- 新增：豆包/火山引擎 生态（豆包, doubao, seed, 火山, seedance, 字节）
+- 新增：Grok 生态（grok）
+- 扩展 AI 编程工具：加入 hermes, opencode, kiro, minimax
+- 扩展 OpenAI 关键词：sub2api, plus, pro20, pro 5x
+- 扩展 Claude 关键词：cc-switch, max
+
+**实测数据**
+- Source A: 1049 帖，Source B: 372 帖 → 合并 1379 帖
+- 历史去重后 1313 帖，32h 筛选后 432 帖，公益站过滤后 412 帖
+- 正文抓取 120 帖（4 批），整体耗时约 25 分钟
 
 ### v10.0.0 (2026-06-23)
 基于 2026-06-23 实战经验重构：
