@@ -1,14 +1,14 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、linuxdo日报、AI日报、AI周报、技术日报、weekly
-version: 11.0.0
+version: 12.0.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报。
 
-> **v11 核心改进**：滚动策略优化（35 次可加载 1000+ 帖）、批量抓取可提前终止（100-150 帖即可出高质量日报）、Typst 模板修复、主题分类不需要完整正文。
+> **v12 核心改进**：批量抓取数据强制保存、空帖检测跳过、官方警告检测、全量抓取支持、Typst 特殊字符处理。
 
 ## ⚡ 权限预授权（必须最先执行，一次性完成）
 
@@ -350,7 +350,13 @@ async (page) => {
       await page.goto('https://linux.do/t/topic/' + tid, { waitUntil: 'domcontentloaded', timeout: 20000 });
       await page.waitForTimeout(2000);
       let pgTitle = await page.title();
+      // Cloudflare 检测
       if (pgTitle.includes('Just a moment') || pgTitle.includes('Checking')) await page.waitForTimeout(15000);
+      // 官方警告检测（v12 新增）
+      const pageContent = await page.evaluate(() => document.body.innerText);
+      if (pageContent.includes('异常的自动化访问行为') || pageContent.includes('系统检测到')) {
+        return JSON.stringify({ batch: N, count: results.length, results, stopped: 'official_warning' });
+      }
       const data = await page.evaluate(() => {
         const title = document.querySelector('.fancy-title')?.textContent?.trim() || '';
         const cooked = document.querySelector('.topic-post .cooked');
@@ -369,6 +375,39 @@ async (page) => {
 }
 ```
 
+#### ⚠️ 批量抓取数据保存（v12 核心修复）
+
+**2026-06-29 实测问题**：浏览器 `browser_run_code_unsafe` 返回的 JSON 结果必须**立即用 Python 保存到文件**，否则数据会丢失。
+
+**正确流程**：
+1. `browser_run_code_unsafe` 执行批量抓取 → 返回 JSON 字符串
+2. **立即**用 Bash/Python 保存到 `data/batch_browser_N.json`
+3. 继续下一批
+
+**错误做法**：等所有批次抓完再保存（数据会丢失）
+
+```python
+# 每批抓取后立即执行此代码保存数据
+import json
+# results_json 是 browser_run_code_unsafe 返回的字符串
+data = json.loads(results_json)
+with open(f'data/batch_browser_{N}.json', 'w') as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+print(f'Batch {N} 已保存: {len(data.get("results", []))} 帖')
+```
+
+#### 空帖检测（v12 新增）
+
+抓取过程中会遇到大量**已删除或私有帖子**（返回空标题/空内容）。这些帖子不需要保存。
+
+```python
+# 过滤空帖
+valid_posts = [p for p in results if p.get('title')]
+deleted_count = len(results) - len(valid_posts)
+if deleted_count > 0:
+    print(f'跳过 {deleted_count} 个已删除/私有帖子')
+```
+
 #### 速度优化
 
 - **每批 30 帖**：处理完一批后保存到 `data/batch_browser_N.json`
@@ -378,17 +417,65 @@ async (page) => {
 
 ### 1.7 数据保存
 
-每批抓取完成后，使用 Python 保存到文件：
+每批抓取完成后，**必须立即**使用 Python 保存到文件（v12 强调：延迟保存会导致数据丢失）：
 
 ```python
 import json
-# results 是浏览器返回的 JSON 字符串
+# results_json 是 browser_run_code_unsafe 返回的字符串
 data = json.loads(results_json)
 with open(f'data/batch_browser_{N}.json', 'w') as f:
     json.dump(data, f, ensure_ascii=False, indent=2)
+print(f'Batch {N} 已保存: {data.get("count", 0)} 帖')
 ```
 
 ### 1.8 数据合并与过滤
+
+> **v12 重要修复**：`browser_evaluate` 使用 `filename` 参数保存的 JSON 文件是 **double-encoded**（双重编码），需要用 `json.loads(json.load(f))` 读取。
+
+```python
+import json, os, glob, re
+from datetime import datetime, timezone, timedelta
+
+# 1. 合并所有 batch 文件
+all_posts = {}
+for f in sorted(glob.glob('data/batch_browser_*.json')):
+    with open(f) as fh:
+        batch = json.load(fh)
+    # 处理可能的 double-encoded JSON
+    if isinstance(batch, str):
+        batch = json.loads(batch)
+    results = batch.get('results', [])
+    for p in results:
+        pid = str(p.get('id', ''))
+        if pid and p.get('title'):  # v12: 只保留有标题的帖子
+            all_posts[pid] = p
+
+print(f'合并后有效帖子: {len(all_posts)}')
+
+# 2. 公益站过滤
+GONGYI_KEYWORDS = ['公益站', '公益推广', 'LDC', 'ldc', 'cdk', '签到', '白嫖',
+                   '薅羊毛', '薅秃', '兑换码', '免费额度', '号池', '号商', '充值额度',
+                   '中转站', '高级推广', '抽奖', '富可敌国']
+
+filtered = {}
+for pid, p in all_posts.items():
+    all_text = f"{p.get('title', '')} {' '.join(p.get('tags', []))}"
+    if not any(kw in all_text for kw in GONGYI_KEYWORDS):
+        filtered[pid] = p
+
+print(f'公益站过滤后: {len(filtered)}')
+
+# 3. 保存每日数据
+date_str = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d')
+os.makedirs('data/daily', exist_ok=True)
+daily_data = {
+    'date': date_str,
+    'total': len(filtered),
+    'posts': [{'id': pid, **p} for pid, p in filtered.items()]
+}
+with open(f'data/daily/{date_str}.json', 'w') as f:
+    json.dump(daily_data, f, ensure_ascii=False, indent=2)
+```
 
 ```python
 import json, os, glob, re
@@ -533,12 +620,20 @@ with open(f'data/daily/{date_str}.json', 'w') as f:
 #set page(paper: "a4", margin: (top: 2cm, bottom: 2cm, left: 2cm, right: 2cm))
 #set text(font: ("PingFang SC", "Helvetica Neue", "Arial"), size: 10pt)
 #set heading(numbering: none)
-
-// 注意：Typst 中不能用 **bold** 语法，用 *斜体* 代替
-// 注意：Typst 中 $ 是数学模式符号，文本中的 $ 必须转义为 \$
-// 注意：Typst 中 # 是标记符号，文本中的 # 必须转义为 \#（如 \#人工智能）
-// 注意：macOS 字体只需 PingFang SC，Noto Sans CJK SC 未安装会报 warning
 ```
+
+### ⚠️ Typst 特殊字符处理（v12 重点修复）
+
+**2026-06-29 实测问题**：以下字符在 Typst 中有特殊含义，必须转义：
+
+| 字符 | 用途 | 转义方式 | 示例 |
+|------|------|---------|------|
+| `$` | 数学模式 | `\$` | `\$50` 而非 `$50` |
+| `#` | 标记符号 | `\#` | `\#人工智能` 而非 `#人工智能` |
+| `*` | 斜体 | 用 `*text*` | 标题用斜体代替粗体 |
+| `_` | 下标 | `\_` | `\_views` 而非 `_views` |
+
+**Typst 不支持 `**bold**` 语法**，用 `*斜体*` 代替。
 
 ### 编译命令
 
@@ -557,12 +652,18 @@ typst compile data/reports/{date}.typ data/reports/{date}.pdf
 - **每帖等待 1.5 秒**：避免触发限流
 - **每批 30 帖**：处理完一批保存，继续下一批（v11：从 20 帖提升到 30 帖）
 - **提前终止**：抓取 100-150 帖后可直接生成日报，不需要全部抓完
+- **全量抓取**：用户要求"全部抓取"时，需完成所有批次（通常 8-10 批，240-300 帖）
 
 ### ⚠️ 反检测规则（必须遵守）
 1. **逐帖浏览间隔 1.5 秒**：每帖之间固定等待 1.5 秒
 2. **检测 Cloudflare 挑战**：如果页面标题包含 "Just a moment"，等待 15 秒
-3. **检测官方警告**：如果页面内容包含 "异常的自动化访问行为"，立即停止爬取
+3. **检测官方警告**：如果页面内容包含 "异常的自动化访问行为" 或 "系统检测到"，立即停止爬取
 4. **429 限流处理**：如果触发 429，等待 30 秒后重试
+
+### 数据保存（v12 重点）
+- **每批抓取后必须立即保存**：`browser_run_code_unsafe` 返回的 JSON 必须用 Python 保存到文件
+- **不要等所有批次完成再保存**：会导致数据丢失
+- **空帖过滤**：已删除或私有帖子返回空标题，不需要保存
 
 ### 日期与过滤
 - **不能用 ID 阈值判断日期**：Discourse ID 不按日期顺序
@@ -576,6 +677,38 @@ typst compile data/reports/{date}.typ data/reports/{date}.pdf
 ---
 
 ## 更新日志
+
+### v12.0.0 (2026-06-29)
+基于 2026-06-29 实战经验优化：
+
+**批量抓取数据保存修复（核心问题）**
+- 旧方案：文档未强调保存时机，导致 batch 3-10 数据丢失
+- 新方案：明确要求每批抓取后**立即**用 Python 保存到文件
+- 新增空帖检测：已删除/私有帖子（空标题）不保存
+
+**官方警告检测（v12 新增）**
+- 新增检测页面内容中的 "异常的自动化访问行为" 或 "系统检测到"
+- 触发时立即停止爬取，返回 `stopped: 'official_warning'`
+
+**JSON 双重编码处理（v12 新增）**
+- `browser_evaluate` 使用 `filename` 参数保存的 JSON 文件是 double-encoded
+- 读取时需用 `json.loads(json.load(f))` 处理
+
+**Typst 特殊字符处理（v12 重点修复）**
+- `$` 必须转义为 `\$`（数学模式符号）
+- `#` 必须转义为 `\#`（标记符号）
+- `*` 用于斜体，不支持 `**bold**` 语法
+- macOS 字体只需 PingFang SC
+
+**全量抓取支持**
+- 新增"全量抓取"模式说明：用户要求"全部抓取"时需完成所有批次
+- 通常 8-10 批，240-300 帖
+
+**实测数据**
+- Source A: 868 帖，Source B: 135 帖 → 合并 970 帖
+- 历史去重后 871 帖，32h 筛选后 262 帖
+- 全量抓取 10 批 × 30 帖 = 300 帖（含空帖）
+- 有效帖子约 180-200 帖，整体耗时约 35 分钟
 
 ### v11.0.0 (2026-06-24)
 基于 2026-06-24 实战经验优化：
