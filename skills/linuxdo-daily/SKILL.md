@@ -1,13 +1,14 @@
 ---
 name: linuxdo-daily
-description: linux.do AI日报/周报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、linuxdo日报、AI日报、AI周报、技术日报、weekly
-version: 12.0.0
+description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly
+version: 13.0.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
-从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报。
+从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v13 核心改进**：新增月报模式。月报基于当月已抓取数据与已生成的日报数据聚合，不重复抓取，输出月度趋势总结 + 主题归纳 + 下月展望。
 > **v12 核心改进**：批量抓取数据强制保存、空帖检测跳过、官方警告检测、全量抓取支持、Typst 特殊字符处理。
 
 ## ⚡ 权限预授权（必须最先执行，一次性完成）
@@ -61,6 +62,27 @@ version: 12.0.0
 - "weekly"、"出周报"
 - "本周AI新闻"、"一周总结"
 
+### 月报模式
+当用户说以下关键词时激活：
+- "月报"、"AI月报"、"技术月报"
+- "linuxdo月报"、"monthly"、"出月报"
+- "本月AI新闻"、"月度总结"
+
+**指定月份**（可选）：
+- "月报 2026-05" / "2026年5月月报" — 生成指定月份的月报
+- "上月月报" — 生成上一个自然月的月报
+- 不指定时默认生成**上一个自然月**的月报（若当月已结束则也可生成当月）
+
+## 模式对比
+
+| 维度 | 日报 | 周报 | 月报 |
+|------|------|------|------|
+| 时间范围 | 当前往前 32h | 上周一~上周日 | 指定月份（默认上月）1日~月末 |
+| 数据来源 | 实时抓取双源 | 聚合当周日报 | **聚合当月已抓取数据 + 已生成日报** |
+| 是否抓取 | ✅ 必须抓取 | 可复用日报数据 | ❌ 不重复抓取 |
+| 历史去重 | 必须执行 | 按周累计 | 不去重（全量呈现） |
+| 输出风格 | 今日亮点 + 新内容 | 本周总结 | **月度趋势总结 + 主题归纳 + 下月展望** |
+
 ## 目录结构
 
 **数据输出目录**：`/Users/youngsdream/Documents/learn-claude-code/data/`（项目目录，非 skill 目录）
@@ -76,6 +98,10 @@ version: 12.0.0
 ├── weekly/{week}.md           # 周报 Markdown
 ├── weekly/{week}_press.md     # 周报新闻稿
 ├── weekly/{week}.pdf          # 周报 PDF
+├── monthly/{YYYY-MM}.md       # 月报 Markdown
+├── monthly/{YYYY-MM}_press.md # 月报新闻稿
+├── monthly/{YYYY-MM}.pdf      # 月报 PDF
+├── monthly/{YYYY-MM}.typ      # 月报 Typst 源文件
 ├── source_a.json              # Source A 帖子列表
 ├── source_b.json              # Source B 帖子列表（AI过滤后）
 ├── merged_ids.json            # 合并后的帖子ID列表
@@ -643,6 +669,196 @@ typst compile data/reports/{date}.typ data/reports/{date}.pdf
 
 ---
 
+## 月报模式（v13 新增）
+
+月报**不重复抓取**，而是基于当月已抓取的日报数据（`data/daily/{YYYY-MM-DD}.json`）与已生成的日报 Markdown（`data/reports/{YYYY-MM-DD}.md`）聚合生成。若某日数据缺失，月报会标注缺失天数并继续生成。
+
+### 月份解析
+
+```python
+import re
+from datetime import datetime, timezone, timedelta
+
+def parse_month(user_msg, now=None):
+    """从用户消息解析目标月份，默认返回上一个自然月 (YYYY-MM)。"""
+    now = now or datetime.now(timezone(timedelta(hours=8)))
+    # 支持形如 "2026-05" / "2026年5月" / "2026-5"
+    m = re.search(r'(20\d{2})\D{0,2}(\d{1,2})', user_msg)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}"
+    # "上月月报" → 上一个自然月
+    first_of_this_month = now.replace(day=1)
+    last_month = first_of_this_month - timedelta(days=1)
+    return last_month.strftime('%Y-%m')
+```
+
+### 数据聚合逻辑
+
+读取目标月份所有日报数据，合并帖子去重，并扫描日报 Markdown 提取亮点：
+
+```python
+import json, os, glob, re
+from datetime import datetime, timedelta, timezone
+
+month = parse_month(user_msg)  # 如 "2026-05"
+
+# 1. 定位月内所有日期
+year, mon = map(int, month.split('-'))
+start = datetime(year, mon, 1, tzinfo=timezone(timedelta(hours=8)))
+if mon == 12:
+    end = datetime(year + 1, 1, 1, tzinfo=timezone(timedelta(hours=8)))
+else:
+    end = datetime(year, mon + 1, 1, tzinfo=timezone(timedelta(hours=8)))
+total_days = (end - start).days
+
+# 2. 聚合 daily JSON
+month_posts = {}          # 帖子去重
+covered_days = []         # 有日报数据的日期
+missing_days = []
+day_topic_counts = {}     # 每日主题数（用于活跃度趋势）
+
+cur = start
+while cur < end:
+    date_str = cur.strftime('%Y-%m-%d')
+    daily_path = f'data/daily/{date_str}.json'
+    if os.path.exists(daily_path):
+        try:
+            with open(daily_path) as f:
+                daily = json.load(f)
+            posts = daily.get('posts', [])
+            day_topic_counts[date_str] = len(posts)
+            if posts:
+                covered_days.append(date_str)
+            for p in posts:
+                pid = str(p.get('id', ''))
+                if pid and p.get('title'):
+                    month_posts[pid] = p
+        except Exception:
+            missing_days.append(date_str)
+    else:
+        missing_days.append(date_str)
+    cur += timedelta(days=1)
+
+# 3. 扫描日报 Markdown 提取每日亮点（用于月度趋势归纳）
+daily_highlights = {}     # {date: [亮点句子]}
+for md_path in sorted(glob.glob('data/reports/*.md')):
+    fname = os.path.basename(md_path).replace('.md', '')
+    if not fname.startswith(month):
+        continue
+    try:
+        with open(md_path) as f:
+            content = f.read()
+    except Exception:
+        continue
+    # 提取 "今日亮点" / "本周亮点" 段落要点
+    m = re.search(r'## (?:今日|本周)亮点\n+(.*?)(?=\n##|\Z)', content, re.S)
+    if m:
+        bullets = [b.strip('- ').strip() for b in m.group(1).strip().split('\n') if b.strip().startswith('-')]
+        if bullets:
+            daily_highlights[fname] = bullets
+
+# 4. 公益站过滤（与日报一致，v12 规则复用）
+GONGYI_KEYWORDS = ['公益站', '公益推广', 'LDC', 'ldc', 'cdk', '签到', '白嫖',
+                   '薅羊毛', '薅秃', '兑换码', '免费额度', '号池', '号商', '充值额度',
+                   '中转站', '高级推广', '抽奖', '富可敌国']
+filtered_posts = {}
+for pid, p in month_posts.items():
+    all_text = f"{p.get('title', '')} {' '.join(p.get('tags', []))}"
+    if not any(kw in all_text for kw in GONGYI_KEYWORDS):
+        filtered_posts[pid] = p
+
+# 5. 按浏览量排序取月度 TOP 10
+top_posts = sorted(filtered_posts.values(),
+                   key=lambda p: int(re.sub(r'\D', '', p.get('views', '0')) or 0),
+                   reverse=True)[:10]
+
+month_data = {
+    'month': month,
+    'total_days': total_days,
+    'covered_days': covered_days,
+    'missing_days': missing_days,
+    'coverage': f'{len(covered_days)}/{total_days}',
+    'total_topics': len(filtered_posts),
+    'day_topic_counts': day_topic_counts,
+    'daily_highlights': daily_highlights,
+    'top_posts': top_posts,
+}
+os.makedirs('data/monthly', exist_ok=True)
+with open(f'data/monthly/{month}.json', 'w') as f:
+    json.dump(month_data, f, ensure_ascii=False, indent=2)
+print(f'月报数据聚合: {month} 覆盖 {len(covered_days)}/{total_days} 天, '
+      f'有效主题 {len(filtered_posts)} 个')
+```
+
+### 月报 Markdown 模板（Writer Agent 专用）
+
+```markdown
+# linux.do 人工智能 技术月报
+**{YYYY-MM}** | 数据来源：当月日报聚合（{covered_days}/{total_days} 天）
+
+## 本月概览
+- 数据覆盖天数：{covered_days}/{total_days}
+- 缺失天数：{missing_days}（如有）
+- 月度主题总数：{total_topics}
+- 最活跃讨论日：{most_active_day}（{peak_count} 个新主题）
+- 日均新主题数：{avg_per_day}
+
+## 本月热门主题 TOP 10
+1. **帖子标题** — 摘要（浏览 X | 回复 Y | 出现日期）
+2. ...
+（按月度浏览量降序排列，标注每周话题峰值）
+
+## 月度技术趋势
+### 趋势一：{趋势名称}
+- **热度变化**：本月讨论量 / 起止时间 / 周环比
+- **关键驱动**：核心事件或发布
+- **代表主题**：相关帖子链接
+
+### 趋势二 / 趋势三 …
+（基于 daily_highlights 跨日归纳，不按天拼接）
+
+## 主题分布
+| 主题分组 | 帖数 | 占比 |
+|---------|------|------|
+| OpenAI/ChatGPT 生态 | ... | ... |
+| Claude/Anthropic 生态 | ... | ... |
+（复用 Agent 2 主题分类规则）
+
+## 下月展望
+基于本月趋势，预测下月可能关注的方向：
+- 预测方向 1（依据：本月某趋势持续升温）
+- 预测方向 2
+- 预测方向 3
+
+## 数据来源说明
+- 数据时间范围：{YYYY-MM-01} ~ {YYYY-MM-末}
+- 基于日报文件：{daily_count} 份
+- 缺失日期：{missing_days}（如有，标注影响）
+- 公益站/中转站内容已过滤
+```
+
+### 月报多 Agent 流程
+
+月报模式下，**Crawler 不抓取新数据**，6 个 Agent 的职责调整：
+
+| Agent | 日报职责 | 月报职责 |
+|-------|---------|---------|
+| Crawler | 抓取双源 | **读取当月 daily JSON + 日报 MD** |
+| Topic Merger | 合并去重 | 合并当月所有帖子去重（不去重历史） |
+| Trend Analyzer | 今日趋势 | **跨日趋势归纳**（基于 daily_highlights） |
+| Writer | 日报 MD | 月报 MD（用月报模板） |
+| Press Writer | 新闻稿 | 月度新闻稿 |
+| PDF Builder | 日报 PDF | 月报 PDF（复用 Typst 模板，转义规则同 v12） |
+
+### 月报 Typst 输出
+
+```bash
+typst compile data/monthly/{YYYY-MM}.typ data/monthly/{YYYY-MM}.pdf
+```
+Typst 特殊字符转义规则与日报一致（`$` → `\$`、`#` → `\#`、不支持 `**bold**`）。
+
+---
+
 ## 注意事项
 
 ### 浏览器与抓取
@@ -673,10 +889,41 @@ typst compile data/reports/{date}.typ data/reports/{date}.pdf
 ### 流程完整性
 - **必须按顺序完成所有 Agent**：Crawler → Topic Merger → Trend Analyzer → Writer → Press Writer → PDF Builder
 - **Press Writer 和 PDF Builder 不可跳过**：即使用户没有明确要求，也必须生成
+- **月报模式不抓取新数据**：聚合当月 daily JSON + 日报 MD，Crawler 仅做读取与聚合
+- **月报数据缺失处理**：若某日数据缺失，标注缺失天数并继续生成，不中断流程
 
 ---
 
 ## 更新日志
+
+### v13.0.0 (2026-06-30)
+新增**月报模式**，基于已有数据聚合，不重复抓取：
+
+**月报触发词**
+- 新增：月报、AI月报、技术月报、linuxdo月报、monthly、出月报、本月AI新闻、月度总结
+- 支持指定月份：`月报 2026-05` / `2026年5月月报` / `上月月报`
+- 不指定时默认生成上一个自然月
+
+**月报数据策略（核心）**
+- 不重复抓取，聚合当月 `data/daily/{YYYY-MM-DD}.json` 与 `data/reports/{YYYY-MM-DD}.md`
+- 扫描日报 Markdown 提取每日亮点，用于跨日趋势归纳
+- 帖子去重但不做历史去重（月内全量呈现）
+- 复用 v12 公益站过滤规则
+- 缺失日期标注并继续生成，不中断
+
+**月报输出风格**
+- 月度趋势总结 + 主题归纳（非按天拼接）
+- 月度热门主题 TOP 10（按月度浏览量）
+- 主题分布表（复用 Agent 2 分类规则）
+- **下月展望**（基于本月趋势预测）
+
+**月报多 Agent 职责调整**
+- Crawler：改为读取当月已有数据并聚合
+- Trend Analyzer：改为跨日趋势归纳（基于 daily_highlights）
+- Writer / Press Writer / PDF Builder：使用月报模板，Typst 转义规则同 v12
+
+**目录结构**
+- 新增 `data/monthly/{YYYY-MM}.md` / `.json` / `_press.md` / `.pdf` / `.typ`
 
 ### v12.0.0 (2026-06-29)
 基于 2026-06-29 实战经验优化：
