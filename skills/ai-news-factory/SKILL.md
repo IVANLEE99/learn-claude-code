@@ -1,12 +1,12 @@
 ---
 name: ai-news-factory
-description: AI News Factory - 从日报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "新闻工厂", "news factory", "日报视频", "生成日报视频", "AI news video"
-version: 3.0.0
+description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
+version: 3.1.0
 ---
 
-# AI News Factory — 日报短视频自动生成 v3.0.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.1.0
 
-将 AI 日报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：日报 → 去重 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。
+将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
 **核心原则：原始脚本文本 + ffprobe 时长比例对齐，确保字幕 100% 准确且与音频精确同步。**
 
@@ -92,8 +92,42 @@ version: 3.0.0
 - "日报视频", "生成日报视频", "AI news video"
 - "把日报做成视频", "日报转视频"
 - "AI周报", "羊报AI周刊", "weekly report", "周报视频"
+- "AI月报", "羊报AI月报", "monthly report", "月报视频", "把月报做成视频", "月报转视频"
 - "破格模式", "破格元素", "破格风格", "元素破格"
 - "精简模式", "精简", "排序", "精华版", "3W", "压新闻"
+
+## 模式参数映射表（v3.1.0 新增，单一事实源）
+
+本表是 daily/weekly/monthly 三模式字段对照的**唯一事实源**。Phase 0 依据 `REPORT_PATH` 或触发词判定 `REPORT_MODE` 后，所有下游 Phase 一律按本表读取参数，**禁止在脚本/封面/标题/合集里硬编码"今日羊报AI"或"YYYY-MM-DD"**。
+
+| 字段 | 日报 daily | 周报 weekly | 月报 monthly |
+|------|-----------|------------|-------------|
+| `REPORT_PATH` 默认 | `data/reports/YYYY-MM-DD.md` | 7 份日报（程序读取最近7天） | `data/monthly/YYYY-MM.md` |
+| 输出目录 | `news-pipeline/YYYY-MM-DD/` | `news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/` | `news-pipeline/monthly/YYYY-MM/` |
+| 是否重新聚合 | 否 | 是（读 7 天日报） | **否**（直接消费月报 md，linuxdo-daily v13 已聚合） |
+| 去重策略 | 对比前 3 天日报 | 对比上一期周报 | **对比上一期月报**（`data/monthly/{上月}.md`，不扫日报） |
+| 事件粒度 | 单日单帖事件 | 周内事件 | **月度趋势级**（4 趋势 + TOP 主题） |
+| 事件数档位 | 4-6（精简 3-5） | 5-6 | **4 趋势主线**（精简 3 趋势） |
+| 视频总时长 | 60-120s（≤150s） | 90-120s | **180-240s（≤300s）** |
+| 每段字数 | ≤80 字 | ≤80 字 | **≤100 字** |
+| 标题前缀 B站 | `【今日羊报AI】` | `【羊报AI周刊】` | `【羊报AI月报】` |
+| 日期字段 | `YYYY-MM-DD` | `MM-DD~MM-DD` | `YYYY-MM` |
+| tags 首 tag | `今日羊报AI` | `羊报AI周刊` | `羊报AI月报` |
+| tags 主题 tag | `AI日报` | `AI周报` | `AI月报` / `AI月度盘点` |
+| 封面品牌名 | `今日羊报 AI` | `羊报AI周刊` | `羊报AI月报` |
+| 封面日期字段 | `{YYYY-MM-DD}` | `{YYYY-MM-DD} ~ {YYYY-MM-DD}` | `{YYYY-MM}` |
+| 视频渲染文件名 | `【今日羊报AI】{核心标题} \| YYYY-MM-DD.mp4` | `【羊报AI周刊】{核心标题} \| MM-DD~MM-DD.mp4` | `【羊报AI月报】{核心标题} \| YYYY-MM.mp4` |
+| B站合集名 | `「今日羊报 AI」` | `「羊报AI周刊」` | `「羊报AI月报」` |
+| 公众号合集名 | 同 B站 | 同 B站 | 同 B站 |
+| 公众号署名 | `今日羊报 AI · YYYY-MM-DD` | `羊报AI周刊 · MM-DD~MM-DD` | `羊报AI月报 · YYYY-MM` |
+| 公众号结尾 CTA | `每天 9 点带你速览 AI 圈最热的 5 条新闻` | `每周带你盘点 AI 圈一周大事` | `每月带你回顾 AI 圈整月风向` |
+| 简介数字规则 | 版本号简化 + 数字中文 | 同日报 | **强制全数字中文化**（见 B站简介数字中文化章节） |
+| 精简模式可叠加 | 是 | 是 | 是（精简月报 = 3 趋势，≤180s） |
+
+**模式判定规则**（Phase 0 自动）：
+- `REPORT_PATH` 含 `data/monthly/`，或触发词含"月报/monthly" → `REPORT_MODE=monthly`，`MONTH_LABEL=YYYY-MM`
+- 触发词含"周报/weekly"，或 `REPORT_PATH` 含 `data/weekly/` → `REPORT_MODE=weekly`
+- 否则 → `REPORT_MODE=daily`
 
 ## 周报模式
 
@@ -140,6 +174,64 @@ A professional Chinese AI news studio weekly cover image. A male news anchor in 
 - 开源模型发布
 - 行业政策与监管
 - 重大技术突破
+
+## 月报模式（v3.1.0 新增）
+
+**当触发词包含"月报"或"monthly"，或 `REPORT_PATH` 指向 `data/monthly/*.md` 时，进入月报模式。**
+
+### 月报与日报/周报的区别
+
+| 项目 | 日报 | 周报 | 月报 |
+|------|------|------|------|
+| 数据源 | 单日日报 | 7天日报汇总 | **linuxdo-daily v13 月报 md**（已聚合，不重算） |
+| 输入路径 | `data/reports/YYYY-MM-DD.md` | `data/reports/*.md`（7天） | `data/monthly/YYYY-MM.md` |
+| 输出目录 | `news-pipeline/YYYY-MM-DD/` | `news-pipeline/weekly/...` | `news-pipeline/monthly/YYYY-MM/` |
+| 事件粒度 | 单日事件 | 本周事件 | **月度趋势**（一条趋势跨多日多帖） |
+| 是否去重 | 对比前3天日报 | 对比上期周报 | **月报已聚合去重，跳过跨日去重**；仅对比上期月报避免重复趋势 |
+| 脚本结构 | Hook+4段正文+CTA | Hook+5-6事件+CTA | **Hook + 4趋势段 + 月度总结 + 下月展望 + CTA** |
+| 总时长 | 60-150s | 90-120s | 180-240s（≤300s） |
+| 每段字数 | ≤80 字 | ≤80 字 | ≤100 字 |
+| 封面品牌 | 今日羊报 AI | 羊报AI周刊 | 羊报AI月报 |
+| 标题前缀 | 【今日羊报AI】 | 【羊报AI周刊】 | 【羊报AI月报】 |
+| 日期字段 | YYYY-MM-DD | MM-DD~MM-DD | YYYY-MM |
+| 简介数字规则 | 版本号简化 | 同日报 | **强制全数字中文化**（见 B站简介数字中文化章节） |
+
+### 月报生成流程
+
+1. **读取月报 md**：`data/monthly/{YYYY-MM}.md`（**不读取当月日报，不重新聚合**——linuxdo-daily v13 已完成跨日聚合与去重）
+2. **对比上期月报**（去重）：读取 `data/monthly/{上一个月}.md`，对比 4 条趋势是否与上月高度重叠。重叠趋势标记「延续」并在脚本中合并表述，避免重复展开。
+3. **选材**：按下方"月报选材规则"，从 4 条月度趋势 + TOP10 主题中选 4 条趋势主线 + 4-8 个支撑案例。
+4. **生成月报视频脚本**：输出到 `news-pipeline/monthly/{YYYY-MM}/scripts/`，引用 `templates/script-template-monthly.md`。
+5. **生成月报封面**：使用月报专用封面提示词（下方模板），引用 `templates/image-prompt-monthly.md`。
+6. **后续流程**：与日报/周报相同（分镜→图片→TTS→字幕→视频→上传），但所有标题/品牌名/合集名/日期字段按模式参数映射表读取。
+
+### 月报封面提示词模板
+
+```
+A professional Chinese AI news studio monthly cover image. A male news anchor in a dark navy suit sits at a modern curved news desk. Behind him are multiple large display screens arranged in a grid showing: {本月4条趋势相关视觉元素，如 OpenAI/Codex logo、智谱 GLM 标识、Anthropic Claude 图标、AI编程工具拼贴}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI月报" on the first line and "AI 月度盘点" on the second line in large white Chinese characters. In the bottom center, display the month "{YYYY-MM}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, {ratio} aspect ratio.
+```
+
+### 月报选材规则（最关键，区别于周报）
+
+> 月报的"事件"是**趋势级**，不是单帖级。选材以 4 条月度趋势为主线骨架，每条趋势配 1-2 个代表性 TOP 主题作为支撑案例。**禁止把 4 趋势拆成 8-10 个单日事件回退日报结构。**
+
+1. **4 条月度趋势全部纳入骨架**（不砍趋势，砍则丢信息）。若某趋势与上月高度重叠（如上月也是 OpenAI 调度混乱），标记为"延续趋势"，配 1 个本月新进展案例，合并表述。
+2. **每条趋势选 1-2 个代表主题**：优先选该趋势「代表主题」字段中浏览量最高的 1 条；TOP10 中归属该趋势的再选 1 条。总数 = 4 趋势 × 1-2 = **4-8 个支撑点**。
+3. **二次过滤公益站/套利类 TOP 主题**：月报 md 本身已过滤公益站/中转站（151 条），但 TOP10 仍可能含套利账号帖（如"墨西哥18刀买一送一"）或渠道促销帖（如"Codex 渠道半价"）。这类帖必须用趋势代表主题替代，不得入选。
+4. **脚本结构**：1 Hook + 4 趋势段（每段 = 趋势概述 + 1-2 案例支撑，约 100 字）+ 1 月度总结段 + 1 下月展望段 + 1 CTA = **8-9 段**。
+5. **精简月报模式**：砍到 3 趋势（每趋势配 1 案例共 6-7 段），总时长 ≤180s。
+
+### 月报过滤规则
+
+沿用周报过滤规则（公益站/中转站/倒卖/兑换码）。月报 md 已做一轮过滤，Phase 1 选材时再做一次 TOP10 套利帖的二次过滤。
+
+### 月报模式叠加
+
+| 组合 | 触发词示例 | 说明 |
+|------|-----------|------|
+| 精简 + 月报 | "精简 月报" | 精简版月报，3 趋势，≤180s |
+| 破格 + 月报 | "破格 月报" | 月报脚本 + 破格标记 |
+| 精简 + 破格 + 月报 | "精简 破格 月报" | 全部叠加 |
 
 ## 精简模式
 
@@ -235,18 +327,29 @@ A professional Chinese AI news studio weekly cover image. A male news anchor in 
 
 **在预授权阶段已收集以下信息，直接使用：**
 
-- `REPORT_PATH`: 日报文件路径
+- `REPORT_PATH`: 报告文件路径（日报 `data/reports/YYYY-MM-DD.md` / 周报 7 份日报 / 月报 `data/monthly/YYYY-MM.md`）
 - `API_URL`: 图片生成 API URL
 - `API_KEY`: 图片生成 API Key
 - `UPLOAD_PLATFORMS`: 上传平台列表
 - `STYLE_MODE`: 风格模式（standard / poge），默认 standard
 - `CONDENSED`: 是否启用精简模式（true / false），默认 false
+- `REPORT_MODE`: 报告模式（daily / weekly / monthly），按模式参数映射表"模式判定规则"自动判定
+- `MONTH_LABEL`: 月报模式下的月份标签 YYYY-MM（如 2026-06），仅 monthly 模式使用
 
 如信息不完整，在此处补充询问。
 
+**🔴 月报前置检查**（仅当 `REPORT_MODE=monthly`）：
+- 确认 `data/monthly/{YYYY-MM}.md` 存在；若不存在，提示用户先运行 linuxdo-daily 月报模式生成。
+- 确认 B站/公众号后台已创建合集「羊报AI月报」（首次运行月报前必须人工创建，否则 Phase 11/12 合集选择失败）。
+
 ### Phase 1: 输入、去重与事件切分
 
-**Step 1.1**: 读取今日日报内容。
+**模式分派**：
+- `daily`: 执行 Step 1.1 → 1.4 原流程（去重 + 排序 + 事件切分）
+- `weekly`: 执行周报流程（读 7 天日报聚合）
+- `monthly`: **跳过 Step 1.2 跨日去重**（月报已聚合），执行 Step 1.5 月报选材流程
+
+**Step 1.1**: 读取今日日报内容（daily/weekly）；monthly 模式读取 `data/monthly/{YYYY-MM}.md`。
 
 **Step 1.2**: 🔴 去重检查
 
@@ -304,6 +407,39 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 
 用户确认选择后进入 Phase 2。
 
+**Step 1.5（仅 `REPORT_MODE=monthly`）**: 月报选材流程
+
+1. 解析 `data/monthly/{YYYY-MM}.md`：
+   - 本月概览（覆盖天数 / 主题总数 / 最活跃日 / 日均 / 亮点文件数）
+   - 4 条月度技术趋势（热度变化 / 关键驱动 / 代表主题 triple-bullet）
+   - TOP10 主题（带浏览量）
+   - 下月展望（4 条预测）
+
+2. 对比上期月报 `data/monthly/{上一个月}.md`：4 条趋势是否与上月高度重叠（如 OpenAI 调度混乱连续两月）。重叠趋势标记「延续」，脚本中合并表述。
+
+3. 按"月报选材规则"选材：4 趋势全纳入骨架；每趋势配 1-2 代表主题（过滤公益站/套利类）；输出 4-8 个支撑点。
+
+4. 向用户展示选材结果并确认：
+
+```
+📊 月报选材（2026-06，覆盖 28/30 天）
+
+🟢 趋势一：GPT-5.5/5.6 调度混乱与 Codex 额度震荡
+   - 案例1: TOP10 #6 GPT-5.6 传闻（6.3k 浏览）✅保留
+   - 案例2: 6/10 全月峰值 1698 主题 ✅保留
+
+🟢 趋势二：国产模型集中爆发，GLM-5.2 贴脸输出
+   - 案例1: TOP10 #5 AxonHub 1.0 开源（7.5k）✅
+   - 案例2: 6/17 GLM-5.2 正式发布并开源 ✅
+
+🔴 已过滤：TOP10 #2 墨西哥18刀（套利账号）、#10 Codex渠道促销（倒卖）
+
+📐 脚本结构：1 Hook + 4 趋势段 + 1 总结 + 1 展望 + 1 CTA = 8-9 段
+⏱️ 预计时长：约 200s
+```
+
+用户确认后进入 Phase 2。
+
 ### Phase 2: 视频脚本生成
 
 对每个选中事件，按模板生成脚本。
@@ -312,8 +448,8 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 - **🔴 说人话！** 像跟朋友聊天一样，不要播音腔、不要堆砌术语、口语化、有温度
 - 像 B站 AI 科技 UP 主
 - 快节奏、有情绪、不书面
-- 总时长 60-120 秒（可适当放宽到 150s）
-- 每段不超过 80 字
+- 总时长按 `REPORT_MODE`：daily 60-120s（≤150s）/ weekly 90-120s / **monthly 180-240s（≤300s）**
+- 每段字数按 `REPORT_MODE`：daily/weekly ≤80 字 / **monthly ≤100 字**
 - 保留争议性与情绪感
 
 **输出结构**:
@@ -331,6 +467,44 @@ Hook：{开场钩子，5秒内抓住注意力}
 ```
 
 **🔴 重要：保存每个场景的 TTS 文本**，Phase 7 字幕生成需要直接使用这些文本（不用 ASR 识别）。
+
+**🔴 月报模式脚本模板**（仅当 `REPORT_MODE=monthly` 时生效，参考 `templates/script-template-monthly.md`）：
+
+结构：1 Hook + 4 趋势段 + 1 月度总结 + 1 下月展望 + 1 CTA（共 8-9 段）
+
+```
+标题：{核心标题，如"2026年6月AI圈：GPT调度乱象与GLM开源逆袭"}
+Hook：{一句话点出本月最大风向，如"这个6月，AI圈被GPT调度和GLM开源两件事刷屏了"}
+
+正文：
+{趋势一段} - {趋势名 + 热度变化时间线 + 1-2个代表案例，约100字}
+{趋势二段} - {同上}
+{趋势三段} - {同上}
+{趋势四段} - {同上}
+{月度总结段} - {TOP10归类 + 主题分布一句话，约60字}
+{下月展望段} - {从下月展望选2-3条预测，约60字}
+
+结尾：{CTA：关注羊报AI月报，每月带你回顾AI圈整月风向}
+```
+
+**月报脚本示例**（基于 2026-06 月报）：
+
+```
+标题：2026年6月AI圈：GPT调度乱象与GLM开源逆袭
+Hook：这个6月，AI圈被两件事反复刷屏——OpenAI的GPT调度全程翻车，和智谱GLM新版本的开源贴脸输出。
+
+趋势一：GPT调度混乱与Codex额度震荡
+六月三号起OpenAI大规模二验风暴，奥特曼连夜取消短信二验、新增passkey。中下旬降智争议持续，月末Codex灰度最新版并连续重置额度，全月话题峰值出现在六月十号。
+
+趋势二：国产模型集中爆发，GLM贴脸输出
+...
+```
+
+**月报脚本特殊要求**：
+- 每段趋势必须含「时间线（什么时候）+ 驱动（为什么）+ 代表案例（具体帖）」三要素
+- 月度总结段引用 TOP10 归类（如"OpenAI生态占TOP10五席"）
+- 下月展望段只选 2-3 条最可能成真的预测
+- **数字中文化**（见 B站简介数字中文化章节，月报脚本与简介均强制中文化，禁止阿拉伯数字连续出现）
 
 **🔴 精简模式脚本模板**（仅当 CONDENSED=true 时生效）：
 
@@ -1015,10 +1189,15 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
 /Users/youngsdream/Documents/learn-claude-code/news-pipeline/video-project/node_modules/.bin/remotion render \
   /Users/youngsdream/Documents/learn-claude-code/news-pipeline/video-project/src/index.ts \
   AINewsVideo \
-  "out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" \
+  "out/{按 REPORT_MODE 读取文件名前缀}.mp4" \
   --codec h264 --crf 18 \
   --public-dir /Users/youngsdream/Documents/learn-claude-code/news-pipeline/video-project/public
 ```
+
+**文件名按模式参数映射表读取**：
+- daily：`out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4`
+- weekly：`out/【羊报AI周刊】{核心标题} | MM-DD~MM-DD.mp4`
+- **monthly**：`out/【羊报AI月报】{核心标题} | YYYY-MM.mp4`
 
 **关键参数说明**：
 - `node_modules/.bin/remotion`：使用 video-project 下的本地 remotion
@@ -1031,15 +1210,19 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
 
 **🔴 视频合成后自动归档（必须执行）**：
 
-视频渲染完成后，必须立即将视频从根目录 `out/` 复制到日报目录：
+视频渲染完成后，必须立即将视频从根目录 `out/` 复制到报告目录（按 `REPORT_MODE` 对应的输出目录）：
 
 ```bash
-# 复制视频到日报目录（从根目录 out/ 复制）
+# 复制视频到报告目录（以 daily 为例；weekly 用 weekly/... ，monthly 用 monthly/YYYY-MM/）
 cp "/Users/youngsdream/Documents/learn-claude-code/out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" \
    "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/YYYY-MM-DD/video/"
 
+# monthly 模式：
+# cp "/Users/youngsdream/Documents/learn-claude-code/out/【羊报AI月报】{核心标题} | YYYY-MM.mp4" \
+#    "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/monthly/YYYY-MM/video/"
+
 # 验证复制成功
-ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/YYYY-MM-DD/video/"
+ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目录}/video/"
 ```
 
 **⚠️ 常见错误**：
@@ -1064,16 +1247,16 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/YYYY-MM-DD/
 | 抖音横版 | 4:3 | 1536x1152 | `douyin-horizontal-4-3.png` | 抖音视频封面 |
 | 抖音竖版 | 3:4 | 1152x1536 | `douyin-vertical-3-4.png` | 抖音个人主页卡片 |
 
-**封面模板 Prompt**：
+**封面模板 Prompt**（按 `REPORT_MODE` 读取品牌名与日期字段，**禁止硬编码**；周报用"羊报AI周刊"+日期范围，月报用"羊报AI月报"+`{YYYY-MM}` 见月报模式章节）：
 ```
 A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, {ratio} aspect ratio.
 ```
 
-输出到 `news-pipeline/YYYY-MM-DD/` 目录
+输出到 `{REPORT_MODE 对应的输出目录}`（daily `news-pipeline/YYYY-MM-DD/`；weekly `news-pipeline/weekly/...`；monthly `news-pipeline/monthly/YYYY-MM/`）
 
 #### 10.2 生成多平台发布信息
 
-生成 `news-pipeline/YYYY-MM-DD/publish.json`，包含 B站、抖音、视频号、公众号四个平台：
+生成 `{输出目录}/publish.json`，包含 B站、抖音、视频号、公众号四个平台（下方为 daily 模板，weekly/monthly 按模式参数映射表替换标题前缀/tags/日期字段）：
 
 ```json
 {
@@ -1105,6 +1288,14 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
 }
 ```
 
+**月报模式 publish.json 变体**（`REPORT_MODE=monthly` 时使用）：
+- `title`：`【羊报AI月报】{核心标题} | YYYY-MM`
+- `tags`：`["羊报AI月报", "AI月报", "AI月度盘点", "..."]`
+- `bilibili.title`：`【羊报AI月报】{核心标题}｜本月{N}大AI趋势月度盘点 | YYYY-MM`
+- `douyin/channels/wechat.title`：`{核心标题}｜羊报AI月报 YYYY-MM`
+- `bilibili.description`：**强制全数字中文化**（见 B站简介数字中文化章节）
+- `wechat.article`：`wechat-article-YYYY-MM.md`
+
 **标题规则**:
 - 日报 B站：`【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD`
 - 日报 抖音/视频号：`{核心标题}｜今日羊报AI YYYY-MM-DD`（较短）
@@ -1112,6 +1303,9 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
 - **周报 B站**：`【羊报AI周刊】{核心标题}｜本周{N}大AI新闻一次看完 | MM-DD~MM-DD`
 - **周报 抖音/视频号**：`{核心标题}｜羊报AI周刊 MM-DD~MM-DD`
 - **周报 公众号**：`{核心标题}｜羊报AI周刊 MM-DD~MM-DD`
+- **月报 B站**：`【羊报AI月报】{核心标题}｜本月{N}大AI趋势月度盘点 | YYYY-MM`
+- **月报 抖音/视频号**：`{核心标题}｜羊报AI月报 YYYY-MM`
+- **月报 公众号**：`{核心标题}｜羊报AI月报 YYYY-MM`
 
 #### 10.3 生成公众号图文
 
@@ -1147,12 +1341,50 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
 💬 你最关心哪条？评论区聊聊！
 ```
 
+**月报模式公众号图文变体**（`REPORT_MODE=monthly` 时使用，结构按月度趋势组织而非单事件）：
+```
+# {标题}
+
+> 羊报AI月报 · YYYY-MM
+
+---
+
+## 趋势一：{趋势名}
+
+{趋势正文，2-3段，含时间线 + 关键驱动 + 代表案例}
+
+![配图描述](images/sceneN.png)
+
+---
+
+## 趋势二：{趋势名}
+...
+
+---
+
+## 月度总结
+{TOP10 归类 + 主题分布一句话}
+
+## 下月展望
+{2-3 条预测}
+
+---
+
+**这个月，AI 圈的风向已经变了。**
+
+---
+
+👆 觉得有用就点个赞、转发给关注 AI 的朋友！
+🔔 关注「羊报AI月报」，每月带你回顾 AI 圈整月风向。
+💬 你最看好哪条趋势？评论区聊聊！
+```
+
 **生成规则**：
 - 标题使用视频标题
-- 每个新闻事件一个 `##` 标题
+- daily/weekly：每个新闻事件一个 `##` 标题；monthly：每条趋势一个 `##` 标题 + 月度总结 + 下月展望
 - 正文从脚本段落中提取，去掉口语化表达（"今天"、"我们"、"大家"等）
-- 每个事件配一张场景图片（scene2.png ~ sceneN.png，跳过 Hook 场景）
-- 结尾替换为引导关注的 CTA
+- 每个事件/趋势配一张场景图片（scene2.png ~ sceneN.png，跳过 Hook 场景）
+- 结尾署名与 CTA 按模式参数映射表读取（daily"今日羊报 AI·每天9点带你速览AI圈最热的5条新闻"；monthly"羊报AI月报·每月带你回顾AI圈整月风向"）
 
 输出到：
 - 文章：`news-pipeline/YYYY-MM-DD/wechat-article-YYYY-MM-DD.md`
@@ -1161,6 +1393,7 @@ A professional Chinese AI news studio cover image. A male news anchor in a dark 
 #### 10.4 归档资源
 
 ```bash
+# 输出目录与视频文件名前缀按 REPORT_MODE 读取（此处为 daily；monthly 用 news-pipeline/monthly/YYYY-MM/ 与 【羊报AI月报】*.mp4）
 mkdir -p news-pipeline/YYYY-MM-DD/{scripts,storyboards,prompts,images,voiceover,captions,video,wechat-images}
 cp news-pipeline/video-project/out/【今日羊报AI】*.mp4 news-pipeline/YYYY-MM-DD/video/
 ```
@@ -1194,6 +1427,8 @@ browser_navigate("https://member.bilibili.com/platform/upload/video/frame")
 
 ```
 browser_click(target=e231)  # 点击上传区域，触发 file chooser
+# 视频路径按 REPORT_MODE：daily news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4
+#                       monthly news-pipeline/monthly/YYYY-MM/video/【羊报AI月报】*.mp4
 browser_file_upload("news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4")
 ```
 
@@ -1258,17 +1493,21 @@ for tag in tags:
 
 #### 11.7 加入合集（自定义下拉框）
 
-**🔴 合集选择器也是自定义下拉框，必须用 JS evaluate：**
+**🔴 合集选择器也是自定义下拉框，必须用 JS evaluate。合集名按 `REPORT_MODE` 从模式参数映射表读取：daily `「今日羊报 AI」` / weekly `「羊报AI周刊」` / monthly `「羊报AI月报」`。**
+
+**🔴 风险点**：合集必须由用户预先在 B站创作中心手动创建。若 monthly 模式合集「羊报AI月报」未创建，下方 JS 找不到选项会返回 `not found`，Phase 11.7 卡住——此时需提示用户去后台创建后再继续。
 
 ```javascript
 // 1. 点击打开下拉框
 browser_click(target=e525)  // "请选择合集"
 
-// 2. 用 JS 找到并点击选项
+// 2. 用 JS 找到并点击选项（合集名按 REPORT_MODE 读取）
 browser_evaluate("""() => {
   const options = document.querySelectorAll('li, div, span, p');
+  // 合集名按模式参数映射表：daily 「今日羊报 AI」/ weekly 「羊报AI周刊」/ monthly 「羊报AI月报」
+  const targetName = '「今日羊报 AI」';
   for (const opt of options) {
-    if (opt.textContent.trim() === '「今日羊报 AI」') {
+    if (opt.textContent.trim() === targetName) {
       opt.click();
       return 'clicked';
     }
@@ -1722,7 +1961,7 @@ browser_run_code_unsafe("""async (page) => {
   return 'dialog opened';
 }""")
 
-# 步骤2：点击输入框 focus
+# 步骤2：点击输入框 focus（搜索关键词按 REPORT_MODE：daily「今日羊报」/ weekly「羊报AI周刊」/ monthly「羊报AI月报」）
 browser_run_code_unsafe("""async (page) => {
   const input = page.getByRole('textbox', { name: '请选择合集' });
   await input.click();
@@ -1732,8 +1971,9 @@ browser_run_code_unsafe("""async (page) => {
   return 'typed';
 }""")
 
-# 步骤3：hover 并点击选项（必须用 exact: true 精确匹配！）
+# 步骤3：hover 并点击选项（必须用 exact: true 精确匹配！合集名按 REPORT_MODE 从模式参数映射表读取）
 browser_run_code_unsafe("""async (page) => {
+  // daily 「今日羊报 AI」/ weekly 「羊报AI周刊」/ monthly 「羊报AI月报」
   const option = page.getByText('「今日羊报 AI」', { exact: true });
   await option.hover();
   await page.waitForTimeout(500);
@@ -2200,7 +2440,7 @@ browser_run_code_unsafe("""async (page) => {
 
 ```
 news-pipeline/
-├── YYYY-MM-DD/                 # 按日期隔离的产出目录
+├── YYYY-MM-DD/                 # 按日期隔离的产出目录（daily）
 │   ├── scripts/                # 视频脚本
 │   ├── storyboards/            # 分镜表
 │   ├── prompts/                # 图片 Prompt JSON
@@ -2213,6 +2453,23 @@ news-pipeline/
 │   ├── publish.json            # 多平台发布信息
 │   ├── wechat-article-*.md     # 公众号图文
 │   └── wechat-images/          # 公众号配图
+├── weekly/                     # 周报产出目录（weekly，按日期范围隔离）
+│   └── YYYY-MM-DD~YYYY-MM-DD/
+│       └── （同 daily 子结构，视频 【羊报AI周刊】*.mp4，封面 weekly-cover.png）
+├── monthly/                    # 月报产出目录（monthly，按月隔离）
+│   └── YYYY-MM/
+│       ├── scripts/            # 月报视频脚本（8-9段：Hook+4趋势+总结+展望+CTA）
+│       ├── storyboards/        # 分镜表
+│       ├── prompts/            # 图片 Prompt JSON
+│       ├── images/             # 生成的图片
+│       ├── voiceover/          # TTS 音频
+│       ├── captions/           # 字幕 JSON
+│       ├── video/
+│       │   └── 【羊报AI月报】*.mp4
+│       ├── cover.png           # 视频封面
+│       ├── publish.json        # 多平台发布信息（月报变体：tags 含 AI月报）
+│       ├── wechat-article-YYYY-MM.md   # 公众号图文（月报变体）
+│       └── wechat-images/      # 公众号配图
 ├── video-project/              # Remotion 项目 (固定复用)
 │   ├── public/
 │   │   ├── images/             # 当期图片（复制）
@@ -2226,6 +2483,8 @@ news-pipeline/
 │           └── NewsTitle.tsx   # 标题组件
 └── sources/                    # 原始日报 Markdown
 ```
+
+**月报输入**：`data/monthly/{YYYY-MM}.md`（项目根 data 目录，由 linuxdo-daily v13 生成，**不在 news-pipeline 下**）。
 
 ## 已知坑与经验教训
 
@@ -2304,6 +2563,31 @@ Codex后台疯狂写日志，SSD直接被写报废！
 
 **Why:** B站的反垃圾系统对连续数字串非常敏感，`213756` 这样的模式会被误判为联系方式
 **How to apply:** Phase 10 生成 B站简介时，自动将版本号简化、数字用中文替代、去掉 hashtag 行
+
+#### 🔴 月报简介数字中文化（v3.1.0 新增，强制执行）
+
+**问题**：月报数据天然大量数字（`6709` 主题、`28/30` 天、`1698` 峰值、`303` 日均、`52.6k` 浏览、`9650亿` 估值、`GPT-5.5/5.6`、`GLM-5.2`、`Opus 4.8` 等），密度是日报的数十倍。按 v2.9.0 规则只简化零星版本号远远不够，月报简介几乎必触发 B站违规推广检测。
+
+**强制规则**：
+1. 月报简介**禁止出现任何阿拉伯数字**（0-9），一律中文数字替代。包括浏览量、主题数、天数、token 数、估值、定价、版本号。
+2. 大数模糊量化，避免连续数字串：`6709 → 近七千`、`6860 → 不写`、`1698 → 近一千七`、`303.1 → 三百出头`、`52.6k → 五万多`、`17.6k → 近一万八`、`9650亿 → 近万亿`、`70亿美元 → 数十亿美元`。
+3. 天数/占比中文：`28/30 天 → 三十天里二十八天有数据`。
+4. token 数模糊：`272k/353k → 近三十万token`、`516 → 五百多`。
+5. 定价不写具体：`8/28元每百万Token → 几块钱`。
+6. 版本号一律去数字：`GPT-5.5/5.6 → GPT新版本`、`gpt-5.6-sol → GPT最新灰度版`、`GLM-5.2 → GLM新版本`、`Opus 4.8 → Opus`、`Sonnet 4.6 → Sonnet`。
+7. 该规则对月报**强制执行**，不得以"这个数字看起来安全"为由保留阿拉伯数字。
+
+**月报安全版简介示例**（对照 v2.9.0 日报示例）：
+```
+本月AI圈月度盘点：OpenAI的GPT新版本调度全程翻车，二验风暴连夜取消，月末灰度版连续重置额度；智谱GLM新版本开源并登顶设计榜，国产模型集中爆发；Anthropic提交招股书估值近万亿，但服务中断、Mythos反复关闭；AI编程工具百花齐放。
+
+本月三十天里二十八天有数据，日均新增主题三百出头，峰值近一千七。
+
+羊报AI月报，每月带你回顾AI圈整月风向。
+```
+
+**Why:** 月报数据密度是日报的数十倍，不中文化几乎必触发 B站违规推广检测，稿件直接被移除。
+**How to apply:** 月报模式 Phase 10 生成 B站简介时强制全数字中文化；月报脚本正文同样适用（避免字幕里出现连续数字串）。
 
 ### 🔴 TTS API 多节点故障转移（v2.9.0 新增，2026-06-24）
 **问题**：MiMo TTS API 主节点（token-plan-cn.xiaomimimo.com）配额用完后返回 `quota exhausted` (429)。
@@ -3096,12 +3380,18 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 - 图片生成失败时自动重试一次
 - TTS 使用 mimo-tts，推荐预置音色「白桦」（不要用克隆音色！）
 - **TTS 必须串行执行，禁止并行！**
-- 视频总时长建议 60-120 秒（可适当放宽到 150s）
-- 事件数量建议 4-6 个
+- 视频总时长按 `REPORT_MODE`：daily 60-120s（≤150s）/ weekly 90-120s / **monthly 180-240s（≤300s）**
+- 事件数量建议 4-6 个（日报/周报）
 - **精简模式事件数量建议 3-5 个**（比标准模式少）
 - **精简模式每条用 3W 结构**（What→So What→Now What），总时长控制在 60-90s
-- **精简模式可与破格模式、周报模式叠加使用**
-- **Phase 1 去重是强制步骤，不可跳过**
+- **精简模式可与破格模式、周报模式、月报模式叠加使用**
+- **月报模式事件数为 4 趋势主线**（精简月报 3 趋势），不要套用日报 4-6 单日事件
+- **月报模式每段 ≤100 字**（趋势段落比日报单事件长）
+- **月报 B站简介强制全数字中文化**（见 B站简介数字中文化章节，月报数据全数字，不中文化必触发违规推广检测）
+- **月报合集「羊报AI月报」需用户预先在 B站/公众号后台创建**，否则上传 Phase 失败
+- **月报不重新聚合**：直接消费 linuxdo-daily v13 的 `data/monthly/{YYYY-MM}.md`，不读取当月日报
+- **月报去重改为对比上期月报**（`data/monthly/{上月}.md`），不扫 30 天日报（月报本身已跨日去重）
+- **Phase 1 去重是强制步骤，不可跳过**（月报模式改为对比上期月报，同样不可跳过）
 - **Phase 8（渲染前校验）是强制步骤，不可跳过**
 - **字幕必须使用原始脚本文本 + ffprobe 对齐**，不用 FunASR（专业术语识别率太低）
 - **B站自定义下拉框必须用 JS evaluate，不能用 browser_click 文本匹配**
@@ -3216,4 +3506,37 @@ await input.setInputFiles('/path/to/bilibili-cover.png');
 
 **Why:** 抖音自动检测视频内容生成章节建议
 **How to apply:** 上传视频后如果出现章节弹窗，直接关闭
+
+## 更新日志
+
+### v3.1.0（2026-06-30）
+- **新增月报模式**：兼容 linuxdo-daily v13 月报产物，直接消费 `data/monthly/{YYYY-MM}.md`，不重新聚合
+- 新增「模式参数映射表」统一管理 daily/weekly/monthly 三模式字段（单一事实源）
+- Phase 0 新增 `REPORT_MODE` 自动判定 + 月报前置检查（文件存在性 + 合集预创建提醒）
+- Phase 1 新增 Step 1.5 月报选材流程：4 趋势骨架 + 每趋势 1-2 代表主题 + 套利帖二次过滤；月报跳过跨日去重，改为对比上期月报
+- Phase 2 新增月报脚本模板（Hook + 4 趋势段 + 月度总结 + 下月展望 + CTA，180-240s/≤300s，每段≤100字），引用 `templates/script-template-monthly.md`
+- Phase 5.5 封面 prompt 模式化（月报品牌名"羊报AI月报" + 日期 `{YYYY-MM}` + 副标题"AI 月度盘点"），引用 `templates/image-prompt-monthly.md`
+- Phase 9 渲染文件名模式化（月报 `【羊报AI月报】{核心标题} | YYYY-MM.mp4`）
+- Phase 10 新增月报变体：publish.json（tags 含 AI月报/AI月度盘点）、标题规则（月报 B站/抖音/视频号/公众号）、公众号图文（按趋势分节 + 月度总结 + 下月展望）
+- Phase 11 B站合集 / Phase 12 公众号合集 / 抖音合集模式化（月报用「羊报AI月报」，需用户预先创建）
+- B站简介数字中文化规则升级（v2.9.0 仅日报零星版本号 → v3.1.0 月报强制全数字中文化，含详细中文化映射表 + 安全版简介示例）
+- 目录结构补 `news-pipeline/monthly/YYYY-MM/` 子树 + 月报输入路径说明
+- 注意事项补月报全部约束（时长/事件数/数字中文化/合集预创建/不重新聚合/去重对比上期月报）
+- 触发词新增"AI月报""羊报AI月报""monthly report""月报视频"等
+- **已知风险**：合集「羊报AI月报」需用户在 B站/公众号后台预先创建；月报选材严禁把 4 趋势拆成单日事件
+
+### v3.0.0
+- 周报模式（读 7 天日报聚合）
+- 精简模式、破格模式可叠加
+
+### v2.9.0（2026-06-24）
+- B站简介数字检测误判修复
+- TTS API 多节点故障转移
+
+### v2.8.0（2026-06-23）
+- 所有平台存草稿
+- 平台合规审查
+- 视频号 AI 标识
+- 标题党检查
+- 图片-脚本映射铁律
 ```
