@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.1.0
+version: 3.2.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.1.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.2.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -967,7 +967,14 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 
 根据视频脚本逐场景生成配音：
 
+**🔴 重要：mimo-tts.sh 依赖 settings.json 中的 `MIMO_TTS_API_KEY` 配置。如果未配置，必须使用环境变量方式调用。**
+
+#### 6.1 首选方案：环境变量直接调用 mimo-tts.sh（v3.2.0 新增）
+
+**如果 settings.json 中没有 MIMO_TTS_API_KEY 配置，直接用环境变量方式调用：**
+
 ```bash
+MIMO_TTS_API_URL="https://your-tts-api-url.com" MIMO_TTS_API_KEY="sk-your-tts-key" \
 bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
   --text "配音文本" \
   --voice "白桦" \
@@ -975,36 +982,21 @@ bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
   --output "news-pipeline/YYYY-MM-DD/voiceover/sceneN.wav"
 ```
 
-**🔴 关键限制：mimo-tts.sh 使用 `mktemp` 生成临时文件，并行调用会导致文件名冲突和静默失败。必须逐场景串行执行！**
+**🔴 关键经验（v3.2.0 新增）**：
+- settings.json 中可能没有 MIMO_TTS_API_KEY 配置，导致 mimo-tts.sh 报错 `MIMO_TTS_API_KEY not found`
+- 环境变量方式可以绕过 settings.json 配置问题
+- TTS API URL 和 Key 通常与图片 API 不同，需要单独收集
+- 如果用户未提供 TTS API 信息，先检查 settings.json，再询问用户
 
-**配音要求**:
-- 推荐音色: **白桦**（预置音色，效果最佳）
-- **🔴 重要：使用 `--voice "白桦"` 而非 `--profile "白桦"`！`--profile` 只能使用本地 profiles.json 中已保存的克隆音色（曼波/阿根），预置音色必须用 `--voice` 参数。**
-- **🔴 重要：优先使用预置音色（白桦/苏打/冰糖/茉莉），不要使用克隆音色（曼波/阿根）！克隆音色在新闻播报场景下听起来太机械、不自然。**
-- **🔴 TTS API 直接调用**：如果 mimo-tts.sh 报错缺少 MIMO_TTS_API_KEY，直接用 Python+curl 调用 MiMo TTS API（见下方代码）
-- **必须逐场景串行生成**（不要并行！）
-- 按场景生成音频文件（scene1.wav, scene2.wav, ...）
-- 每个场景的文本来自视频脚本对应段落
-- 结束语（"今天AI圈真是又热闹又魔幻..."）作为最后一个场景
+#### 6.2 备选方案：Python 直接调用 MiMo TTS API
 
-**获取音频时长**:
-
-```bash
-for i in 1 2 3 4 5 6 7; do
-  duration=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "news-pipeline/YYYY-MM-DD/voiceover/scene${i}.wav" 2>/dev/null)
-  echo "scene${i}: ${duration}s"
-done
-```
-
-**TTS API 直接调用（备选方案）**:
-
-如果 mimo-tts.sh 报错 `MIMO_TTS_API_KEY not found`，直接用 Python 调用 MiMo TTS API：
+如果 mimo-tts.sh 环境变量方式也失败，直接用 Python+curl 调用：
 
 ```python
 import json, subprocess, base64, tempfile, os, time
 
-API_URL = "https://token-plan-cn.xiaomimimo.com"  # 用户提供
-API_KEY = "用户提供的 TTS API Key"
+API_URL = "https://your-tts-api-url.com/v1/chat/completions"
+API_KEY = "sk-your-tts-key"
 OUTPUT_DIR = "news-pipeline/YYYY-MM-DD/voiceover"
 
 SCENES = [
@@ -2543,6 +2535,39 @@ for sent, chars in zip(sentences, char_counts):
 
 **解决**：用 `browser_evaluate` 注入 `innerHTML` 到 `.ql-editor`，然后 dispatch `input` 事件。
 
+### 🔴 B站上传 502/400 错误（v3.2.0 新增，2026-07-04）
+
+**问题**：B站上传视频时，preupload 接口返回 502 Bad Gateway 或 400 Bad Request 错误，视频无法上传成功。Console 显示 `preupload接口失败` 和 `probe timeout`。
+
+**原因**：B站服务器端问题，不是客户端或文件问题。可能是 B站 CDN 节点故障、上传接口限流、或临时维护。
+
+**解决**：
+1. 等待一段时间后重试（可能是临时故障）
+2. 如果持续失败，提示用户手动上传到 B站
+3. 视频文件已生成在 `news-pipeline/YYYY-MM-DD/video/` 目录，用户可直接拖拽上传
+
+**Why:** B站上传接口不稳定，502/400 错误是服务器端问题，无法通过客户端修复
+**How to apply:** Phase 11 B站上传失败时，不要反复重试，直接提示用户手动上传
+
+### 🔴 B站上传文件路径中文字符问题（v3.2.0 新增，2026-07-04）
+
+**问题**：视频文件名包含中文字符（如 `【今日羊报AI】阿里禁用Claude...mp4`）时，B站上传接口返回 400 Bad Request 错误。
+
+**原因**：B站上传接口对文件名中的中文字符处理有问题，可能导致 URL 编码错误。
+
+**解决**：
+1. 上传前将视频复制到简单路径（如 `/tmp/upload.mp4` 或 `news-pipeline/YYYY-MM-DD/video/upload.mp4`）
+2. 使用简单文件名上传，上传成功后 B站会自动使用视频标题作为文件名
+
+```bash
+# 复制视频到简单路径
+cp "news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4" \
+   "news-pipeline/YYYY-MM-DD/video/upload-YYYY-MM-DD.mp4"
+```
+
+**Why:** B站上传接口对中文文件名兼容性差
+**How to apply:** Phase 11 B站上传前，先复制视频到简单路径再上传
+
 ### 🔴 B站简介数字检测误判（v2.9.0 新增，2026-06-24）
 **问题**：B站简介中包含大量数字（如 `21天37TB`、`2.5`、`2.1 Pro`、`4.6`、`5.6`、`5.2`）会被系统检测为「违规推广内容」（疑似QQ号/微信号），稿件直接被移除。
 
@@ -3345,20 +3370,28 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 **Why:** 克隆音色在短句和新闻播报场景下表现不佳，预置音色经过专业调优
 **How to apply:** TTS 默认使用 `mimo-v2.5-tts` 模型 + `voice: "白桦"`，不要用 `mimo-v2.5-tts-voiceclone`
 
-### 🟡 MIMO_TTS_API_KEY 未配置（v2.5.0 新增，v2.8.0 更新）
+### 🟡 MIMO_TTS_API_KEY 未配置（v2.5.0 新增，v2.8.0 更新，v3.2.0 更新）
 
 **问题**：mimo-tts.sh 脚本报错 `MIMO_TTS_API_KEY not found`，因为 ~/.claude/settings.json 的 env 中没有配置该变量。
 
 **v2.8.0 新发现**：settings.json 中 `MIMO_TTS_API_URL` 可能包含 `/anthropic` 后缀（如 `https://token-plan-cn.xiaomimimo.com/anthropic`），这是 **错误的**！正确 URL 格式为 `https://token-plan-cn.xiaomimimo.com/v1/chat/completions`（不带 `/anthropic`）。
 
+**v3.2.0 新发现**：settings.json 中可能根本没有 MIMO_TTS_API_KEY 和 MIMO_TTS_API_URL 配置。此时必须使用环境变量方式调用 mimo-tts.sh，而不是依赖 settings.json。
+
 **解决方案**：
-1. 在预授权阶段向用户收集 TTS API URL 和 Key
-2. 如果 mimo-tts.sh 失败，直接用 Python+curl 调用 MiMo TTS API
+1. **首选方案（v3.2.0）**：使用环境变量方式调用 mimo-tts.sh
+   ```bash
+   MIMO_TTS_API_URL="https://your-api-url.com" MIMO_TTS_API_KEY="sk-your-key" \
+   bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
+     --text "配音文本" --voice "白桦" --style "新闻播报" \
+     --output "news-pipeline/YYYY-MM-DD/voiceover/sceneN.wav"
+   ```
+2. **备选方案**：如果环境变量方式也失败，直接用 Python+curl 调用 MiMo TTS API
 3. **URL 校验**：如果 settings.json 中的 URL 以 `/anthropic` 结尾，需要去掉 `/anthropic` 再拼接 `/v1/chat/completions`
 4. API 格式：`POST {API_URL}/v1/chat/completions`，body 格式见 mimo-tts.sh 源码
 
-**Why:** TTS API Key 和图片 API Key 是分开的，需要分别收集
-**How to apply:** 预授权时额外收集 TTS API URL + Key，或在 Phase 6 遇到错误时询问用户
+**Why:** TTS API Key 和图片 API Key 是分开的，需要分别收集。settings.json 可能没有 TTS 配置。
+**How to apply:** 预授权时额外收集 TTS API URL + Key。Phase 6 TTS 生成时，先尝试环境变量方式，失败再用 Python 直接调用。
 
 ### 🟡 脚本风格必须"说人话"（v2.5.0 新增，2026-06-16）
 
@@ -3508,6 +3541,13 @@ await input.setInputFiles('/path/to/bilibili-cover.png');
 **How to apply:** 上传视频后如果出现章节弹窗，直接关闭
 
 ## 更新日志
+
+### v3.2.0（2026-07-04）
+- **Phase 6 TTS 优化**：新增环境变量直接调用 mimo-tts.sh 方案（v3.2.0），解决 settings.json 未配置 MIMO_TTS_API_KEY 的问题
+- **B站上传新问题**：新增 502/400 错误处理（服务器端问题，需手动上传）和文件路径中文字符问题（需复制到简单路径）
+- **公众号上传验证**：v3.2.0 实测确认完整流程可用（标题/作者/正文/原创声明/合集选择/保存草稿）
+- **已知坑补充**：MIMO_TTS_API_KEY 未配置问题更新为 v3.2.0，新增环境变量首选方案
+- **版本号升级**：3.1.0 → 3.2.0
 
 ### v3.1.0（2026-06-30）
 - **新增月报模式**：兼容 linuxdo-daily v13 月报产物，直接消费 `data/monthly/{YYYY-MM}.md`，不重新聚合
