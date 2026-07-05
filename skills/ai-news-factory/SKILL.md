@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.2.0
+version: 3.3.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.2.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.3.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -1435,6 +1435,16 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/cover.png")
 browser_click(target=e715)  # 点击「完成」→ 确认封面
 ```
 
+**🔴 B站封面 file input 无 image accept（v3.3.0 更新）**：B站的 file input 不包含 image accept 属性，用 `input[accept*="image"]` 找不到。用位置索引：
+```javascript
+const inputs = await page.$$('input[type="file"]');
+// inputs[0]: 视频 (.mp4)
+// inputs[1]: 封面 (通过封面设置弹窗触发)
+await inputs[1].setInputFiles('cover.png');
+```
+
+**⚠️ 实测经验（v3.3.0）**：B站封面自动上传成功率不稳定，建议跳过自动封面，提示用户在草稿箱中手动上传封面。
+
 #### 11.4 设置创作声明（自定义下拉框）
 
 **🔴 B站的创作声明是自定义下拉框组件，不是标准 `<select>`。`browser_click(listitem=...)` 不可靠，必须用 JS evaluate：**
@@ -1990,12 +2000,36 @@ browser_run_code_unsafe("""async (page) => {
 
 #### 12.11 保存草稿
 
+**🔴 保存前必须处理弹窗（v3.3.0 更新）**：封面图上传后会弹出「图片上传中，请稍后」弹窗，阻挡保存按钮。必须先等待上传完成、关闭弹窗，再保存。
+
 ```
 browser_run_code_unsafe("""async (page) => {
-  const saveBtn = page.locator('button:has-text("保存为草稿")');
-  await saveBtn.first().click();
+  // 等待上传完成（封面图可能需要10秒+）
+  await page.waitForTimeout(10000);
+  
+  // 关闭可能的弹窗
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  
+  // 再等5秒确保上传完成
+  await page.waitForTimeout(5000);
+  
+  // 保存草稿
+  await page.evaluate(() => {
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      if (btn.textContent.trim() === '保存为草稿') {
+        btn.click(); return;
+      }
+    }
+  });
   await page.waitForTimeout(3000);
-  return 'saved as draft';
+  
+  // 验证保存成功
+  const body = await page.evaluate(() => document.body.textContent);
+  return body.includes('已保存') ? 'saved!' : 'URL: ' + page.url();
 }""")
 ```
 
@@ -2742,13 +2776,13 @@ const checkbox = parent.querySelector('input[type="checkbox"], [role="checkbox"]
 if (checkbox) checkbox.click();
 ```
 
-### 🔴 公众号合集选择器正确流程（v1.9.1 更新）
+### 🔴 公众号合集选择器正确流程（v1.9.1 更新，v3.3.0 补充）
 **问题**：合集选择器是自定义 Vue 组件，JS evaluate 和坐标点击都不可靠。
 
 **已验证的正确流程**：
 1. 点击「合集」→「未添加」打开弹窗
 2. 点击「请选择合集」输入框 focus
-3. 输入「今日羊报」搜索
+3. 输入「今日羊报」或「羊报AI周刊」搜索
 4. 用 `page.getByText('「今日羊报 AI」', { exact: true })` 精确匹配选项
 5. **先 hover 再 click**（必须！）
 6. 用 `page.getByRole('button', { name: '确认' })` 点击确认
@@ -2757,6 +2791,8 @@ if (checkbox) checkbox.click();
 - 必须用 `exact: true` 精确匹配，否则会匹配到正文中的同名文本
 - 必须先 hover 再 click，直接 click 不生效
 - 不要用 JS evaluate，用 Playwright locator 更可靠
+- **合集名按 REPORT_MODE 读取**：daily「今日羊报 AI」/ weekly「羊报AI周刊」/ monthly「羊报AI月报」
+- **v3.3.0 补充**：合集选择失败时用 try-catch 跳过（timeout: 5000），不阻塞保存草稿
 
 ### 🟡 公众号原创声明弹窗自动填充（v1.7.0 新增）
 **问题**：原创声明弹窗打开后，「文字原创」已默认选中，「我已阅读并同意」已默认勾选。
@@ -3540,7 +3576,119 @@ await input.setInputFiles('/path/to/bilibili-cover.png');
 **Why:** 抖音自动检测视频内容生成章节建议
 **How to apply:** 上传视频后如果出现章节弹窗，直接关闭
 
+### 🔴 公众号弹窗阻挡「保存为草稿」（v3.3.0 新增，2026-07-05）
+
+**问题**：公众号封面图上传后弹出「图片上传中，请稍后」弹窗，此时点击「保存为草稿」无效（被弹窗拦截）。弹窗不会自动关闭，需要等待图片上传完成。
+
+**解决**：
+1. 上传封面图后等待 10 秒再操作（`browser_wait_for(time=10)`）
+2. 保存前检测是否有弹窗阻挡：`document.body.textContent.includes('上传中')`
+3. 如果仍有弹窗，按 Escape 关闭弹窗后再保存
+4. 验证保存成功：`document.body.textContent.includes('已保存')`
+
+```javascript
+// 保存前自动处理弹窗
+browser_run_code_unsafe("""async (page) => {
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  await page.waitForTimeout(5000);
+  await page.evaluate(() => {
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      if (btn.textContent.trim() === '保存为草稿') {
+        btn.click(); return;
+      }
+    }
+  });
+  await page.waitForTimeout(3000);
+  const body = await page.evaluate(() => document.body.textContent);
+  return body.includes('已保存') ? 'saved!' : 'failed';
+}""")
+```
+
+**Why:** 公众号图片上传是异步的，但弹窗会阻挡所有按钮点击
+**How to apply:** Phase 12 公众号上传时，封面图上传后等10s，保存前先Escape关闭弹窗
+
+### 🟡 公众号合集选择失败时自动跳过（v3.3.0 新增，2026-07-05）
+
+**问题**：公众号合集选择器用 `page.getByText('「羊报AI周刊」', { exact: true })` 精确匹配时，可能因合集名不完全匹配而超时（如合集名实际为「羊报AI周刊」vs页面显示差异）。
+
+**解决**：合集选择失败时自动跳过，不阻塞保存草稿。合集可后续手动添加。
+
+```javascript
+// 合集选择带超时保护
+try {
+  const option = page.getByText('「羊报AI周刊」', { exact: true });
+  await option.hover({ timeout: 5000 });
+  await option.click();
+} catch (e) {
+  console.log('合集选择跳过: ' + e.message);
+  await page.keyboard.press('Escape');
+}
+```
+
+**Why:** 合集选择器是自定义 Vue 组件，匹配规则不稳定
+**How to apply:** Phase 12 公众号合集选择用 try-catch 包裹，失败时 Escape 跳过
+
+### 🔴 B站封面上传 file input 无 image accept（v3.3.0 新增，2026-07-05）
+
+**问题**：B站上传页面有 4 个 file input，但没有任何一个的 accept 属性包含 image 类型。之前用 `input[accept*="image"]` 找不到封面 input。
+
+**解决**：封面 file input 通常在 inputs 数组的第 2 个位置（index 1）。按位置索引设置文件：
+```javascript
+const inputs = await page.$$('input[type="file"]');
+// inputs[0]: 视频 (.mp4)
+// inputs[1]: 封面 (通过封面设置弹窗触发)
+await inputs[1].setInputFiles('cover.png');
+```
+
+或者跳过自动封面上传，提示用户手动上传。
+
+**Why:** B站的 file input 使用动态 accept 属性，不包含 image
+**How to apply:** Phase 11 B站封面上传时，用 inputs[1] 或提示手动上传
+
+### 🔴 精简模式脚本审核必须前置（v3.3.0 新增，2026-07-05）
+
+**问题**：脚本生成后直接展示给用户，但没有先执行脚本审核检查清单。用户需要提醒才执行审核。
+
+**解决**：脚本生成后、展示给用户前，**必须先执行审核检查清单**，审核结果和脚本一起展示：
+
+```
+## ✅ 脚本审核检查
+1. 禁止词汇检查 ✅
+2. 口语化程度 ✅
+3. 平台合规审查 ✅
+4. 标题检查 ✅
+5. 内容准确性 ✅
+
+## 📝 脚本内容
+[完整脚本]
+```
+
+**Why:** 用户期望审核是自动执行的，不需要手动提醒
+**How to apply:** Phase 2 脚本生成后，先审核再展示，审核不通过则修改后再展示
+
+### 🟡 周报去重需对比上周周报（v3.3.0 新增，2026-07-05）
+
+**问题**：周报模式的去重策略是「对比上一期周报」，但实际执行时没有找到上周周报文件，跳过了去重。
+
+**解决**：如果上周周报文件不存在（`data/reports/2026-W26.md`），跳过去重步骤，但在脚本审核时标注「未去重」。
+
+**Why:** 周报文件可能不存在（首次生成或文件被清理）
+**How to apply:** Phase 1 周报去重时，先检查上周周报文件是否存在，不存在则跳过
+
 ## 更新日志
+
+### v3.3.0（2026-07-05）
+- **公众号上传修复**：新增弹窗阻挡「保存为草稿」的处理方案（等待上传完成+Escape关闭弹窗+验证已保存）
+- **公众号合集选择**：新增 try-catch 超时保护，失败时自动跳过不阻塞
+- **B站封面上传**：更新 file input 查找方案（按位置索引 inputs[1] 而非 accept 属性匹配）
+- **精简模式审核强化**：脚本审核检查必须在展示前执行，审核结果与脚本一起展示
+- **周报去重优化**：新增上周周报文件不存在时的跳过逻辑
+- **精简周报验证**：v3.3.0 实测精简+周报叠加模式可用（4条事件，125s，B站+公众号均存草稿成功）
+- **版本号升级**：3.2.0 → 3.3.0
 
 ### v3.2.0（2026-07-04）
 - **Phase 6 TTS 优化**：新增环境变量直接调用 mimo-tts.sh 方案（v3.2.0），解决 settings.json 未配置 MIMO_TTS_API_KEY 的问题
