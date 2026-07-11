@@ -1,0 +1,3 @@
+[submodule "ai-concept-bank"]
+	path = ai-concept-bank
+	url = git@github.com:IVANLEE99/ai-concept-bank.git
