@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.3.0
+version: 3.4.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.3.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.4.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -123,11 +123,17 @@ version: 3.3.0
 | 公众号结尾 CTA | `每天 9 点带你速览 AI 圈最热的 5 条新闻` | `每周带你盘点 AI 圈一周大事` | `每月带你回顾 AI 圈整月风向` |
 | 简介数字规则 | 版本号简化 + 数字中文 | 同日报 | **强制全数字中文化**（见 B站简介数字中文化章节） |
 | 精简模式可叠加 | 是 | 是 | 是（精简月报 = 3 趋势，≤180s） |
+| **专业锚点** | **15s × 1**（`ai-concept-bank`） | **30–60s × 1** | **30–60s × 1** |
+| **锚点库路径** | `ai-concept-bank/concepts.json` | 同左 | 同左 |
+| **脚本默认结构** | **3W + 可信度** | **3W + 可信度** | 趋势内嵌 3W + 可信度 |
+| **灰色渠道上限** | **每期 ≤1 条** | **每期 ≤1 条** | **每期 ≤1 条** |
 
 **模式判定规则**（Phase 0 自动）：
 - `REPORT_PATH` 含 `data/monthly/`，或触发词含"月报/monthly" → `REPORT_MODE=monthly`，`MONTH_LABEL=YYYY-MM`
 - 触发词含"周报/weekly"，或 `REPORT_PATH` 含 `data/weekly/` → `REPORT_MODE=weekly`
 - 否则 → `REPORT_MODE=daily`
+
+**专业锚点（v3.4.0）**：每期默认 1 个，算法与写 log 见 `templates/professional-anchor.md`；主库为 submodule `ai-concept-bank/`（禁止另建 `news-pipeline/concept-bank`）。
 
 ## 周报模式
 
@@ -239,7 +245,8 @@ A professional Chinese AI news studio monthly cover image. A male news anchor in
 
 ### 什么是精简模式
 
-先按重要程度排序，再用 **3W 模型**（What—So What—Now What）将每条新闻压缩为精华三段式。源自哈佛商学院和麦肯锡的分析框架，让观众 30 秒看懂一条新闻的核心价值。
+**v3.4：3W 已是全模式默认。** 精简模式 = 先按重要程度排序 + 更少条数 + 更短句。  
+3W（What—So What—Now What）源自哈佛/麦肯锡分析框架；细则见 `templates/credibility-and-tone.md`。
 
 ### 3W 模型说明
 
@@ -251,19 +258,19 @@ A professional Chinese AI news studio monthly cover image. A male news anchor in
 
 ### 精简模式与标准模式的区别
 
-| 项目 | 标准模式 | 精简模式 |
+| 项目 | 标准模式（v3.4 默认 3W） | 精简模式 |
 |------|---------|---------|
 | 事件筛选 | 用户选 4-6 个 | **AI 先排序，精选 3-5 个** |
-| 脚本结构 | Hook + 4段正文 + CTA | **Hook + 3W 三段式** |
-| 每条时长 | 15-30s | **10-20s（更紧凑）** |
-| 总时长 | 60-120s | **60-90s（更精炼）** |
+| 脚本结构 | **Hook + 每条 3W + 可信度 + 锚点 + CTA** | **同结构，更短句；CTA 可省** |
+| 每条时长 | 15-25s | **10-20s（更紧凑）** |
+| 总时长 | 75-135s（≤160 含锚点） | **60-100s（含锚点）** |
 | 其他阶段 | 不变 | 不变（分镜/图片/TTS/字幕/上传） |
 
 ### 精简模式规则
 
-1. **Phase 1 新增排序步骤**：按 5 个维度给事件打分（1-5 分），展示排序结果供用户确认
+1. **Phase 1 排序步骤**：按 5 个维度给事件打分（1-5 分），展示排序结果供用户确认
 2. **精选 3-5 条**：从排序结果中选最重要的 3-5 条
-3. **每条用 3W 结构**：What → So What → Now What，每段 1-2 句
+3. **每条仍用 3W + 可信度**（比标准模式更短：每段 1-2 句）
 4. **其他阶段不变**：分镜、图片、TTS、字幕、渲染、上传与标准模式相同
 
 ### 模式叠加规则
@@ -380,7 +387,13 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 
 **Step 1.3**: 用户确认选择要制作视频的事件（建议 4-6 个）。
 
-**Step 1.4**: 🔴 重要程度排序（仅当 CONDENSED=true 时执行）
+**Step 1.3b（v3.4.0 强制）**: 灰色渠道配额 + 传闻跟踪 + 上游字段
+
+1. **消费上游字段**：若报告条目含 `可信度：` / `技术锚点：` / `影响：`，在候选列表中一并展示，排序说明可引用。  
+2. **灰色渠道配额**：命中封号/KYC/土尼菲区/反代/号池/白嫖/薅羊毛/接码/代充等 → 本期独立成段 **≤1 条**；措辞改「风控/账号资产风险」，**禁止**教绕法（见 `templates/credibility-and-tone.md`）。  
+3. **传闻跟踪**：同一未确认事件前 3 天已报且无新事实 → 不单独成段或改一句状态更新。  
+
+**Step 1.4**: 🔴 重要程度排序（精简模式必做；标准模式可选展示）
 
 对去重后的新鲜事件按以下维度打分（1-5 分），展示排序结果：
 
@@ -405,7 +418,7 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 建议精选前 3-5 条制作视频。
 ```
 
-用户确认选择后进入 Phase 2。
+用户确认选择后，**不要直接进入 Phase 2**——先执行 **Step 1.6 专业锚点选题**。
 
 **Step 1.5（仅 `REPORT_MODE=monthly`）**: 月报选材流程
 
@@ -438,33 +451,64 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 ⏱️ 预计时长：约 200s
 ```
 
-用户确认后进入 Phase 2。
+用户确认后，**先执行 Step 1.6**，再进入 Phase 2。
+
+**Step 1.6（全模式强制，v3.4.0）**: 专业锚点自动选题
+
+> 完整算法、降级、展示模板见 **`templates/professional-anchor.md`**。以下为必须执行的摘要。
+
+1. **读库**：`ai-concept-bank/concepts.json`。仅 **eligible**：`status=ready` 且台词非空 且 `script_meta.authored_by=ai-concept-narrator` 且 `script_meta.reviewed=true`。库不存在则提示 `git submodule update --init`，本期可跳过。  
+2. **匹配**：用用户已确认的事件/趋势标题+摘要，匹配各概念的 `news_keywords` / `aliases` / `name`。  
+3. **冷却**：`last_used` 距今 < `reuse_gap_days`（默认 14）且同角度 → 不进默认推荐（可展示在「冷却跳过」）。  
+4. **排序**：命中本期 +100；tier1 +40；从未用 +20；较久未用 +10；低 use_count +5。取 top 3。  
+5. **时长**：daily → 15s（用 `script_15s`）；weekly/monthly → 30–60s（优先 `script_60s`，否则 15s 兜底并标注）。  
+6. **向用户展示候选并确认**，写入会话变量：`ANCHOR_CONCEPT_ID` / `ANCHOR_ANGLE` / `ANCHOR_DURATION_SEC` / `ANCHOR_SKIP`。  
+
+无强命中时走 P3：tier1 中 `last_used` 最旧或 null 的 **eligible** 概念。  
+用户可选：用推荐 / 选编号 / 指定 id / **本期不要锚点**。
+
+确认后进入 Phase 2。
 
 ### Phase 2: 视频脚本生成
 
 对每个选中事件，按模板生成脚本。
 
 **风格要求**:
-- **🔴 说人话！** 像跟朋友聊天一样，不要播音腔、不要堆砌术语、口语化、有温度
+- **🔴 说人话！** 像跟朋友聊天，不要播音腔；结论冷静
 - 像 B站 AI 科技 UP 主
-- 快节奏、有情绪、不书面
-- 总时长按 `REPORT_MODE`：daily 60-120s（≤150s）/ weekly 90-120s / **monthly 180-240s（≤300s）**
-- 每段字数按 `REPORT_MODE`：daily/weekly ≤80 字 / **monthly ≤100 字**
-- 保留争议性与情绪感
+- 快节奏；**情绪词黑名单**见 `templates/credibility-and-tone.md`（炸了/大瓜/闹鬼/白嫖…）
+- 总时长按 `REPORT_MODE`：daily 75-135s（≤160 含锚点）/ weekly 100-150s / **monthly 200-280s（≤320 含锚点）**
+- 每段字数：daily/weekly ≤80 字 / **monthly ≤100 字**
+- **🔴 默认 3W + 可信度**（全模式；精简仅更短更少条）
+- **🔴 灰色渠道 ≤1 条**，改写为风控/资产风险
+- **🔴 每期 1 个专业锚点**（除非 `ANCHOR_SKIP`）：仅 **eligible** 台词，见 `templates/professional-anchor.md`
 
-**输出结构**:
+**输出结构（默认 3W）**:
 ```
-标题：{标题}
-Hook：{开场钩子，5秒内抓住注意力}
+标题：{事件+影响，禁情绪词}
+Hook：{5s 钩子；下一句落到事实}
 
-正文：
-{段落1 - 引入}
-{段落2 - 核心信息}
-{段落3 - 争议/反转}
-{段落4 - 深入}
+正文（每条）：
+What：{一句可验证事实}
+So What：{影响}
+Now What：{是否跟进 + 建议}
+可信度：{五档之一}
 
-结尾：{CTA 引导互动}
+{专业锚点场景 - 命中新闻后或 CTA 前}
+
+结尾：{CTA}
 ```
+细则：`templates/script-template.md`、`templates/credibility-and-tone.md`
+
+**🔴 专业锚点场景（v3.4.0，`ANCHOR_SKIP=false` 时强制）**：
+
+1. 读取 `id == ANCHOR_CONCEPT_ID` 条目，必须 **eligible**：`ready` + 台词非空 + `authored_by=ai-concept-narrator` + `reviewed=true`。  
+2. 口播正文 **原样使用** `script_15s`（或周/月的 `script_60s`）；**禁止**主会话手写/改写整段专业定义；**禁止**非 narrator 来源台词。  
+3. 允许在锚点前加 ≤15 字过渡（如「刚才提到 MoE——」），不改动库内定义句。  
+4. 锚点 = **独立 scene**（独立 TTS + 图），计入场景列表与 Phase 7/8 校验。  
+5. 插入位置：命中该概念的新闻/趋势之后；无命中则 CTA 前（月报则在月度总结前）。  
+
+若未 eligible 且用户仍要该概念：调 **`ai-concept-narrator`**（`ai-concept-bank/prompts/script-15s-request.md`）→ `reviewed=true` → `ready` → 再进脚本。见 concept-bank README。
 
 **🔴 重要：保存每个场景的 TTS 文本**，Phase 7 字幕生成需要直接使用这些文本（不用 ASR 识别）。
 
@@ -491,7 +535,7 @@ Hook：{一句话点出本月最大风向，如"这个6月，AI圈被GPT调度�
 
 ```
 标题：2026年6月AI圈：GPT调度乱象与GLM开源逆袭
-Hook：这个6月，AI圈被两件事反复刷屏——OpenAI的GPT调度全程翻车，和智谱GLM新版本的开源贴脸输出。
+Hook：这个6月，AI圈被两件事反复刷屏——OpenAI的GPT调度与额度反复震荡，和智谱GLM新版本的开源贴脸输出。
 
 趋势一：GPT调度混乱与Codex额度震荡
 六月三号起OpenAI大规模二验风暴，奥特曼连夜取消短信二验、新增passkey。中下旬降智争议持续，月末Codex灰度最新版并连续重置额度，全月话题峰值出现在六月十号。
@@ -506,9 +550,9 @@ Hook：这个6月，AI圈被两件事反复刷屏——OpenAI的GPT调度全程�
 - 下月展望段只选 2-3 条最可能成真的预测
 - **数字中文化**（见 B站简介数字中文化章节，月报脚本与简介均强制中文化，禁止阿拉伯数字连续出现）
 
-**🔴 精简模式脚本模板**（仅当 CONDENSED=true 时生效）：
+**🔴 精简模式脚本模板**（CONDENSED=true：更短 3W，结构与默认相同）：
 
-每条新闻压缩为 3W 三段式，每段 1-2 句，总时长 10-20s：
+每条 3W + 可信度，每段 1-2 句，条内约 10-20s：
 
 ```
 标题：{标题}
@@ -517,6 +561,7 @@ Hook：{核心事件，一句话抓住注意力}
 What（发生了什么）：{关键事实，2-3句}
 So What（影响啥）：{对行业/用户的影响，1-2句}
 Now What（值不值得跟进）：{结论/建议，1句}
+可信度：{五档之一}
 ```
 
 **精简模式脚本示例**：
@@ -571,16 +616,18 @@ Hook：[破格类型] {开场，用破格制造意外感}
 - 同一视频至少使用 3 种不同破格类型
 - 参考模板：`templates/script-template.md`（破格模式模板）
 
-**🔴 禁止使用的词汇**：文案和字幕中不得出现以下词汇，需替换为通用称呼：
-- 「佬友」→「大家」「朋友们」（包括「有佬友」等变体，必须全部替换）
-- 「Linuxdo」→「社区」「论坛」
-- 「L站」→「社区」「论坛」
+**🔴 禁止使用的词汇**：
+- 社区名：「佬友」→「大家」；「Linuxdo」「L站」→「社区」「论坛」
+- **情绪黑名单**（见 `templates/credibility-and-tone.md`）：炸了/炸裂/大瓜/吃瓜/闹鬼/背刺/赢麻/白嫖/薅羊毛/彻底炸锅… → 专业替换词
 
 **🔴 脚本审核检查清单**：展示脚本给用户前，必须逐句检查：
-1. 是否包含禁止词汇（佬友/Linuxdo/L站）
-2. 破格类型标记是否完整（Hook 至少1种，正文至少2种不同破格）
-3. 口语化程度是否足够（不要播音腔）
-4. **平台合规审查**（基于B站/公众号/视频号/抖音社区公约）：
+1. 禁止词汇 + 情绪黑名单是否清零  
+2. 破格标记（非破格写 N/A）  
+3. 口语化、非播音腔  
+4. **每条是否有 What / So What / Now What / 可信度**  
+5. **灰色渠道是否 ≤1 且无操作指南**  
+6. **专业锚点**：仅 1 个（或 SKIP）且 **eligible**（ready+narrator+reviewed）  
+7. **平台合规审查**  
 
 ### 🔴 平台合规审查规则（v2.8.0 新增）
 
@@ -662,7 +709,16 @@ Hook：[破格类型] {开场，用破格制造意外感}
 
 **🔴 用户审核步骤**：脚本生成后，必须将完整脚本展示给用户审核，获得确认后才能进入 Phase 3。用户可能要求修改某些场景的文案。
 
-**参考模板**: `templates/script-template.md`
+**🔴 用户确认脚本后、进入 Phase 3 前：写入专业锚点 usage-log（v3.4.0 强制）**
+
+若 `ANCHOR_SKIP=true`，跳过。否则必须：
+
+1. **Append** `ai-concept-bank/usage-log.json` 一条记录（字段见 `templates/professional-anchor.md`）：`date`, `concept_id`, `angle`, `mode`（daily/weekly/monthly）, `duration_sec`, `news_trigger`, `report_path`, `script_path`, `notes`。  
+2. **更新** `ai-concept-bank/concepts.json` 对应概念：`last_used=date`，`use_count+=1`，`angles.used` 含本次 angle。  
+3. **不要**静默 git commit 子模块；可提示用户稍后 bump submodule。  
+4. 审核清单应能勾选：「已写 usage-log」。
+
+**参考模板**: `templates/script-template.md`；`templates/credibility-and-tone.md`；专业锚点：`templates/professional-anchor.md`
 
 ### Phase 3: 分镜生成
 
@@ -1157,10 +1213,32 @@ const sceneConfig = [
 ];
 ```
 
+**🔴 铁律：`duration` 必须来自 ffprobe 实测的音频时长，禁止手填估算值。** 用下面命令一次性打印全部实测时长，直接抄进 `sceneConfig`：
+
+```bash
+D=news-pipeline/YYYY-MM-DD/voiceover
+for i in $(seq 1 8); do
+  dur=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$D/scene$i.wav")
+  printf 'scene%d: %.2fs\n' "$i" "$dur"
+done
+```
+
+> **🔴 经验教训（2026-07-12）：重跑 TTS 后必须同步更新 Composition.tsx 和 Root.tsx 的时长，否则字幕漂移。**
+> 现象：只重新生成了音频 + 重算了 captions.json，但 `sceneConfig` 的 `duration` 还是旧音频的值。视频画面按旧时长排布、字幕按新音频时长对齐，两条时间轴从中段开始逐渐错位，到 1 分多钟处字幕与音频明显重叠、对不上。
+> 铁律：**任何一次重跑 TTS（哪怕只改一个场景），都必须重新 ffprobe 全部音频 → 同步刷新 Composition.tsx 的 `sceneConfig` 时长 + 标题浮层 `NewsTitle` 的 `durationInFrames` + Root.tsx 的 `TOTAL_DURATION_SEC` → 再重算 captions.json → 最后渲染。**四者必须来自同一批音频，缺一步就会漂移。
+
 #### Step 8.3: 更新 Root.tsx
 
 ```tsx
 const TOTAL_DURATION_SEC = 场景1时长 + 场景2时长 + ... + 场景N时长;
+```
+
+**校验：渲染出的视频总时长必须 ≈ 音频总时长（`captions.json` 末条 `endMs`）。** 若两者相差超过 0.5s，说明 `sceneConfig`/`Root.tsx` 与音频不同步，字幕必然漂移，需回到 Step 8.2 修正后重渲染：
+
+```bash
+# 渲染后校验：视频时长 vs 音频总时长
+ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \
+  "news-pipeline/YYYY-MM-DD/video/{文件名}.mp4"
 ```
 
 #### Step 8.4: 复制资源到 public 目录
@@ -3451,8 +3529,8 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 - **TTS 必须串行执行，禁止并行！**
 - 视频总时长按 `REPORT_MODE`：daily 60-120s（≤150s）/ weekly 90-120s / **monthly 180-240s（≤300s）**
 - 事件数量建议 4-6 个（日报/周报）
-- **精简模式事件数量建议 3-5 个**（比标准模式少）
-- **精简模式每条用 3W 结构**（What→So What→Now What），总时长控制在 60-90s
+- **默认全模式 3W + 可信度**（v3.4）；精简 = 3-5 条 + 更短句，总时长约 60-100s
+- **灰色渠道每期 ≤1**；情绪黑名单见 `templates/credibility-and-tone.md`
 - **精简模式可与破格模式、周报模式、月报模式叠加使用**
 - **月报模式事件数为 4 趋势主线**（精简月报 3 趋势），不要套用日报 4-6 单日事件
 - **月报模式每段 ≤100 字**（趋势段落比日报单事件长）
@@ -3461,6 +3539,9 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 - **月报不重新聚合**：直接消费 linuxdo-daily v13 的 `data/monthly/{YYYY-MM}.md`，不读取当月日报
 - **月报去重改为对比上期月报**（`data/monthly/{上月}.md`），不扫 30 天日报（月报本身已跨日去重）
 - **Phase 1 去重是强制步骤，不可跳过**（月报模式改为对比上期月报，同样不可跳过）
+- **Phase 1 Step 1.6 专业锚点选题是强制步骤**（用户可选手动换概念或跳过；算法见 `templates/professional-anchor.md`）
+- **Phase 2 用户确认脚本后必须写 `ai-concept-bank` usage-log**（`ANCHOR_SKIP` 除外），再进 Phase 3
+- **专业锚点台词只读 eligible ready**（narrator + reviewed + 非空）；否则调 `ai-concept-narrator`，禁止主会话瞎编长段
 - **Phase 8（渲染前校验）是强制步骤，不可跳过**
 - **字幕必须使用原始脚本文本 + ffprobe 对齐**，不用 FunASR（专业术语识别率太低）
 - **B站自定义下拉框必须用 JS evaluate，不能用 browser_click 文本匹配**
@@ -3680,6 +3761,16 @@ await inputs[1].setInputFiles('cover.png');
 **How to apply:** Phase 1 周报去重时，先检查上周周报文件是否存在，不存在则跳过
 
 ## 更新日志
+
+### v3.4.0（2026-07-12）
+- **专业锚点**：Step 1.6 + `professional-anchor.md`；eligible = ready + narrator + reviewed；usage-log 写回
+- **3W 默认**：全模式 What/So What/Now What + 可信度五档；精简仅更短更少条
+- **可信度/语气**：新增 `templates/credibility-and-tone.md`（五档、情绪黑名单、灰渠道措辞、标题示例）
+- **Phase 1**：灰渠道配额 ≤1；传闻 3 日跟踪；消费上游 `可信度`/`技术锚点`
+- **脚本模板**：script-template / monthly 去炸锅示例，默认 3W + 锚点 scene
+- **审核清单**：3W、可信度、灰渠道、锚点 eligible、黑名单
+- **版本**：3.3.0 → 3.4.0
+
 
 ### v3.3.0（2026-07-05）
 - **公众号上传修复**：新增弹窗阻挡「保存为草稿」的处理方案（等待上传完成+Escape关闭弹窗+验证已保存）
