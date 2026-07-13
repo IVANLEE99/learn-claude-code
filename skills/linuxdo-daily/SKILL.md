@@ -1,13 +1,15 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly
-version: 15.0.0
+version: 15.1.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v15.1 核心改进**：概念候选受控入库——日报附录经去重/过滤后只追加最小 `candidate`，不写口播、不晋升 ready。
+> **v15 核心改进**：接入 `ai-concept-bank` 技术锚点；可信度五档；账号权益黑话过滤。
 > **v14 核心改进**：Cloudflare 点击绕过、周报模式完整流程、并行 Agent 优化、旧 batch 文件清理。
 > **v13 核心改进**：新增月报模式。月报基于当月已抓取数据与已生成的日报数据聚合，不重复抓取，输出月度趋势总结 + 主题归纳 + 下月展望。
 > **v12 核心改进**：批量抓取数据强制保存、空帖检测跳过、官方警告检测、全量抓取支持、Typst 特殊字符处理。
@@ -652,6 +654,135 @@ Writer **应**在日报中点出技术概念，供下游 ai-news-factory Step 1.
 5. **亮点选择**：硬新闻优先；封号潮重复、低价区、未确认灰度第 N 次、纯情绪帖降权  
 6. 数据来源说明可加：「条目含可信度分层，未确认信息不作为定论」
 
+### 🟡 概念候选受控入库（v15.1.0 · 可选但推荐）
+
+**执行时机**：日报 Markdown 写入完成后、Press Writer / PDF Builder 启动前。
+**目标**：减少人工搬运，但只把合格新词追加为最小 `candidate`；不生产口播、不晋升 `draft/ready`、不写 `usage-log`。
+
+#### 1. 读取候选来源
+
+仅从本期日报 Markdown 的附录读取：
+
+```markdown
+## 概念候选（供 concept-bank）
+- **候选名** — 出现在：...
+```
+
+若日报没有该附录，或附录为空，跳过本步骤，不阻断 Press / PDF。
+
+#### 2. 读取概念库与频次表
+
+必须读取：
+
+```text
+ai-concept-bank/concepts.json
+```
+
+可选读取（用于长期价值参考，不要求每天重跑）：
+
+```text
+ai-concept-bank/extracts/term-frequency.json
+```
+
+月度维护时由 `ai-concept-bank/scripts/extract-term-frequency.py` 刷新长期频次；日报候选只负责发现新词。
+
+#### 3. 去重规则（任一命中即跳过新增）
+
+候选必须与 `concepts.json` 中已有条目的以下字段去重：
+
+- `id`
+- `name`
+- `aliases`
+- `news_keywords`
+
+去重时应同时检查中英文、大小写、空格、连字符和常见缩写。若候选更像已有概念的新说法，优先记录为后续 `aliases` / `angles.available` 的维护建议，不新建概念。
+
+#### 4. 过滤规则（任一命中即跳过）
+
+- 营销词、标题党词、社区情绪词。
+- 公司名、产品名、模型型号或单次事件名。
+- 账号权益、低价渠道、封号套利、号池、兑换码等权益黑话。
+- `可信度=未确认传闻` 且缺少可复核技术含义。
+- 只能描述当天个案、无法形成稳定定义的说法。
+- 不能在约 15 秒内讲清一个核心点的复杂混合表达。
+- 与已有 ready/candidate 概念高度重叠，但更适合作为新角度。
+
+#### 5. 追加最小 candidate
+
+通过去重与过滤后，只能追加最小 `candidate`，字段模板：
+
+```json
+{
+  "id": "snake_case_id",
+  "name": "候选名",
+  "aliases": [],
+  "category": "待定",
+  "tier": 3,
+  "difficulty": "待定",
+  "status": "candidate",
+  "one_liner": "",
+  "analogy": "",
+  "script_15s": "",
+  "script_60s": null,
+  "script_meta": {
+    "authored_by": "ai-concept-narrator",
+    "authored_at": null,
+    "reviewed": false,
+    "angle": null
+  },
+  "news_keywords": ["候选名"],
+  "corpus": null,
+  "angles": {
+    "available": ["基础定义"],
+    "used": []
+  },
+  "related_events": [],
+  "sources": ["data/reports/{YYYY-MM-DD}.md#概念候选"],
+  "last_used": null,
+  "use_count": 0
+}
+```
+
+若候选可匹配 `term-frequency.json` 的 `normalized_id`，可复制精简 `corpus`：
+
+```json
+{
+  "count_total": 0,
+  "count_scripts": 0,
+  "count_reports": 0,
+  "top_paths": []
+}
+```
+
+否则保持 `corpus: null`，等待月度 term-frequency 验证长期价值。
+
+#### 6. 写入后校验
+
+写入 `concepts.json` 后必须执行：
+
+```bash
+jq empty ai-concept-bank/concepts.json
+```
+
+并人工确认：
+
+- 新增条目 `status == "candidate"`。
+- `script_15s == ""`。
+- `script_meta.reviewed == false`。
+- 未修改 `usage-log.json`。
+- 未改动已有 ready 概念的口播和状态。
+
+#### 7. 禁止事项
+
+- 禁止自动调用 `ai-concept-narrator`。
+- 禁止自动设 `reviewed=true`。
+- 禁止自动晋升 `draft` 或 `ready`。
+- 禁止写入 `usage-log.json`。
+- 禁止覆盖已有概念、删除历史字段或改 `last_used/use_count`。
+- 禁止静默 git commit 子模块。
+
+> 职责边界：日报候选负责发现新词；`term-frequency` 负责验证长期价值；概念库维护 Agent 决定后续 `candidate → draft → ready`。
+
 ---
 
 ## Agent 5: Press Writer（新闻稿撰写器）
@@ -1082,6 +1213,7 @@ print("已清理旧 batch 文件")
 ### 日期与过滤
 
 - **概念库（v15）**：Writer 技术锚点只引用 `ai-concept-bank` 中 eligible ready；路径 `ai-concept-bank/concepts.json`
+- **概念候选入库（v15.1）**：仅从日报 `## 概念候选（供 concept-bank）` 附录追加最小 `candidate`；必须去重、过滤、`jq` 校验；不生成口播、不改 ready、不写 usage-log
 - **不能用 ID 阈值判断日期**：Discourse ID 不按日期顺序
 - **必须过滤公益站**：公益站、LDC、cdk、签到、白嫖、薅羊毛、兑换码、免费额度、号池、号商、中转站、高级推广、抽奖、富可敌国
 - **必须历史去重**：扫描 `data/reports/*.md` 提取已报道帖子 ID
@@ -1102,6 +1234,12 @@ print("已清理旧 batch 文件")
 ---
 
 ## 更新日志
+
+### v15.1.0 (2026-07-13)
+- **概念候选受控入库**：日报生成后可读取 `## 概念候选（供 concept-bank）`，经去重、过滤后只追加最小 `candidate`
+- **安全边界**：不自动调用 narrator、不设 `reviewed=true`、不晋升 `draft/ready`、不写 `usage-log`
+- **长期验证**：日报候选负责发现新词；`term-frequency` 负责验证长期价值；维护 Agent 决定后续 `candidate → draft → ready`
+- **校验要求**：写入 `concepts.json` 后必须 `jq empty`，并确认新增条目为空口播、未审核、未影响 ready 概念
 
 ### v15.0.0 (2026-07-12)
 - **接入 ai-concept-bank**：Writer 可读 `concepts.json`，条目「技术锚点：name — one_liner」（仅 ready + narrator + reviewed）
