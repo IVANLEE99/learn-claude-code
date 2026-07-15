@@ -1,14 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.4.0
+version: 3.5.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.4.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.5.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
-**核心原则：原始脚本文本 + ffprobe 时长比例对齐，确保字幕 100% 准确且与音频精确同步。**
+**核心原则：原始脚本文本 + 加权字符估算 + silencedetect 真实停顿点吸附，确保字幕 100% 准确且与音频精确同步。**
 
 ### 🔴 全局规则：所有平台上传一律存草稿
 
@@ -1080,13 +1080,15 @@ def generate_tts(scene):
 
 **🔴 重要**：预置音色用 `mimo-v2.5-tts` 模型 + `voice: "白桦"`。克隆音色用 `mimo-v2.5-tts-voiceclone` 模型 + base64 音频，但效果差，不推荐。
 
-### Phase 7: 字幕生成（原始脚本文本 + ffprobe 比例对齐）
+### Phase 7: 字幕生成（原始脚本文本 + 加权字符估算 + silencedetect 吸附）
 
-**v2.1.0 方案：使用原始脚本文本 + ffprobe 时长比例对齐（默认方案）。**
+**v2.2.0 混合方案：原始脚本文本 + 加权字符时长估算 + silencedetect 真实停顿点吸附（默认方案）。**
 
-> **🔴 经验教训（2026-06-12）**：FunASR 对专业术语识别极差（GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末），修正字典永远追不上新术语。**直接使用原始 TTS 脚本文本 + ffprobe 时长比例分配，字幕 100% 准确。**
+> **🔴 经验教训（2026-06-12）**：FunASR 对专业术语识别极差（GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末），修正字典永远追不上新术语。**直接使用原始 TTS 脚本文本，绝不用 ASR 识别。**
+>
+> **🔴 经验教训（2026-07-15）**：纯等字符比例分配（v2.1.0）会漂移——TTS 读中文、数字、英文的语速差异极大，一句 `GPT-5.6` 或 `85.5GiB` 的实际耗时远低于同字符数的纯中文。纯比例把英文/数字段落的时长高估，字幕越到后面越提前。**v2.2.0 用加权字符估算贴近真实语速，再用 silencedetect 把句子边界吸附到音频里的真实停顿点，消除累积漂移。**
 
-#### 7.1 默认方案：原始脚本文本 + ffprobe 对齐
+#### 7.1 默认方案：加权字符估算 + 真实停顿吸附
 
 ```python
 import json, subprocess, re, os
@@ -1100,7 +1102,32 @@ def get_audio_duration(wav_path):
     )
     return float(result.stdout.strip()) * 1000
 
-# 原始脚本文本（从 Phase 2 视频脚本中提取每个场景的 TTS 文本）
+def detect_silences(wav_path, noise="-30dB", min_dur=0.18):
+    """用 ffmpeg silencedetect 找出音频里的真实停顿点（返回停顿中点的毫秒列表）"""
+    result = subprocess.run(
+        ["ffmpeg", "-i", wav_path, "-af",
+         f"silencedetect=noise={noise}:d={min_dur}", "-f", "null", "-"],
+        capture_output=True, text=True
+    )
+    starts = [float(m) for m in re.findall(r"silence_start: ([\d.]+)", result.stderr)]
+    ends = [float(m) for m in re.findall(r"silence_end: ([\d.]+)", result.stderr)]
+    # 取每段静音的中点作为候选断句点
+    return sorted((s + e) / 2 * 1000 for s, e in zip(starts, ends))
+
+# 加权字符权重：中文最慢，数字次之，英文字母最快
+def weighted_len(s):
+    w = 0.0
+    for ch in s:
+        if '一' <= ch <= '鿿':
+            w += 1.0          # 中文汉字
+        elif ch.isdigit():
+            w += 0.6          # 数字
+        elif ch.isascii() and ch.isalpha():
+            w += 0.35         # 英文字母
+        # 标点/空格不计
+    return w
+
+# 原始脚本文本（从 Phase 2 视频脚本中提取每个场景的 TTS 文本，100% 准确）
 SCENE_TEXTS = {
     1: "场景1的TTS文本...",
     2: "场景2的TTS文本...",
@@ -1112,8 +1139,15 @@ def split_by_punctuation(text):
     parts = re.split(r'(?<=[。！？，；：])', text)
     return [p.strip() for p in parts if p.strip()]
 
+def snap_to_silence(t_ms, silences, tolerance=350):
+    """把估算的断句点吸附到最近的真实停顿点（容差内才吸附，避免乱跳）"""
+    if not silences:
+        return t_ms
+    nearest = min(silences, key=lambda s: abs(s - t_ms))
+    return nearest if abs(nearest - t_ms) <= tolerance else t_ms
+
 def generate_captions_from_script(base_dir, scene_count=8):
-    """使用原始脚本文本 + ffprobe 时长比例生成字幕"""
+    """加权字符估算 + silencedetect 吸附生成字幕"""
     all_captions = []
     global_offset_ms = 0
 
@@ -1122,36 +1156,43 @@ def generate_captions_from_script(base_dir, scene_count=8):
         if not os.path.exists(wav_path):
             continue
 
-        # 获取实际音频时长
         audio_duration_ms = get_audio_duration(wav_path)
+        silences = detect_silences(wav_path)  # 场景内真实停顿点（相对场景起点）
 
-        # 使用原始脚本文本（100% 准确）
         text = SCENE_TEXTS.get(scene_num, "")
         if not text:
             global_offset_ms += audio_duration_ms
             continue
 
-        # 按标点分割
         sentences = split_by_punctuation(text)
         if not sentences:
             global_offset_ms += audio_duration_ms
             continue
 
-        # 按字符比例分配时间（排除标点计算比例）
-        char_counts = [len(re.sub(r'[。！？，；：、]', '', s).replace(" ", "")) for s in sentences]
-        total_chars = sum(char_counts) if sum(char_counts) > 0 else len(sentences)
+        # 1) 加权字符估算：按语速权重分配，贴近 TTS 真实读速
+        weights = [weighted_len(s) or 0.5 for s in sentences]
+        total_w = sum(weights)
 
-        relative_ms = 0
-        for sent, chars in zip(sentences, char_counts):
-            proportion = chars / total_chars
-            duration = audio_duration_ms * proportion
+        # 2) 先算出每句的累积边界（相对场景起点）
+        boundaries, acc = [], 0.0
+        for w in weights:
+            acc += w / total_w * audio_duration_ms
+            boundaries.append(acc)
+        boundaries[-1] = audio_duration_ms  # 末句强制对齐场景结尾
 
+        # 3) 把中间边界吸附到真实停顿点，消除累积漂移
+        for i in range(len(boundaries) - 1):
+            boundaries[i] = snap_to_silence(boundaries[i], silences)
+
+        # 4) 生成字幕条目
+        start = 0.0
+        for sent, end in zip(sentences, boundaries):
             all_captions.append({
                 "text": sent,
-                "startMs": round(global_offset_ms + relative_ms),
-                "endMs": round(global_offset_ms + relative_ms + duration)
+                "startMs": round(global_offset_ms + start),
+                "endMs": round(global_offset_ms + end)
             })
-            relative_ms += duration
+            start = end
 
         global_offset_ms += audio_duration_ms
 
@@ -1162,13 +1203,15 @@ def generate_captions_from_script(base_dir, scene_count=8):
 
 ```
 视频脚本(Phase 2) → 提取每个场景TTS文本 → ffprobe获取每个音频实际时长
-    → 按标点分割文本 → 按字符比例分配时间 → 输出 captions.json
+    → silencedetect 找真实停顿点 → 按标点分割文本
+    → 加权字符估算每句时长 → 吸附到最近停顿点 → 输出 captions.json
 ```
 
 **关键点**：
-- **直接使用原始脚本文本**，不需要 ASR 识别，字幕 100% 准确
-- **必须用 ffprobe 获取音频实际时长**，按比例分配确保总时长对齐
-- **标点分割后按字符比例分配**，每个场景内部时间轴精确
+- **直接使用原始脚本文本**，不需要 ASR 识别，字幕内容 100% 准确
+- **必须用 ffprobe 获取音频实际时长**，末句强制对齐场景结尾，确保总时长对齐
+- **加权字符估算**（中文 1.0 / 数字 0.6 / 英文 0.35）贴近 TTS 真实读速，避免英文/数字段落时长高估
+- **silencedetect 吸附**把句子边界拉到音频里的真实停顿点，消除纯比例的累积漂移；容差内（默认 350ms）才吸附，避免乱跳
 
 **字体使用规范**：
 - 使用系统字体：`"PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif`
@@ -2592,40 +2635,47 @@ news-pipeline/
 
 ## 已知坑与经验教训
 
-### 🔴 字幕与音频不同步（v2.0.0 → v2.1.0 修复）
+### 🔴 字幕与音频不同步（v2.0.0 → v2.1.0 → v2.2.0 演进）
 
-**问题**：使用字数比例估算字幕时间轴时，由于 TTS 语速不均匀，越到后面字幕偏差越大。
+**问题**：使用纯字数比例估算字幕时间轴时，由于 TTS 语速不均匀（中文/数字/英文每字发音时长差异大，且句间停顿不计入字符数），越到后面字幕偏差越大。
 
 **v2.0.0 方案（已废弃）**：FunASR 语音识别 + ffprobe 比例调整
 - FunASR 对专业术语识别极差：GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末
 - 修正字典永远追不上新术语，每次都要手动添加大量修正规则
 - 识别错误导致字幕内容完全不可用
 
-**v2.1.0 方案（当前默认）**：原始脚本文本 + ffprobe 时长比例对齐
+**v2.1.0 方案（已被 v2.2.0 取代）**：原始脚本文本 + ffprobe 纯字符比例对齐
+- 解决了内容准确性问题（100% 用原始文本），但内部切分仍按纯字符数，长句/多数字场景仍会漂移
+
+**v2.2.0 方案（当前默认）**：原始脚本文本 + 加权字符估算 + silencedetect 真实停顿点吸附
 ```python
-# 1. 直接使用 Phase 2 视频脚本中的原始 TTS 文本（100% 准确）
-text = SCENE_TEXTS[scene_num]
+# 1. 直接使用 Phase 2 视频脚本中的原始 TTS 文本（内容 100% 准确）
 
-# 2. 用 ffprobe 获取音频实际时长
-audio_duration_ms = get_audio_duration(wav_path)
+# 2. 加权字符估算：不同字符类型发音时长不同
+#    中文 1.0 / 数字 0.6 / 英文字母 0.35（标点不计）
+def weighted_len(s):
+    w = 0.0
+    for ch in s:
+        if '一' <= ch <= '鿿': w += 1.0
+        elif ch.isdigit():            w += 0.6
+        elif ch.isascii() and ch.isalpha(): w += 0.35
+    return w
 
-# 3. 按标点分割文本
-sentences = split_by_punctuation(text)
+# 3. 用 ffmpeg silencedetect 探测每个场景音频的真实停顿点
+#    ffmpeg -i scene.wav -af silencedetect=noise=-30dB:d=0.25 -f null -
+#    将句子边界吸附到最近的真实停顿点，消除累积漂移
 
-# 4. 按字符比例分配时间（排除标点计算比例）
-char_counts = [len(re.sub(r'[。！？，；：、]', '', s).replace(" ", "")) for s in sentences]
-total_chars = sum(char_counts)
-
-# 5. 按比例分配音频时长
-for sent, chars in zip(sentences, char_counts):
-    duration = audio_duration_ms * chars / total_chars
-    # 添加到字幕列表...
+# 4. 无停顿点可吸附时，退回加权字符比例分配该区间时长
 ```
 
 **关键点**：
-- **直接使用原始脚本文本**，不需要 ASR 识别，字幕 100% 准确
-- **必须用 ffprobe 获取音频实际时长**，按比例分配确保总时长对齐
-- **标点分割后按字符比例分配**，每个场景内部时间轴精确
+- **内容用原始脚本文本**，不需要 ASR 识别，字幕内容 100% 准确
+- **切分用加权字符估算**，数字/英文按更短发音权重计，避免版本号密集句被高估
+- **边界吸附 silencedetect 真实停顿点**，从根本上消除逐句累积漂移
+- **必须用 ffprobe 校验总时长对齐**（见 Step 8.3 校验）
+
+**Why:** 纯字符比例假设每字等长，但 TTS 中数字/英文更快、句间有停顿，长视频后半段必然漂移
+**How to apply:** Phase 7 生成字幕时一律用加权字符 + silencedetect 吸附，不再用纯字符比例
 
 ### 🔴 TTS 并发冲突
 **问题**：`mimo-tts.sh` 内部使用 `mktemp /tmp/mimo-tts-request-XXXXXX.json` 生成临时文件。并行调用时多个进程竞争同一文件名，导致 `mktemp: mkstemp failed: File exists` 错误，TTS 静默失败不生成音频。
@@ -3761,6 +3811,13 @@ await inputs[1].setInputFiles('cover.png');
 **How to apply:** Phase 1 周报去重时，先检查上周周报文件是否存在，不存在则跳过
 
 ## 更新日志
+
+### v3.5.0（2026-07-15）
+- **字幕算法根治**：Phase 7 默认方案从 v2.1.0 纯字符比例升级为 v2.2.0 混合算法（加权字符估算 + silencedetect 真实停顿点吸附）
+- **加权字符**：中文 1.0 / 数字 0.6 / 英文 0.35，避免版本号密集句（`GPT-5.6`、`85.5GiB`）被高估时长
+- **停顿吸附**：用 ffmpeg silencedetect 提取音频真实停顿点，句子边界吸附上去，消除长视频后半段累积漂移
+- **已知坑**：字幕不同步条目更新为 v2.0.0 → v2.1.0 → v2.2.0 演进，附 Why/How to apply
+- **版本**：3.4.0 → 3.5.0
 
 ### v3.4.0（2026-07-12）
 - **专业锚点**：Step 1.6 + `professional-anchor.md`；eligible = ready + narrator + reviewed；usage-log 写回
