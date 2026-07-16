@@ -1,6 +1,7 @@
 #!/bin/bash
-# gen-img: GPT-Image-2 图片生成脚本
+# gen-img: OpenAI-compatible 图片生成脚本
 # 用法: gen-img.sh "prompt" [output_path] [size] [quality] [n] [format]
+# model 从 ~/.claude/settings.json 的 GEN_IMG_MODEL 读取
 
 set -euo pipefail
 
@@ -12,7 +13,7 @@ QUALITY="${4:-auto}"
 N="${5:-1}"
 FORMAT="${6:-png}"
 
-# === 读取 API 配置 ===
+# === 读取 API 配置（含 MODEL）===
 CONFIG=$(python3 -c "
 import json, os
 settings_path = os.path.expanduser('~/.claude/settings.json')
@@ -20,17 +21,28 @@ try:
     with open(settings_path) as f:
         s = json.load(f)
     env = s.get('env', {})
-    url = env.get('GEN_IMG_API_URL', 'https://sin.ioll.pp.ua')
-    key = env.get('GEN_IMG_API_KEY', '')
-    print(f'{url}')
-    print(f'{key}')
+    url = env.get('GEN_IMG_API_URL', '') or os.environ.get('GEN_IMG_API_URL', '')
+    key = env.get('GEN_IMG_API_KEY', '') or os.environ.get('GEN_IMG_API_KEY', '')
+    model = env.get('GEN_IMG_MODEL', '') or os.environ.get('GEN_IMG_MODEL', 'gpt-image-2')
+    if not model:
+        model = 'gpt-image-2'
+    print(url)
+    print(key)
+    print(model)
 except Exception:
-    print('https://sin.ioll.pp.ua')
     print('')
+    print('')
+    print('gpt-image-2')
 " 2>/dev/null)
 
 API_URL=$(echo "$CONFIG" | sed -n '1p')
 API_KEY=$(echo "$CONFIG" | sed -n '2p')
+MODEL=$(echo "$CONFIG" | sed -n '3p')
+
+if [ -z "$API_URL" ]; then
+    echo "错误: 未找到 API URL，请在 ~/.claude/settings.json 的 env 中配置 GEN_IMG_API_URL" >&2
+    exit 1
+fi
 
 if [ -z "$API_KEY" ]; then
     echo "错误: 未找到 API Key，请在 ~/.claude/settings.json 的 env 中配置 GEN_IMG_API_KEY" >&2
@@ -51,16 +63,18 @@ mkdir -p "$OUTPUT_DIR"
 
 # === 调用 API ===
 echo "正在生成图片..."
+echo "  Model: $MODEL"
 echo "  Prompt: ${PROMPT:0:80}..."
 echo "  Size: $SIZE | Quality: $QUALITY | Format: $FORMAT"
+echo "  API: $API_URL"
 
-RESPONSE=$(curl -s --max-time 120 "${API_URL}/v1/images/generations" \
+RESPONSE=$(curl -s --max-time 180 "${API_URL}/v1/images/generations" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${API_KEY}" \
     -d "$(python3 -c "
 import json
 body = {
-    'model': 'gpt-image-2',
+    'model': '''${MODEL}''',
     'prompt': '''${PROMPT}''',
     'size': '${SIZE}',
     'quality': '${QUALITY}',
@@ -98,6 +112,7 @@ if 'error' in resp:
 data = resp.get('data', [])
 if not data:
     print("错误: API 未返回图片数据", file=sys.stderr)
+    print(resp_text[:500], file=sys.stderr)
     sys.exit(1)
 
 output_path = "${OUTPUT}"
@@ -125,5 +140,5 @@ if saved_count == 0:
     print("错误: 未能保存任何图片", file=sys.stderr)
     sys.exit(1)
 
-print(f"完成！共生成 {saved_count} 张图片")
+print(f"完成！共生成 {saved_count} 张图片 (model=${MODEL})")
 PYEOF

@@ -19,9 +19,10 @@ Skill（技能）是 Claude Code 的扩展机制，允许用户定义可复用�
 
 ### 功能
 
-基于 GPT-Image-2 API 的图片生成工具，支持：
+基于 OpenAI 兼容 Images API 的图片生成工具，支持：
 - 文本生成图片（text-to-image）
 - 自定义尺寸、质量、格式
+- **模型从 `GEN_IMG_MODEL` 读取**（如 `gpt-image-2` / `grok-imagine-image` / `grok-imagine-image-lite`）
 - 自动保存到本地目录
 - 支持批量生成（1-10 张）
 
@@ -44,7 +45,7 @@ Claude 检测到关键词 "画" → 激活 gen-img skill
         ↓
 从 ~/.claude/settings.json 读取 API 配置
         ↓
-执行 gen-img.sh 脚本 → 调用 GPT-Image-2 API
+执行 gen-img.sh 脚本 → 读取 GEN_IMG_API_URL / KEY / MODEL → 调用 Images API
         ↓
 API 返回 base64 图片数据
         ↓
@@ -80,7 +81,7 @@ Claude 使用 Read 工具展示生成的图片
 ```typescript
 // 1. 构建请求体
 const body = {
-  model: profile.model,        // "gpt-image-2"
+  model: profile.model,        // 从 GEN_IMG_MODEL 读取，如 "gpt-image-2" / "grok-imagine-image"
   prompt: prompt,               // 用户输入
   size: params.size,            // "1024x1024"
   quality: params.quality,      // "auto"
@@ -166,12 +167,20 @@ mkdir -p ~/.claude/skills/gen-img/scripts
 ```json
 {
   "env": {
-    "GEN_IMG_API_URL": "https://your-api-endpoint.com/v1",
-    "GEN_IMG_API_KEY": "sk-your-api-key-here"
+    "GEN_IMG_API_URL": "https://your-api-endpoint.com",
+    "GEN_IMG_API_KEY": "sk-your-api-key-here",
+    "GEN_IMG_MODEL": "gpt-image-2"
   }
 }
 ```
 
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `GEN_IMG_API_URL` | 是 | API base URL（不要尾斜杠） |
+| `GEN_IMG_API_KEY` | 是 | API Key |
+| `GEN_IMG_MODEL` | 否 | 模型名，默认 `gpt-image-2`。可选：`grok-imagine-image`、`grok-imagine-image-lite` 等 |
+
+脚本与 SKILL.md **不再硬编码 model**，统一从 `GEN_IMG_MODEL` 读取。
 ---
 
 ## 四、对话中的相关讨论
@@ -208,29 +217,29 @@ mkdir -p ~/.claude/skills/gen-img/scripts
 - Skill 脚本运行时从配置文件读取，**不硬编码**
 - `settings.json` 应加入 `.gitignore`，**不提交到仓库**
 
-### Q: 如何切换到其他图片生成服务？
+### Q: 如何切换到其他图片生成服务 / 模型？
 
-**A**: 只需修改 `settings.json` 中的环境变量：
+**A**: 修改 `settings.json` 中的环境变量即可：
 
 ```json
 {
   "env": {
-    "GEN_IMG_API_URL": "https://api.openai.com/v1",
-    "GEN_IMG_API_KEY": "sk-your-openai-key"
+    "GEN_IMG_API_URL": "https://elysiver.h-e.top",
+    "GEN_IMG_API_KEY": "sk-your-key",
+    "GEN_IMG_MODEL": "grok-imagine-image"
   }
 }
 ```
 
-或使用 fal.ai：
-```json
-{
-  "env": {
-    "GEN_IMG_API_URL": "https://fal.run",
-    "GEN_IMG_API_KEY": "your-fal-key"
-  }
-}
-```
+常用组合示例：
+| URL | MODEL | 备注 |
+|-----|-------|------|
+| `https://elysiver.h-e.top` | `grok-imagine-image` | 约 $0.5/request |
+| `https://ai.xmiaom.com` | `grok-imagine-image-lite` | 约 $1/request |
+| `https://new.iqach.top` | `grok-imagine-image` | 已验证可用 |
+| OpenAI 兼容端点 | `gpt-image-2` | 官方 / 中转 |
 
+切换后无需改代码；`gen-img.sh` 会自动读取 `GEN_IMG_MODEL`。
 ---
 
 ## 五、文件内容
