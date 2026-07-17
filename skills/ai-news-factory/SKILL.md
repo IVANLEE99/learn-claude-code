@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.5.0
+version: 3.6.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.5.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.6.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -1856,92 +1856,118 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png")
 # 重复以上步骤插入多张图片
 ```
 
-#### 12.7 上传封面（已验证流程 v1.9.1）
+#### 12.7 上传封面（已验证流程 v1.9.1 + v3.5.0 降级策略）
 
-**🔴 推荐流程：先上传图片到正文，再通过「从正文选择」设置封面。**
+**🔴 完整推荐流程：先把 `wechat-21-9.png` 插入正文，再「从正文选择」设封面。**  
+**🔴 降级原则（v3.5.0）**：封面步骤不稳定时，**不得阻塞整篇草稿**——先保证标题/作者/正文/原创/「保存为草稿」成功；封面可留草稿箱手补。
 
 ```
-# 步骤1：上传封面图到正文（通过工具栏「图片」→「本地上传」）
-# 点击正文区域获取 focus
-browser_click(target={正文段落ref})
+# 步骤1：上传封面图到正文（工具栏「图片」→「本地上传」）
+# 先 focus 正文（第二个 ProseMirror / contenteditable）
+browser_run_code_unsafe("""async (page) => {
+  const prose = document.querySelectorAll('.ProseMirror');
+  if (prose[1]) prose[1].click();
+  return 'body focused';
+}""")
 
-# 点击工具栏「图片」按钮（动态查找坐标）
+# 点击工具栏「图片」（顶部 y < 50），再点「本地上传」
 browser_run_code_unsafe("""async (page) => {
   await page.evaluate(() => {
-    const items = document.querySelectorAll('li, a, span');
-    for (const item of items) {
+    for (const item of document.querySelectorAll('li, a, span')) {
       if (item.textContent.trim() === '图片' && item.offsetParent !== null) {
         const rect = item.getBoundingClientRect();
         if (rect.y < 50 && rect.y > 0) { item.click(); return; }
       }
     }
   });
-  await page.waitForTimeout(1500);
-  // 点击「本地上传」
+  await page.waitForTimeout(1000);
   await page.evaluate(() => {
-    const items = document.querySelectorAll('*');
-    for (const item of items) {
+    for (const item of document.querySelectorAll('*')) {
       if (item.textContent.trim() === '本地上传' && item.offsetParent !== null) {
         item.click(); return;
       }
     }
   });
-  return 'clicked';
+  return 'clicked 本地上传';
 }""")
 
-# 等待 file chooser 出现后上传
-browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-21-9.png")
+# 优先 file_upload；若 chooser 未弹出，直接 setInputFiles（v3.5.0）
+# browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-21-9.png")
+browser_run_code_unsafe("""async (page) => {
+  const cover = 'news-pipeline/YYYY-MM-DD/wechat-21-9.png';
+  // 等 chooser 由 MCP browser_file_upload 处理；此处作兜底
+  const input = await page.$('input[type="file"][accept*="image"]')
+    || (await page.$$('input[type="file"]'))[0];
+  if (input) {
+    await input.setInputFiles(cover);
+    return 'setInputFiles ok';
+  }
+  return 'no file input — use browser_file_upload';
+}""")
+# 上传后可能出现「图片上传中，请稍后」弹窗：等 8–15s，必要时 Escape
 
-# 步骤2：Hover 封面区域，显示选项菜单
+# 步骤2：Hover「拖拽或选择封面」，显示选项菜单（直接 click 常无效）
 browser_hover(target={拖拽或选择封面ref})
 
-# 步骤3：点击「从正文选择」（必须用 class 选择器）
+# 步骤3：「从正文选择」必须用 class，不要文本匹配
 browser_evaluate("""() => {
   const btn = document.querySelector('.js_selectCoverFromContent');
   if (btn) { btn.click(); return 'clicked'; }
   return 'not found';
 }""")
 
-# 步骤4：在弹窗中点击图片选择（出现勾选标记）
+# 步骤4：弹窗中点图（出现勾选）→「下一步」→ 裁剪「确认/确定」
 browser_run_code_unsafe("""async (page) => {
-  await page.mouse.click(313, 340);  // 图片位置
-  await page.waitForTimeout(1000);
-  return 'selected';
-}""")
-
-# 步骤5：点击「下一步」
-browser_evaluate("""() => {
-  const buttons = document.querySelectorAll('button, a');
-  for (const btn of buttons) {
-    if (btn.textContent.trim() === '下一步' && btn.offsetParent !== null) {
-      btn.click(); return 'clicked';
+  await page.mouse.click(313, 340);
+  await page.waitForTimeout(800);
+  await page.evaluate(() => {
+    for (const btn of document.querySelectorAll('button, a')) {
+      if ((btn.textContent || '').trim() === '下一步' && btn.offsetParent) {
+        btn.click(); return;
+      }
     }
-  }
-  return 'not found';
-}""")
-
-# 步骤6：确认裁剪
-browser_evaluate("""() => {
-  const buttons = document.querySelectorAll('button, a');
-  for (const btn of buttons) {
-    const text = btn.textContent.trim();
-    if ((text === '确定' || text === '确认') && btn.offsetParent !== null) {
-      btn.click(); return 'clicked: ' + text;
+  });
+  await page.waitForTimeout(800);
+  await page.evaluate(() => {
+    for (const btn of document.querySelectorAll('button, a')) {
+      const t = (btn.textContent || '').trim();
+      if ((t === '确定' || t === '确认') && btn.offsetParent) {
+        btn.click(); return;
+      }
     }
-  }
-  return 'not found';
+  });
+  return 'cover crop done';
 }""")
 
-# 步骤7：保存草稿
-browser_click(target={保存为草稿按钮ref})
+# 步骤5：保存前处理弹窗 + 保存草稿（v3.3.0 / v3.5.0）
+browser_run_code_unsafe("""async (page) => {
+  await page.waitForTimeout(8000);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    for (const btn of document.querySelectorAll('button')) {
+      if ((btn.textContent || '').trim() === '保存为草稿' && btn.offsetParent) {
+        btn.click(); return;
+      }
+    }
+  });
+  await page.waitForTimeout(3000);
+  // 成功信号：URL 出现 appmsgid= 或文案含「已保存」/「草稿」
+  return { url: page.url(), savedHint: document.body.innerText.includes('已保存')
+    || page.url().includes('appmsgid=') };
+}""")
 ```
 
-**🔴 关键经验（v1.9.1 新增）：**
-1. **必须先通过工具栏「图片」→「本地上传」将封面图插入正文**，否则「从正文选择」不可用
-2. **Hover 封面区域才能显示选项菜单**，直接 click 不会触发
-3. **「从正文选择」必须用 `.js_selectCoverFromContent` class 选择器**，普通文本匹配找不到
-4. **弹窗中点击图片后会出现勾选标记**，然后才能点「下一步」
-5. **裁剪弹窗点击「确认」**即可，不需要调整裁剪区域
+**🔴 关键经验（v1.9.1 + v3.5.0）：**
+1. **必须先「图片」→「本地上传」把 `wechat-21-9.png` 插入正文**，「从正文选择」才可用  
+2. **file chooser 不弹时**：`input[type=file][accept*=image].setInputFiles(path)` 可兜底  
+3. **Hover 封面区**才出菜单；「从正文选择」只用 **`.js_selectCoverFromContent`**  
+4. **「图片上传中」弹窗会挡住「保存为草稿」**：等上传完 + Escape，再保存（见 v3.3.0）  
+5. **封面失败不阻塞草稿**：标题/正文/原创/保存优先；封面可草稿箱补  
+6. **保存成功判定**：URL 含 `appmsgid=` 比「已保存」文案更稳（文案有时不出现）  
+7. 裁剪一般无需手调，点「确认/确定」即可
 
 #### 12.8 设置原创声明（已验证 v1.9.1）
 
@@ -3138,93 +3164,227 @@ browser_run_code_unsafe("""async (page) => {
 }""")
 ```
 
-#### 14.6 上传封面（横封面4:3 + 竖封面3:4）
+#### 14.6 上传封面（横封面4:3 + 竖封面3:4）（v3.6.0 更新）
 
-**🔴 抖音封面上传需要两步：先上传横封面，再上传竖封面。封面编辑器使用 canvas 组件：**
+**🔴 必须双封面**：横 `douyin-horizontal-4-3.png`（4:3）+ 竖 `douyin-vertical-3-4.png`（3:4）。  
+**文件名铁律**：用 Phase 5.5 产出的 `douyin-horizontal-4-3.png` / `douyin-vertical-3-4.png`，**不要**写成 `cover-horizontal.png` / `cover-vertical.png`。
+
+**入口差异**：
+- **首次投稿页**：横封面点「完成」后，常自动弹出「设置竖封面获更多流量」→ 点「设置竖封面」
+- **草稿编辑页**（`post/video?enter_from=draft`）：「设置竖封面」弹窗**经常不出现**，必须**再点竖封面 3:4 区域**单独打开编辑器
+
+**🔴 完成按钮坑（v3.6.0 / 2026-07-17 实测）**：
+- `getByRole('button', { name: '完成' })` **经常 count=0**（弹窗粉按钮不是标准 button role）
+- 必须用 **text 匹配 + evaluate click**，并在 **filechooser 成功后等 1.5–3s**（预览出现）再点完成
+- 点完后若仍见「设置竖封面」标题 → 再点一次完成；**禁止**在未保存时点「取消/关闭」触发「封面未保存」确认框后点「确定」（会丢图）
+
+**推荐完整流程（语义定位 + filechooser + 可靠完成）**：
 
 ```
-# 步骤1：点击横封面区域打开封面编辑器
+# 共用：可靠点击弹窗内「完成」（优先 text，其次 evaluate）
+# 返回 clicked / not_found
+async function clickCoverDone(page) {
+  await page.waitForTimeout(1500); // 等预览渲染
+  // 1) text 定位（比 role 稳）
+  try {
+    const loc = page.locator('text=完成').last();
+    if (await loc.count() && await loc.isVisible().catch(() => false)) {
+      await loc.click({ force: true, timeout: 3000 });
+      return 'clicked text=完成';
+    }
+  } catch (_) {}
+  // 2) evaluate：点最靠下、宽度较大的「完成」（粉色主按钮）
+  const ok = await page.evaluate(() => {
+    const cands = [];
+    for (const el of document.querySelectorAll('button, div, span, a')) {
+      if ((el.textContent || '').trim() !== '完成' || !el.offsetParent) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width > 40 && r.y > 300) cands.push({ el, y: r.y, w: r.width });
+    }
+    if (!cands.length) return false;
+    cands.sort((a, b) => b.y - a.y);
+    cands[0].el.click();
+    return true;
+  });
+  return ok ? 'clicked evaluate 完成' : 'not_found';
+}
+
+# 步骤1：打开横封面编辑器——语义找「横封面4:3」→ 同卡「选择封面」
 browser_run_code_unsafe("""async (page) => {
-  // 滚动到封面区域
-  await page.evaluate(() => window.scrollBy(0, 300));
-  // 点击横封面4:3区域
-  await page.mouse.click(421, 562);  // 横封面位置
-  await page.waitForTimeout(1000);
-  return 'clicked 横封面';
+  await page.evaluate(() => window.scrollTo(0, 0));
+  return await page.evaluate(() => {
+    for (const el of document.querySelectorAll('*')) {
+      if ((el.textContent || '').trim() === '横封面4:3' && el.offsetParent) {
+        let p = el.parentElement;
+        for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
+          const sel = Array.from(p.querySelectorAll('*'))
+            .find(n => (n.textContent || '').trim() === '选择封面');
+          if (sel) { sel.click(); return 'opened horizontal via 选择封面'; }
+        }
+        el.click(); return 'clicked 横封面4:3';
+      }
+    }
+    return 'horizontal label not found';
+  });
 }""")
 
-# 步骤2：点击「上传封面」（需要 force: true，因为 SVG 元素拦截点击）
+# 步骤2：横封面 filechooser（推荐）或 setInputFiles 兜底
 browser_run_code_unsafe("""async (page) => {
-  const uploadBtn = page.locator('text=上传封面');
-  await uploadBtn.first().click({ force: true });
+  const path = 'news-pipeline/YYYY-MM-DD/douyin-horizontal-4-3.png';
+  try {
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: 6000 }),
+      page.locator('text=上传封面').first().click({ force: true })
+    ]);
+    await chooser.setFiles(path);
+    return 'h chooser ok';
+  } catch (e) {
+    const inputs = await page.$$('input[type="file"]');
+    if (inputs.length) {
+      await inputs[inputs.length - 1].setInputFiles(path);
+      return 'h setInput ok n=' + inputs.length;
+    }
+    return 'h fail';
+  }
+}""")
+# 步骤3：完成横封面
+# → clickCoverDone(page)；确认不再显示设置弹窗标题
+
+# 步骤4：打开竖封面编辑器
+browser_run_code_unsafe("""async (page) => {
+  await page.waitForTimeout(800);
+  const btn = page.getByRole('button', { name: '设置竖封面' });
+  if (await btn.count() && await btn.first().isVisible().catch(() => false)) {
+    await btn.first().click();
+    return 'clicked 设置竖封面 popup';
+  }
+  // 草稿页：标签「竖封面3:4」上方封面框
+  const r = await page.evaluate(() => {
+    for (const el of document.querySelectorAll('*')) {
+      if ((el.textContent || '').trim() === '竖封面3:4' && el.offsetParent) {
+        const rect = el.getBoundingClientRect();
+        return { x: rect.x + 40, y: Math.max(rect.y - 70, 120), labelY: rect.y };
+      }
+    }
+    return null;
+  });
+  if (!r) return 'vertical label not found';
+  await page.mouse.click(r.x, r.y);
+  await page.waitForTimeout(400);
+  await page.mouse.click(r.x, r.y + 25);
+  // 同卡「选择封面」再兜底一次
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll('*')) {
+      if ((el.textContent || '').trim() === '竖封面3:4' && el.offsetParent) {
+        let p = el.parentElement;
+        for (let i = 0; i < 6 && p; i++, p = p.parentElement) {
+          const sel = Array.from(p.querySelectorAll('*'))
+            .find(n => (n.textContent || '').trim() === '选择封面');
+          if (sel) { sel.click(); return; }
+        }
+      }
+    }
+  });
+  return 'opened vertical near ' + JSON.stringify(r);
+}""")
+
+# 步骤5：竖封面上传（必须确认打开了「设置竖封面」或出现「上传封面」）
+browser_run_code_unsafe("""async (page) => {
+  const path = 'news-pipeline/YYYY-MM-DD/douyin-vertical-3-4.png';
+  const open = await page.evaluate(() =>
+    document.body.innerText.includes('设置竖封面')
+    || document.body.innerText.includes('上传封面'));
+  if (!open) return 'editor not open — re-click vertical box';
+  try {
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: 6000 }),
+      page.locator('text=上传封面').first().click({ force: true })
+    ]);
+    await chooser.setFiles(path);
+    return 'v chooser ok';
+  } catch (e) {
+    const inputs = await page.$$('input[type="file"]');
+    if (inputs.length) {
+      await inputs[inputs.length - 1].setInputFiles(path);
+      return 'v setInput ok';
+    }
+    return 'v fail';
+  }
+}""")
+
+# 步骤6：完成竖封面（等预览 → text/evaluate 点完成 → 再验弹窗是否关闭）
+browser_run_code_unsafe("""async (page) => {
   await page.waitForTimeout(2000);
-  return 'clicked';
-}""")
-
-# 步骤3：上传横封面文件
-browser_file_upload("news-pipeline/YYYY-MM-DD/cover-horizontal.png")
-
-# 步骤4：点击「完成」确认横封面
-browser_run_code_unsafe("""async (page) => {
-  await page.evaluate(() => {
-    const elements = document.querySelectorAll('*');
-    for (const el of elements) {
-      if (el.textContent.trim() === '完成' && el.offsetParent !== null) {
-        const rect = el.getBoundingClientRect();
-        if (rect.y > 630 && rect.y < 680) {
-          el.click();
-          return;
+  // 可靠完成：见上方 clickCoverDone 逻辑
+  let msg = 'not_found';
+  try {
+    const loc = page.locator('text=完成').last();
+    if (await loc.count() && await loc.isVisible().catch(() => false)) {
+      await loc.click({ force: true, timeout: 3000 });
+      msg = 'clicked text=完成';
+    }
+  } catch (_) {}
+  if (msg === 'not_found') {
+    const ok = await page.evaluate(() => {
+      const cands = [];
+      for (const el of document.querySelectorAll('button, div, span, a')) {
+        if ((el.textContent || '').trim() !== '完成' || !el.offsetParent) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width > 40 && r.y > 300) cands.push({ el, y: r.y });
+      }
+      if (!cands.length) return false;
+      cands.sort((a, b) => b.y - a.y);
+      cands[0].el.click();
+      return true;
+    });
+    msg = ok ? 'clicked evaluate 完成' : 'not_found';
+  }
+  await page.waitForTimeout(1500);
+  const still = await page.evaluate(() => document.body.innerText.includes('设置竖封面'));
+  if (still) {
+    // 再点一次
+    await page.evaluate(() => {
+      for (const el of document.querySelectorAll('button, div, span, a')) {
+        if ((el.textContent || '').trim() === '完成' && el.offsetParent) {
+          const r = el.getBoundingClientRect();
+          if (r.y > 400) { el.click(); return; }
         }
       }
-    }
-  });
-  return 'confirmed';
+    });
+    await page.waitForTimeout(1500);
+  }
+  // 若弹出「封面未保存/是否关闭」——仅在已确认预览成功时再处理；默认点「取消」保留编辑
+  return {
+    done: msg,
+    stillOpen: document.body.innerText.includes('设置竖封面')
+  };
 }""")
 
-# 步骤5：点击「设置竖封面」按钮
+# 步骤7：验收（必须全部通过才暂存）
 browser_run_code_unsafe("""async (page) => {
-  await page.evaluate(() => {
-    const elements = document.querySelectorAll('*');
-    for (const el of elements) {
-      if (el.textContent.trim() === '设置竖封面' && el.offsetParent !== null) {
-        const rect = el.getBoundingClientRect();
-        if (rect.y > 560 && rect.y < 600) {
-          el.click();
-          return;
-        }
-      }
-    }
-  });
-  return 'clicked 设置竖封面';
+  const t = document.body.innerText;
+  return {
+    missingV: t.includes('竖封面缺失'),
+    missingDual: t.includes('横/竖双封面缺失') || t.includes('双封面缺失'),
+    hasSetDialog: t.includes('设置竖封面'),
+    hasZancun: !!Array.from(document.querySelectorAll('button'))
+      .find(b => (b.textContent || '').trim() === '暂存离开')
+  };
 }""")
-
-# 步骤6：上传竖封面文件
-browser_run_code_unsafe("""async (page) => {
-  const uploadBtn = page.locator('text=上传封面');
-  await uploadBtn.first().click({ force: true });
-  await page.waitForTimeout(2000);
-  return 'clicked';
-}""")
-
-browser_file_upload("news-pipeline/YYYY-MM-DD/cover-vertical.png")
-
-# 步骤7：点击「完成」确认竖封面
-browser_run_code_unsafe("""async (page) => {
-  await page.evaluate(() => {
-    const elements = document.querySelectorAll('*');
-    for (const el of elements) {
-      if (el.textContent.trim() === '完成' && el.offsetParent !== null) {
-        const rect = el.getBoundingClientRect();
-        if (rect.y > 630 && rect.y < 680) {
-          el.click();
-          return;
-        }
-      }
-    }
-  });
-  return 'confirmed';
-}""")
+# 通过标准：missingV=false && missingDual=false && hasSetDialog=false
+# 然后滚动到底部点「暂存离开」
 ```
+
+**🔴 关键经验（v3.5.0 / v3.6.0 实测）**：
+1. **语义定位 > 硬编码坐标**：先找「横封面4:3」/「竖封面3:4」再点同卡「选择封面」  
+2. **「上传封面」必须 `force: true`**，否则 SVG 拦截  
+3. **草稿页没有「设置竖封面」弹窗是常态**；用标签 `getBoundingClientRect` 点 **y = label.y - 70**  
+4. **完成 ≠ getByRole('button')**：用 `locator('text=完成').last()` 或 evaluate 点底部主按钮  
+5. **setFiles 后必须等 1.5–3s** 再点完成，否则封面未写入状态  
+6. **验收三件套**：无「竖封面缺失」+ 无「双封面缺失」+ 无「设置竖封面」弹窗 → 再「暂存离开」  
+7. 合集/声明可与封面并行，但 **竖封面失败优先重试封面**，不要只关页  
+8. 若 URL 已在 `enter_from=draft` 且横封面已有，可 **只补竖封面**（今天 2026-07-17 场景）
+
 
 #### 14.7 添加合集「今日羊报AI」
 
@@ -3348,29 +3508,30 @@ browser_run_code_unsafe("""async (page) => {
 # 方法2：如果没有「暂存离开」，直接关闭标签页（视频已自动保存）
 ```
 
-#### 抖音上传组件操作总结（v1.8.0 实测）
+#### 抖音上传组件操作总结（v3.6.0 实测）
 
 | 组件 | 类型 | 操作方式 | 可靠性 |
 |------|------|----------|--------|
 | 视频上传 | file chooser | `text=上传视频` → `file_upload` | ✅ 高 |
 | 提示弹窗 | 按钮 | `getByRole('button', { name: '我知道了' })` | ✅ 高 |
-| 作品描述 | 标准 input | JS 设置 `value` + dispatch `input` | ✅ 高 |
+| 作品描述 | 标准 input | **`fill()`** 或 placeholder 匹配（React 受控） | ✅ 高 |
 | 作品简介 | 文本区域 | 坐标点击 + `keyboard.type` | ✅ 高 |
-| 横封面4:3 | **canvas 组件** | 坐标点击 → force click 上传封面 → file_upload → 完成 | ⚠️ 需 force |
-| 竖封面3:4 | **canvas 组件** | 设置竖封面 → force click 上传封面 → file_upload → 完成 | ⚠️ 需 force |
+| 横封面4:3 | 自定义编辑器 | 语义「横封面4:3」→ force「上传封面」→ setFiles → **text/evaluate「完成」** | ⚠️ 需 force+等预览 |
+| 竖封面3:4 | 自定义编辑器 | 弹窗或标签上方点击 → force 上传 → setFiles → **text/evaluate「完成」** | ⚠️ 草稿页无弹窗 |
+| 完成按钮 | 非标准 role | **`locator('text=完成')` / evaluate**，**不要**依赖 `getByRole('button','完成')` | ⚠️ count 常为 0 |
 | 合集 | listbox | 点击下拉框 → snapshot 找 ref → 精确点击 | ✅ 高 |
 | 自主声明 | 弹窗 | 点击打开 → 选择选项 → 确定 | ✅ 高 |
 | 标签 | 输入框 | 点击 `#添加话题` → `keyboard.type` + Enter | ✅ 高 |
+| 存草稿 | 按钮 | 底部 **「暂存离开」**（非「存草稿」） | ✅ 高 |
 | 发布 | 按钮 | 点击「发布」→ 短信验证码（需用户手动） | ⚠️ 需用户 |
 
 **关键经验**：
 1. **上传视频后必须关闭「视频预览功能」弹窗**，否则后续操作被阻挡
-2. **封面上传需要 `force: true`**，因为 SVG 元素会拦截点击事件
-3. **合集选择器使用 listbox 组件**，可以用 `snapshot` 找到 ref 精确点击
-4. **发布需要短信验证码**，这是安全验证，必须用户手动输入
-5. **作品描述是标准 input**，但 placeholder 是「填写作品标题，为作品获得更多流量」
-6. **作品简介是文本区域**，需要用坐标点击 + `keyboard.type` 输入
-7. **自主声明弹窗**中选择「内容为个人观点或见解」，然后点确定
+2. **封面上传需要 `force: true`**，SVG 会拦截点击
+3. **完成按钮不要用 getByRole**，改用 text/evaluate + 等预览 2s
+4. **验收三件套**通过后再「暂存离开」
+5. **作品描述用 `fill()`**（React 受控，`value=` 不生效）
+6. **草稿页只补竖封面**时从 `enter_from=draft` 继续即可
 
 ### 🟡 B站封面上传不可靠（v1.9.1 新增）
 **问题**：B站隐藏 file input 的 accept 属性不包含图片类型（只有视频格式），且通过封面编辑弹窗上传的图片不一定被应用。
@@ -3474,6 +3635,58 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 
 **Why:** 周报内容比日报更正式，用户需要二次确认标题、封面、合集等信息后再发布
 **How to apply:** SKILL.md 周报上传流程中，所有平台最后一步改为「保存草稿」而非「发布/投稿」
+
+### 🔴 抖音草稿页竖封面入口（v3.5.0 新增，2026-07-16；v3.6.0 补强）
+
+**问题**：从草稿箱打开投稿页（`enter_from=draft`）时，横封面点「完成」后**不一定**弹出「设置竖封面」；旧文档写的「弹窗必现」在草稿流失效，导致竖封面一直缺失。
+
+**解决**：
+1. 横封面：语义找「横封面4:3」→ 同卡「选择封面」→ `force` 点「上传封面」→ `douyin-horizontal-4-3.png` →「完成」
+2. 竖封面：若无弹窗，用「竖封面3:4」标签的 `getBoundingClientRect`，点击 **标签上方约 50–80px** 的封面框打开编辑器
+3. 再 `force` 点「上传封面」→ `douyin-vertical-3-4.png` →「完成」
+4. 验收文案无「竖封面缺失」/「横/竖双封面缺失」后「暂存离开」
+
+**Why:** 首次投稿页与草稿编辑页 UI 分支不同；硬编码坐标在不同窗口尺寸下也易失效  
+**How to apply:** Phase 14.6 已改为语义优先 + 草稿页专用竖封面点击逻辑
+
+### 🔴 抖音封面「完成」按钮非 button role（v3.6.0 新增，2026-07-17）
+
+**问题**：竖封面已通过 `filechooser.setFiles` 上传成功、弹窗里也能看到预览，但 `getByRole('button', { name: '完成' })` **count=0**，脚本以为点了完成、实际没点上；或过早点完成导致状态未写入，发文助手仍报「竖封面缺失」。
+
+**解决**：
+1. `setFiles` 后 **wait 1.5–3s**，等预览区出图
+2. 用 `page.locator('text=完成').last().click({ force: true })`；失败再 `evaluate` 点 **y 最大、宽>40** 的「完成」节点
+3. 点完再读 `innerText`：若仍含「设置竖封面」→ 再点一次完成
+4. **禁止**在未完成时关弹窗并对「封面未保存」点「确定」
+5. 最终验收：`missingV=false && missingDual=false && !hasSetDialog` 再「暂存离开」
+
+**Why:** 抖音封面弹窗主按钮常用自定义 div/span，不是 accessibility button  
+**How to apply:** Phase 14.6 步骤 3/6 一律按 text/evaluate 完成 + 双次确认
+
+### 🔴 抖音只补竖封面场景（v3.6.0 新增，2026-07-17）
+
+**问题**：横封面已在草稿中，只缺竖封面时，全流程重跑浪费时间；误操作还可能冲掉横封面。
+
+**解决**：
+1. 直接打开草稿：`https://creator.douyin.com/creator-micro/content/post/video?enter_from=draft`（或内容管理→编辑）
+2. **跳过横封面**，只做竖封面打开→上传→完成→验收
+3. 验收通过后「暂存离开」
+
+**Why:** 发文助手单独报「竖封面缺失」时横封面往往已 OK  
+**How to apply:** 用户说「补竖封面」时走最小路径，不重传视频/横封面
+
+### 🔴 公众号封面不阻塞草稿（v3.5.0 新增，2026-07-16）
+
+**问题**：「从正文选择」链路偶发失败（file chooser 不弹、上传中弹窗挡保存、class 选择器找不到），若强依赖封面会导致整篇无法存草稿。
+
+**解决**：
+1. 完整链路仍优先：工具栏图片→本地上传 `wechat-21-9.png` → hover 封面区 → `.js_selectCoverFromContent` → 下一步 → 确认
+2. chooser 不弹：`input[type=file][accept*=image].setInputFiles(...)` 兜底
+3. 上传中弹窗：等待 8–15s + Escape 再点「保存为草稿」
+4. **封面失败也要保存草稿**；成功信号优先看 URL 是否含 `appmsgid=`
+
+**Why:** 正文/原创比封面更关键，封面可在草稿箱手补  
+**How to apply:** Phase 12.7 已写降级原则与 setInputFiles 兜底
 
 ### 🔴 抖音双封面上传（v2.4.0 新增，2026-06-14）
 
@@ -3812,7 +4025,17 @@ await inputs[1].setInputFiles('cover.png');
 
 ## 更新日志
 
+### v3.6.0（2026-07-17）
+- **抖音封面完成按钮（Phase 14.6）**：`getByRole('button','完成')` 常 count=0 → 改用 `locator('text=完成').last()` + evaluate 点底部主按钮；`setFiles` 后等 1.5–3s 再完成
+- **验收三件套**：`竖封面缺失=false` + `双封面缺失=false` + 无「设置竖封面」弹窗 → 再「暂存离开」
+- **只补竖封面路径**：横封面已在草稿时跳过视频/横封面，直接 `enter_from=draft` 补竖封面
+- **禁止误关弹窗**：未保存时勿对「封面未保存」点确定（会丢图）
+- **组件表升级**：抖音上传总结 v1.8.0 → v3.6.0（完成按钮、fill 标题、暂存离开）
+- **版本**：3.5.0 → 3.6.0
+
 ### v3.5.0（2026-07-15）
+- **抖音封面（Phase 14.6，2026-07-16 实测）**：草稿编辑页「设置竖封面」弹窗常不出现 → 用「竖封面3:4」标签 getBoundingClientRect 点标签上方封面框；语义点「选择封面」优先于硬编码坐标；文件名强制 douyin-horizontal-4-3.png / douyin-vertical-3-4.png；验收无「竖封面缺失」再暂存
+- **公众号封面（Phase 12.7，2026-07-16 实测）**：file chooser 不弹时用 setInputFiles 兜底；封面失败不阻塞「保存为草稿」；成功以 URL appmsgid= 为准；保留「从正文选择」+ .js_selectCoverFromContent + 上传中弹窗 Escape
 - **字幕算法根治**：Phase 7 默认方案从 v2.1.0 纯字符比例升级为 v2.2.0 混合算法（加权字符估算 + silencedetect 真实停顿点吸附）
 - **加权字符**：中文 1.0 / 数字 0.6 / 英文 0.35，避免版本号密集句（`GPT-5.6`、`85.5GiB`）被高估时长
 - **停顿吸附**：用 ffmpeg silencedetect 提取音频真实停顿点，句子边界吸附上去，消除长视频后半段累积漂移
