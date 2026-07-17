@@ -1,18 +1,63 @@
 ---
 name: linuxdo-daily
-description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly
-version: 15.1.0
+description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
+version: 15.2.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v15.2 核心改进（2026-07-17 实测）**：固定项目 cwd；「过滤后全部抓取完」冷启动协议；`crawl_queue`/`batch_ids` 预切分；transcript 回填 batch；正文二次公益站过滤；列表页 views 合并；全量规模 500+ 帖。
 > **v15.1 核心改进**：概念候选受控入库——日报附录经去重/过滤后只追加最小 `candidate`，不写口播、不晋升 ready。
 > **v15 核心改进**：接入 `ai-concept-bank` 技术锚点；可信度五档；账号权益黑话过滤。
 > **v14 核心改进**：Cloudflare 点击绕过、周报模式完整流程、并行 Agent 优化、旧 batch 文件清理。
 > **v13 核心改进**：新增月报模式。月报基于当月已抓取数据与已生成的日报数据聚合，不重复抓取，输出月度趋势总结 + 主题归纳 + 下月展望。
 > **v12 核心改进**：批量抓取数据强制保存、空帖检测跳过、官方警告检测、全量抓取支持、Typst 特殊字符处理。
+
+## ⚡ 工作目录与冷启动（v15.2 必读）
+
+### 固定项目根目录
+
+**所有 `data/` 读写必须在项目目录执行**，不要依赖 shell 默认 cwd：
+
+```bash
+cd /Users/youngsdream/Documents/learn-claude-code
+# 或在 Python 内：
+# os.chdir('/Users/youngsdream/Documents/learn-claude-code')
+```
+
+> **2026-07-17 实测坑**：Bash 可能落在 `~/.claude/projects/...`，导致 `data/` 不存在、清理 batch 误报 0、写出文件写到错误位置。
+
+`browser_evaluate` 的 `filename` 参数也要用**绝对路径**：
+
+```text
+/Users/youngsdream/Documents/learn-claude-code/data/source_a.json
+/Users/youngsdream/Documents/learn-claude-code/data/source_b.json
+```
+
+### 触发词：「过滤后全部抓取完」/「0717 linuxdo日报 过滤后全部抓取完」
+
+含义：**按全量模式跑完日报流水线**（不是“已经有 daily 了只写报告”）。
+
+| 磁盘状态 | 动作 |
+|---------|------|
+| 无 `data/daily/{date}.json`，batch 也为昨/空 | **从 Crawler 冷启动**：清旧 batch → 预授权 → 双源列表 → 合并过滤 → **全量正文** → Writer/Press/PDF |
+| 有 `batch_browser_*.json` 且 mtime 是今天、无 daily | 合并 batch → 写 daily → 后续 Agent |
+| 已有 `data/daily/{date}.json` 与报告 | 跳过抓取，只补缺失产物 |
+
+**禁止**在未验证 `data/daily/{date}.json` 存在时，假设“用户说抓取完=数据已在磁盘”。
+
+### 推荐 Todo 清单（全量日）
+
+```
+1. 清理旧 batch + 浏览器预授权（固定 cwd）
+2. Source A/B 列表 + 合并去重/公益站/32h → crawl_queue + batch_ids
+3. 全量逐帖抓取正文（每批立即保存）
+4. 合并 daily JSON + 正文二次过滤 + Topic/Trend
+5. Writer 日报 + 概念候选入库
+6. Press Writer + PDF Builder
+```
 
 ## ⚡ 权限预授权（必须最先执行，一次性完成）
 
@@ -64,6 +109,7 @@ version: 15.1.0
 - "日报"、"AI日报"、"技术日报"
 - "linuxdo日报"、"抓取linuxdo"
 - "今日AI新闻"、"AI资讯"
+- **"过滤后全部抓取完"** / `MMDD linuxdo日报 过滤后全部抓取完` → **全量模式冷启动**（见上方协议）
 
 ### 周报模式
 当用户说以下关键词时激活：
@@ -302,26 +348,29 @@ with open('data/merged_ids.json', 'w') as f:
 print(f'历史去重: {len(all_ids)} → {len(new_ids)}')
 ```
 
-### 1.6 时间戳解析与 32h 筛选
+### 1.6 时间戳解析与 32h 筛选 + 写 crawl_queue（v15.2）
 
-> **v11 变更**：时间戳已在步骤 1.3 中从列表页 `td.activity[title]` 提取，此步骤仅做解析和筛选。
+> **v11 变更**：时间戳已在步骤 1.3 中从列表页 `td.activity[title]` 提取，此步骤仅做解析和筛选。  
+> **v15.2**：筛选结果写入 `data/crawl_queue.json`，并切分为 `data/batch_ids_{N}.json`（每批 30 id），**禁止**只 merge id 不写 queue。
 
 **⚠️ 常识提醒**：帖子页面没有 `<time>` 元素！`document.querySelector('time')` 返回空。时间只能从列表页提取。
 
 ```python
-import json
+import json, re, os
 from dateutil import parser as dateparser
 from datetime import datetime, timezone, timedelta
 
+# 假定 posts 已是：两源合并 + 历史去重 + 标题/标签公益站过滤后的 dict 或 list
 now = datetime.now(timezone(timedelta(hours=8)))
 cutoff = now - timedelta(hours=32)
+date_str = now.strftime('%Y-%m-%d')
 
-with open('data/daily/2026-06-24.json') as f:
-    daily = json.load(f)
+def views_num(p):
+    return int(re.sub(r'\D', '', str(p.get('views', '0'))) or 0)
 
-final_posts = []
-for post in daily['posts']:
-    created_str = post.get('created', '')
+final = []
+for p in posts:  # list of post dicts with id/title/views/tags/created
+    created_str = p.get('created', '')
     if not created_str:
         continue
     try:
@@ -329,37 +378,48 @@ for post in daily['posts']:
         if created_dt.tzinfo is None:
             created_dt = created_dt.replace(tzinfo=timezone(timedelta(hours=8)))
         if created_dt >= cutoff:
-            post['created_at'] = created_dt.isoformat()
-            final_posts.append(post)
-    except:
+            p = dict(p)
+            p['id'] = str(p['id'])
+            p['created_at'] = created_dt.isoformat()
+            final.append(p)
+    except Exception:
         pass
 
-daily['posts'] = final_posts
-daily['total'] = len(final_posts)
-print(f'32h 筛选: {len(daily["posts"])} 帖')
+final.sort(key=views_num, reverse=True)
+os.makedirs('data', exist_ok=True)
+with open('data/merged_ids.json', 'w') as f:
+    json.dump([p['id'] for p in final], f)
+with open('data/crawl_queue.json', 'w') as f:
+    json.dump({'date': date_str, 'total': len(final), 'cutoff': cutoff.isoformat(), 'posts': final},
+              f, ensure_ascii=False, indent=2)
+for i in range(0, len(final), 30):
+    n = i // 30
+    with open(f'data/batch_ids_{n}.json', 'w') as f:
+        json.dump([p['id'] for p in final[i:i+30]], f)
+print(f'32h 筛选: {len(final)} 帖 → batches 0-{(len(final)-1)//30}')
 ```
 
 ### 1.7 逐帖浏览器浏览（核心抓取方案）
 
 **必须使用此方案**，浏览器 fetch API 会被 429 限流。
 
-#### ⚡ 提前终止策略（v11 新增）
+#### ⚡ 提前终止 vs 全量（v15.2 澄清）
 
-**不需要抓取全部帖子！** 实测表明，100-150 帖的正文数据已足够生成高质量日报。其余帖子仅使用标题+标签+浏览量即可完成主题分类。
+| 模式 | 条件 | 行为 |
+|------|------|------|
+| **标准** | 用户只说「日报」 | 按浏览量优先抓 4–5 批（120–150 帖）后可生成 |
+| **全量** | 用户说「全部抓取」「过滤后全部抓取完」 | **必须**跑完 `crawl_queue` 全部批次（0717 实测约 18 批 / 517 帖） |
 
-**推荐做法**：
-- 按浏览量降序排列待抓取列表（热门帖优先）
-- 抓取前 4-5 批（120-150 帖）后直接进入日报生成
-- 冷门帖子的标题和标签已包含足够信息用于主题分类
+全量时不要在 150 帖提前停；Todo 标进度 `valid/total`。
 
 #### 抓取流程
 
 1. **打开列表页**：`browser_navigate → https://linux.do/tag/444-tag/444`
 2. **滚动加载全部帖子**：见步骤 1.2（35 次滚动）
-3. **提取帖子列表含时间戳**：`browser_evaluate`（见步骤 1.3）
-4. **合并去重筛选**：历史去重 + 公益站过滤 + 32h 筛选
-5. **按浏览量排序**：热门帖优先抓取
-6. **批量抓取正文**：每批 30 帖，抓取 4-5 批后可提前终止
+3. **提取帖子列表含时间戳**：`browser_evaluate`（见步骤 1.3，**绝对路径 filename**）
+4. **合并去重筛选**：历史去重 + 公益站过滤 + 32h 筛选 → **crawl_queue + batch_ids**
+5. **按浏览量排序**：已在 queue 内完成
+6. **批量抓取正文**：每批 30 帖，从 `batch_ids_N.json` 读 id
 
 #### 每帖提取数据
 
@@ -414,25 +474,44 @@ async (page) => {
 }
 ```
 
-#### ⚠️ 批量抓取数据保存（v12 核心修复）
+#### ⚠️ 批量抓取数据保存（v12 核心 + v15.2 transcript 回填）
 
-**2026-06-29 实测问题**：浏览器 `browser_run_code_unsafe` 返回的 JSON 结果必须**立即用 Python 保存到文件**，否则数据会丢失。
+**2026-06-29 实测问题**：浏览器 `browser_run_code_unsafe` 返回的 JSON 结果必须**立即保存到文件**，否则数据会丢失。
 
 **正确流程**：
 1. `browser_run_code_unsafe` 执行批量抓取 → 返回 JSON 字符串
-2. **立即**用 Bash/Python 保存到 `data/batch_browser_N.json`
+2. **立即**保存到 `data/batch_browser_N.json`
 3. 继续下一批
 
 **错误做法**：等所有批次抓完再保存（数据会丢失）
 
 ```python
-# 每批抓取后立即执行此代码保存数据
+# 理想情况：工具返回字符串可直接 loads
 import json
-# results_json 是 browser_run_code_unsafe 返回的字符串
-data = json.loads(results_json)
+data = json.loads(results_json)  # 若外层仍是转义字符串，再 loads 一次
 with open(f'data/batch_browser_{N}.json', 'w') as f:
     json.dump(data, f, ensure_ascii=False, indent=2)
-print(f'Batch {N} 已保存: {len(data.get("results", []))} 帖')
+print(f'Batch {N} 已保存: {len(data.get("results", []))} 帖, valid={sum(1 for r in data["results"] if r.get("title"))}')
+```
+
+#### ⚠️ 大结果无法直接管道时：从 session transcript 回填（v15.2）
+
+当返回体极大、无法在下一步 Bash 里手工粘贴时，**不要重爬该批**。从当前 session 的 jsonl 解析最近一次 `### Result\n"{...}"`：
+
+```python
+# 思路：读 ~/.claude/projects/.../<session>.jsonl
+# 找含 ### Result 且 "batch":N 的 tool 结果文本
+# start = text.find('### Result\n"') + len('### Result\n"')
+# end = text.find('"\n###', start)
+# unescaped = json.loads('"' + text[start:end] + '"')
+# data = json.loads(unescaped)
+# 写入 data/batch_browser_{N}.json
+```
+
+建议在项目里保留可复用脚本 `data/save_latest_batch.py`（参数为 batch 号），每批结束后：
+
+```bash
+python3 data/save_latest_batch.py N
 ```
 
 #### 空帖检测（v12 新增）
@@ -467,90 +546,87 @@ with open(f'data/batch_browser_{N}.json', 'w') as f:
 print(f'Batch {N} 已保存: {data.get("count", 0)} 帖')
 ```
 
-### 1.8 数据合并与过滤
+### 1.8 数据合并与过滤（v15.2：正文二次过滤 + 列表 views 合并）
 
-> **v12 重要修复**：`browser_evaluate` 使用 `filename` 参数保存的 JSON 文件是 **double-encoded**（双重编码），需要用 `json.loads(json.load(f))` 读取。
+> **v12 重要修复**：`browser_evaluate` 使用 `filename` 参数保存的 JSON 文件是 **double-encoded**，需要用 `json.loads(json.load(f))` 读取。  
+> **v15.2**：列表阶段公益站过滤不够（正文才暴露「公益推广/CDK/日抛」）→ **合并 batch 后再滤一次**；帖子页 `views` 常为 `0` → **与 crawl_queue 列表 views 取更合理值**。
 
 ```python
 import json, os, glob, re
 from datetime import datetime, timezone, timedelta
 
-# 1. 合并所有 batch 文件
+queue = json.load(open('data/crawl_queue.json'))
+meta = {str(p['id']): p for p in queue['posts']}
+
 all_posts = {}
 for f in sorted(glob.glob('data/batch_browser_*.json')):
     with open(f) as fh:
         batch = json.load(fh)
-    # 处理可能的 double-encoded JSON
     if isinstance(batch, str):
         batch = json.loads(batch)
-    results = batch.get('results', [])
-    for p in results:
+    for p in batch.get('results', []):
         pid = str(p.get('id', ''))
-        if pid and p.get('title'):  # v12: 只保留有标题的帖子
-            all_posts[pid] = p
+        if not (pid and p.get('title')):
+            continue
+        m = meta.get(pid, {})
+        if m.get('created'):
+            p['created'] = m['created']
+        if m.get('created_at'):
+            p['created_at'] = m['created_at']
+        # 列表页 views 优先于帖子页 0/异常
+        def vn(x):
+            return int(re.sub(r'\D', '', str(x or '0')) or 0)
+        if vn(p.get('views')) == 0 and vn(m.get('views')) > 0:
+            p['views'] = m.get('views')
+        elif vn(m.get('views')) > vn(p.get('views')):
+            p['views'] = m.get('views')
+        p['tags'] = list(dict.fromkeys((p.get('tags') or []) + (m.get('tags') or [])))
+        p['id'] = pid
+        all_posts[pid] = p
 
 print(f'合并后有效帖子: {len(all_posts)}')
 
-# 2. 公益站过滤
-GONGYI_KEYWORDS = ['公益站', '公益推广', 'LDC', 'ldc', 'cdk', '签到', '白嫖',
-                   '薅羊毛', '薅秃', '兑换码', '免费额度', '号池', '号商', '充值额度',
-                   '中转站', '高级推广', '抽奖', '富可敌国']
+GONGYI_KEYWORDS = [
+    '公益站', '公益推广', 'LDC', 'ldc', 'cdk', '签到', '白嫖',
+    '薅羊毛', '薅秃', '兑换码', '免费额度', '号池', '号商', '充值额度',
+    '中转站', '高级推广', '抽奖', '富可敌国', '接码', '代充',
+    # v15.2 正文二次过滤补充
+    'LightBridge公益', 'YSX666', '日抛', '午夜福利', 'CDK',
+]
+TRADE = ['求号', '出号', '共享车']
 
 filtered = {}
+removed = 0
 for pid, p in all_posts.items():
-    all_text = f"{p.get('title', '')} {' '.join(p.get('tags', []))}"
-    if not any(kw in all_text for kw in GONGYI_KEYWORDS):
-        filtered[pid] = p
+    title = p.get('title', '') or ''
+    tags = ' '.join(p.get('tags') or [])
+    content = (p.get('content') or '')[:200]
+    all_text = f'{title} {tags} {content}'
+    if any(kw in all_text for kw in GONGYI_KEYWORDS):
+        removed += 1
+        continue
+    if any(kw in title for kw in TRADE) and not any(x in title for x in ['风控', '封号', '行业', '分析', '讨论']):
+        removed += 1
+        continue
+    filtered[pid] = p
 
-print(f'公益站过滤后: {len(filtered)}')
+print(f'公益站/交易二次过滤后: {len(filtered)} (removed {removed})')
 
-# 3. 保存每日数据
 date_str = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d')
 os.makedirs('data/daily', exist_ok=True)
+posts_list = sorted(filtered.values(),
+                    key=lambda p: int(re.sub(r'\D', '', str(p.get('views', '0'))) or 0),
+                    reverse=True)
 daily_data = {
     'date': date_str,
-    'total': len(filtered),
-    'posts': [{'id': pid, **p} for pid, p in filtered.items()]
+    'total': len(posts_list),
+    'with_content': sum(1 for p in posts_list if p.get('content')),
+    'cutoff': queue.get('cutoff'),
+    'posts': posts_list,
 }
 with open(f'data/daily/{date_str}.json', 'w') as f:
     json.dump(daily_data, f, ensure_ascii=False, indent=2)
-```
-
-```python
-import json, os, glob, re
-from datetime import datetime, timezone, timedelta
-
-# 1. 合并所有 batch 文件
-all_posts = {}
-for f in sorted(glob.glob('data/batch_browser_*.json')):
-    with open(f) as fh:
-        posts = json.load(fh)
-    for p in posts:
-        pid = str(p.get('id', ''))
-        if pid and pid not in all_posts and p.get('title'):
-            all_posts[pid] = p
-
-# 2. 公益站过滤
-GONGYI_KEYWORDS = ['公益站', '公益推广', 'LDC', 'ldc', 'cdk', '签到', '白嫖',
-                   '薅羊毛', '薅秃', '兑换码', '免费额度', '号池', '号商', '充值额度',
-                   '中转站', '高级推广', '抽奖', '富可敌国']
-
-filtered = {}
-for pid, p in all_posts.items():
-    all_text = f"{p.get('title', '')} {' '.join(p.get('tags', []))}"
-    if not any(kw in all_text for kw in GONGYI_KEYWORDS):
-        filtered[pid] = p
-
-# 3. 保存每日数据
-date_str = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d')
-os.makedirs('data/daily', exist_ok=True)
-daily_data = {
-    'date': date_str,
-    'total': len(filtered),
-    'posts': [{'id': pid, **p} for pid, p in filtered.items()]
-}
-with open(f'data/daily/{date_str}.json', 'w') as f:
-    json.dump(daily_data, f, ensure_ascii=False, indent=2)
+print(f'saved data/daily/{date_str}.json total={daily_data["total"]}')
 ```
 
 ---
@@ -562,16 +638,17 @@ with open(f'data/daily/{date_str}.json', 'w') as f:
 ### 主题分类规则
 
 按以下维度对帖子进行分组（按优先级匹配，命中第一个即归类）：
-- **OpenAI/ChatGPT/Codex 生态**：codex, chatgpt, gpt, openai, sub2api, plus, pro20, pro 5x
-- **Claude/Anthropic 生态**：fable, mythos, opus, anthropic, claude code, claudecode, cc-switch, max
-- **豆包/火山引擎 生态**：豆包, doubao, seed, 火山, seedance, 字节
-- **GLM/智谱 生态**：glm, 智谱, zai, glm5.2
-- **Grok 生态**：grok
-- **Kimi/月之暗面**：kimi, 月之暗面
-- **Google/Gemini 生态**：gemini, google, antigravity
-- **AI 编程工具**：cursor, windsurf, trae, hermes, opencode, kiro, minimax
+- **OpenAI/ChatGPT/Codex 生态**：codex, chatgpt, gpt, openai, sub2api, plus, pro20, pro 5x, sol, terra, luna, tibo, gpt-red
+- **Claude/Anthropic 生态**：fable, mythos, opus, anthropic, claude code, claudecode, cc-switch, max, ultracode
+- **Kimi/月之暗面**：kimi, 月之暗面, moonshot, k3, kivine, kivio
+- **Grok/xAI 生态**：grok, xai, spacexai, supergrok, 马圣, 老马
+- **豆包/火山引擎 生态**：豆包, doubao, seed, 火山, seedance, 字节, qoder
+- **GLM/智谱 生态**：glm, 智谱, zai, glm5.2, codegeex
+- **Google/Gemini 生态**：gemini, google, antigravity, spark, ai studio, pixel
+- **DeepSeek 生态**：deepseek, ds, v4（注意与通用英文词区分，优先标题/标签）
+- **AI 编程工具**：cursor, windsurf, trae, hermes, opencode, kiro, minimax, copilot
 - **开源项目**：开源推广, 开源
-- **行业动态**：前沿快讯, 前沿, 转载, 安全, 边界
+- **行业动态**：前沿快讯, 前沿, 转载, 安全, 边界, waic, nvidia, h200, 监管, linus
 - **其他话题**：其余
 
 ---
@@ -1177,46 +1254,55 @@ Typst 特殊字符转义规则与日报一致（`$` → `\$`、`#` → `\#`、�
 ## 注意事项
 
 ### 浏览器与抓取
-- **必须使用浏览器逐帖浏览**：`browser_navigate` 打开帖子页面，不能用 fetch API
-- **Cloudflare 挑战**：每帖检测标题，包含 "Just a moment" 则等待 15 秒；预授权阶段需要**点击验证区域**（v14 新增）
-- **不回列表页**：直接从一个帖子导航到下一个帖子（v11 确认：省去返回列表页的 1.5s 等待）
-- **每帖等待 1.5 秒**：避免触发限流
-- **每批 30 帖**：处理完一批保存，继续下一批（v11：从 20 帖提升到 30 帖）
-- **提前终止**：抓取 100-150 帖后可直接生成日报，不需要全部抓完
-- **全量抓取**：用户要求"全部抓取"时，需完成所有批次（通常 8-10 批，240-300 帖）
+- **固定 cwd**：先 `cd /Users/youngsdream/Documents/learn-claude-code`（v15.2）
+- **必须使用浏览器逐帖浏览**：`browser_navigate` / `browser_run_code_unsafe` 打开帖子页面，不能用 fetch API
+- **Cloudflare 挑战**：标题含 "Just a moment" 则等待 15 秒；预授权可点击验证区域（v14）。**0717 实测有时可直接进入站点**——以 `document.title` 为准
+- **不回列表页**：直接从一个帖子导航到下一个帖子
+- **每帖等待 1.5 秒** + 页载后 2 秒：避免触发限流
+- **每批 30 帖**：处理完一批保存，继续下一批
+- **提前终止**：仅标准日报可在 120–150 帖后进入生成
+- **全量抓取**：「全部抓取 / 过滤后全部抓取完」必须跑完 queue；规模可达 **15–20 批 / 450–550 帖**（0717：517→18 批→490 有效）
 
 ### ⚠️ 反检测规则（必须遵守）
-1. **逐帖浏览间隔 1.5 秒**：每帖之间固定等待 1.5 秒
-2. **检测 Cloudflare 挑战**：如果页面标题包含 "Just a moment"，等待 15 秒
-3. **检测官方警告**：如果页面内容包含 "异常的自动化访问行为" 或 "系统检测到"，立即停止爬取
-4. **429 限流处理**：如果触发 429，等待 30 秒后重试
+1. **逐帖浏览间隔 1.5 秒**
+2. **检测 Cloudflare 挑战**：标题含 "Just a moment" 则等待 15 秒
+3. **检测官方警告**：内容含 "异常的自动化访问行为" 或 "系统检测到" 则立即停止
+4. **429 限流处理**：等待 30 秒后重试
+5. **单帖 timeout 20s**：超时记 `error`，不中断整批
 
-### ⚠️ 旧 Batch 文件清理（v14 新增）
-跨 session 运行时，`data/batch_browser_*.json` 可能残留上次抓取的数据，导致：
-- 合并计数虚高（显示已抓取229帖，实际本次仅抓取120帖）
-- 包含过期数据
+### ⚠️ 旧 Batch 文件清理（v14 + v15.2）
+跨 session 时 `batch_browser_*` / `batch_ids_*` / `rem_batch_*` 会污染合并计数。
 
-**解决方案**：每次抓取前**先删除旧 batch 文件**：
+**每次抓取前删除**（必须在项目 cwd）：
 ```python
 import glob, os
-for f in glob.glob('data/batch_browser_*.json'):
-    os.remove(f)
-print("已清理旧 batch 文件")
+os.chdir('/Users/youngsdream/Documents/learn-claude-code')
+patterns = [
+    'data/batch_browser_*.json', 'data/batch_ids_*.json',
+    'data/rem_batch_*.json', 'data/crawl_queue*.json', 'data/remaining_todo.json',
+]
+n = 0
+for pat in patterns:
+    for f in glob.glob(pat):
+        os.remove(f); n += 1
+print(f'cleaned {n} files')
 ```
-或者在合并时按 session 过滤——但删除更简单可靠。
 
-### 数据保存（v12 重点）
-- **每批抓取后必须立即保存**：`browser_run_code_unsafe` 返回的 JSON 必须用 Python 保存到文件
-- **不要等所有批次完成再保存**：会导致数据丢失
-- **空帖过滤**：已删除或私有帖子返回空标题，不需要保存
+### 数据保存（v12 + v15.2）
+- **每批立即保存**到 `data/batch_browser_N.json`
+- **不要等所有批次完成再保存**
+- **空帖过滤**：无 `title` 不入库
+- **大结果回填**：无法管道时用 session transcript / `save_latest_batch.py`（v15.2）
+- **合并时二次公益站过滤**（标题+标签+content 前 200 字）
+- **列表 views 合并**：帖子页 views=0 时用 crawl_queue 列表 views
 
 ### 日期与过滤
 
 - **概念库（v15）**：Writer 技术锚点只引用 `ai-concept-bank` 中 eligible ready；路径 `ai-concept-bank/concepts.json`
 - **概念候选入库（v15.1）**：仅从日报 `## 概念候选（供 concept-bank）` 附录追加最小 `candidate`；必须去重、过滤、`jq` 校验；不生成口播、不改 ready、不写 usage-log
 - **不能用 ID 阈值判断日期**：Discourse ID 不按日期顺序
-- **必须过滤公益站**：公益站、LDC、cdk、签到、白嫖、薅羊毛、兑换码、免费额度、号池、号商、中转站、高级推广、抽奖、富可敌国
-- **必须历史去重**：扫描 `data/reports/*.md` 提取已报道帖子 ID
+- **必须过滤公益站**（列表 + 正文两遍）：公益站、LDC、cdk、签到、白嫖、薅羊毛、兑换码、免费额度、号池、号商、中转站、高级推广、抽奖、富可敌国、LightBridge公益、YSX666、日抛、午夜福利
+- **必须历史去重**：扫描 `data/reports/*.md` 提取已报道帖子 ID（可排除 `_press.md`）
 - **daily 文件名匹配**：用正则 `^\d{4}-\d{2}-\d{2}$` 严格匹配，排除 `_sorted`、`_topics`、`_classified` 等后缀文件（v14 新增）
 
 ### 并行 Agent 优化（v14 新增）
@@ -1234,6 +1320,38 @@ print("已清理旧 batch 文件")
 ---
 
 ## 更新日志
+
+### v15.2.0 (2026-07-17)
+基于 2026-07-17 全量日报实战优化：
+
+**固定项目 cwd（核心）**
+- Bash 可能落在 `~/.claude/projects/...`，导致 `data/` 找不到、清理 batch 失败
+- 强制 `cd /Users/youngsdream/Documents/learn-claude-code`；`browser_evaluate` filename 用绝对路径
+
+**「过滤后全部抓取完」冷启动协议**
+- 该触发词 = 全量流水线，不以用户口述代替磁盘检查
+- 无 `data/daily/{date}.json` 时从 Crawler 重跑；有今日 batch 无 daily 则只合并
+
+**crawl_queue + batch_ids 预切分**
+- 32h 筛选后写 `data/crawl_queue.json` 与 `data/batch_ids_N.json`
+- 全量模式按 batch_ids 顺序抓完，不在 150 帖提前停
+
+**batch 保存 / transcript 回填**
+- 每批立即 `batch_browser_N.json`
+- 大 JSON 无法管道时，从 session jsonl 解析 `### Result` 转义串回填（`save_latest_batch.py`）
+
+**正文二次公益站过滤 + views 合并**
+- 列表过滤后仍会混入正文含「公益推广/CDK/日抛」的帖 → 合并时 title+tags+content[:200] 再滤
+- 帖子页 views 常为 0 → 用列表页 views 补全
+
+**主题分类扩展**
+- 独立 DeepSeek；Kimi/Grok/OpenAI 关键词补全（k3/kivine/sol/terra/gpt-red 等）
+
+**实测数据（2026-07-17）**
+- Source A 930 + Source B AI 378 → 合并 1232 → 历史去重/公益站后 1084 → 32h **517** 帖
+- 全量 18 批（0–17）→ 正文合并 514 → 二次过滤 **490** 有效
+- 产出：`data/daily/2026-07-17.json` + reports md/press/pdf/typ + 4 个 concept candidate
+- 整体耗时：约 90 分钟（含全量抓取 + 成稿）
 
 ### v15.1.0 (2026-07-13)
 - **概念候选受控入库**：日报生成后可读取 `## 概念候选（供 concept-bank）`，经去重、过滤后只追加最小 `candidate`
