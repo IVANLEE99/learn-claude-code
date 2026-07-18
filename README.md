@@ -35,4 +35,32 @@
 
 ---
 
-如果你希望，我还可以把这份 `readme.md` 改成**表格版**或补充为“命令 + 示例 + 适用场景”的速查手册。
+## Git Submodules
+
+本项目包含以下 submodule：
+
+| 子模块 | 仓库地址 |
+|--------|---------|
+| `ai-concept-bank` | [IVANLEE99/ai-concept-bank](https://github.com/IVANLEE99/ai-concept-bank) |
+
+### Clone 时拉取 submodule
+
+```bash
+git clone --recurse-submodules git@github.com:IVANLEE99/learn-claude-code.git
+```
+
+### 已有仓库补拉 submodule
+
+```bash
+git submodule update --init --recursive
+```
+
+### 更新 submodule 到远程最新
+
+```bash
+git submodule update --remote
+```
+
+---
+
+如果你希望，我还可以把这份 `readme.md` 改成**表格版**或补充为”命令 + 示例 + 适用场景”的速查手册。

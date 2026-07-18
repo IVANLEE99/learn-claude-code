@@ -1,13 +1,14 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 15.2.0
+version: 15.3.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v15.3 核心改进（2026-07-18 实测）**：全量 19 批 / 531 帖闭环；Playwright 批抓与「浏览器退出」解耦说明；batch 保存脚本固化；二次过滤后再 Writer；与 ai-news-factory 衔接时避免边抓边开多浏览器。
 > **v15.2 核心改进（2026-07-17 实测）**：固定项目 cwd；「过滤后全部抓取完」冷启动协议；`crawl_queue`/`batch_ids` 预切分；transcript 回填 batch；正文二次公益站过滤；列表页 views 合并；全量规模 500+ 帖。
 > **v15.1 核心改进**：概念候选受控入库——日报附录经去重/过滤后只追加最小 `candidate`，不写口播、不晋升 ready。
 > **v15 核心改进**：接入 `ai-concept-bank` 技术锚点；可信度五档；账号权益黑话过滤。
@@ -1558,3 +1559,26 @@ print(f'cleaned {n} files')
 - 逐帖浏览方式较慢（每帖约 3-5 秒：导航 2s + 提取 1s + 等待 0.5s）
 - 849 帖全部抓取需要约 45-70 分钟
 - 部分帖子可能返回空标题（已删除或私有）
+
+### v15.3.0 (2026-07-18)
+基于 2026-07-18 全量日报 + 视频工厂联跑经验：
+
+**全量抓取闭环（实测）**
+- 双源列表合并后队列约 557 帖 → 正文批次 0–18（末批不足 30）→ 有效标题约 556 → 二次公益站过滤后 **531** 入 `data/daily/YYYY-MM-DD.json`
+- **每批必须立即** `data/save_latest_batch.py N` 或等价写入 `data/batch_browser_N.json`；禁止「全部抓完再存」
+- 工具返回 JSON 若只在 transcript 里：从 session jsonl 回填（见 v15.2 协议）
+
+**浏览器稳定**
+- 全量批抓阶段**只保留一个** Playwright MCP 会话；不要并行启动视频号独立 Chrome 共用 profile
+- 批抓循环内：Cloudflare 标题检测 + 官方「异常自动化访问」文案则停批保存已抓
+- 与 `ai-news-factory` 衔接：日报 PDF/报告落盘后再开视频流水线，减少浏览器互杀
+
+**合并与过滤**
+- 合并 `crawl_queue` 元数据时：列表页 views 若高于详情 DOM 则回填（详情有时为 0/占位）
+- 二次过滤：标题/标签/内容前 200 字扫公益站与纯交易词（与 v15.2 关键词表一致）
+- Writer 可信度分层：官方确认 / 社区实测 / 媒体报道 / 未确认传闻
+
+**联跑检查清单**
+1. `data/daily/{date}.json` total 与 with_content
+2. `data/reports/{date}.md` + `_press.md` + `.pdf`
+3. 再触发 ai-news-factory（推荐事件可不确认）

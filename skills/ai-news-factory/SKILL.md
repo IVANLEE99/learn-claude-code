@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.6.0
+version: 3.7.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.6.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.7.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -26,6 +26,19 @@ version: 3.6.0
 | 抖音 | 点击「暂存离开」或直接关闭标签页（视频自动保存） |
 | 视频号 | 点击「保存草稿」按钮 |
 | 公众号 | 点击「保存为草稿」按钮 |
+
+### 🔴 浏览器与 Profile 全局铁律（v3.7.0 / 2026-07-18 实测）
+
+**问题**：同日流水线里 MCP Playwright 与独立 `playwright-core` 脚本若**共用** `ms-playwright-mcp/mcp-chrome-*` 登录态，会互抢锁、被 `pkill`、或在视频号双 body 页触发 MCP 崩溃，表现像「浏览器老是退出」。
+
+**铁律**：
+1. **同一时刻只用一种浏览器驱动**：要么全程 MCP（`browser_*` 工具），要么全程独立脚本；禁止中途混用同一 `user-data-dir`。
+2. **独立脚本启动前**才允许 `pkill -f "user-data-dir=.../mcp-chrome-..."`；**不要**对普通 Chrome / Chromium 全局 `pkill`。
+3. **视频号页面**（`channels.weixin.qq.com`）存在 **wujie 双 body**（外层 + `wujie-app body`）。在此页调用 `browser_snapshot` / `browser_find` / `browser_file_upload` / `browser_tabs` 常报：
+   `strict mode violation: locator('body') resolved to 2 elements`
+   **处理**：所有探测与操作放进**一次** `browser_run_code_unsafe`；返回前 `page.goto('https://www.baidu.com')` 离开双 body 页；文件选择器用脚本内 `waitForEvent('filechooser') + setFiles`，勿拆成单独 `browser_file_upload`。
+4. **beforeunload**：从编辑页离开时弹「将此次编辑保留？」→ 先 `browser_handle_dialog(accept=true)` 或脚本内点「保存/不保存」，否则 `net::ERR_ABORTED`。
+5. 独立脚本结束若用户要核对 UI，可**不** `context.close()`，改为提示用户手动关窗（用户明确要求「不要关太快」时）。
 
 ## ⚡ 权限预授权（必须在执行前完成）
 
@@ -2335,6 +2348,16 @@ browser_click(target={确认按钮ref})
 
 **🔴 重要经验：视频号编辑器使用 iframe + 自定义 React 组件，自动化难度较高。必须先检测 iframe 结构。**
 
+**🔴 v3.7.0 补充（2026-07-18）— 上传视频号「稳跑」协议**：
+1. 优先 **MCP 单会话闭环**：打开 create → 上传 → 填描述/短标题 → 封面 → 存草稿 → 草稿箱验收；全过程避免另起独立 Playwright 抢 profile。
+2. 若 MCP 在双 body 上已崩溃，再改用**独立脚本 + 同一 profile**，启动前 scoped `pkill` 仅杀该 profile。
+3. 视频上传成功标志：出现「删除 / 重新上传 / 封面预览」，且「保存草稿」可点（非灰）。
+4. 草稿验收：侧栏「草稿箱」条数 +1，标题含当日描述摘要与日期。
+5. 封面 3:4 / 4:3：等 **「预览图生成中，请等待完成后再编辑」消失** 后再点对应「编辑」；DOM 可见 `input[accept*=image]` 在 `.single-cover-uploader-wrap`，但跨 frame 时 `setInputFiles` 易 detached——**已验证可用 CDP**：
+   `DOM.performSearch` → `getSearchResults` → `describeNode` 过滤 image accept → `DOM.setFileInputFiles({ backendNodeId, files })`。
+6. 竖封面文件必须**带日期**（如 `douyin-vertical-3-4.png` 含 `2026-07-18`）；生成失败勿用 scene 截图顶替。
+7. 短标题 ≤16 中文字符。
+
 #### 13.0 检测 iframe 结构（关键步骤）
 
 **🔴 视频号页面内容在 iframe 中渲染！必须先检测 iframe 才能操作表单元素。**
@@ -2904,21 +2927,30 @@ await titleInput.fill('代码偷吃SSD+豆包对标Opus｜今日羊报AI');
 
 **解决**：创建文章后，切换到最新标签页（index 最大的）。关闭其他重复标签页。
 
-### 🔴 公众号封面上传正确流程（v1.9.1 更新）
-**问题**：之前的方法（坐标点击、innerHTML 注入）都不可靠。
+### 🔴 公众号封面上传正确流程（v1.9.1 更新 / v3.7.0 强化 2026-07-18）
+**问题**：坐标点击、innerHTML 注入不可靠；弹窗缩略图常为 **background-image 的 span**，不是 `<img>`，`querySelectorAll('img')` 会漏选。
 
-**已验证的正确流程**：
-1. 通过工具栏「图片」→「本地上传」将封面图插入正文（触发 file chooser）
-2. Hover 封面区域「拖拽或选择封面」→ 显示选项菜单
-3. 用 `.js_selectCoverFromContent` class 选择器点击「从正文选择」
-4. 在弹窗中点击图片（出现勾选标记）→ 点击「下一步」
-5. 确认裁剪 → 点击「确认」
-6. 保存草稿
+**已验证的正确流程（优先「从正文选择」）**：
+1. Focus 正文：`.ProseMirror` 第二个 / `[contenteditable=true][2]`
+2. 工具栏「图片」→「本地上传」→ `input[accept*=image].setInputFiles(wechat-21-9.png)`
+3. 等「图片上传中」消失；必要时 Escape
+4. 封面区 `#js_cover_area` scrollIntoView → hover `.js_cover_btn_area`（仅 click 常不出菜单）
+5. **`.js_selectCoverFromContent`** 点「从正文选择」（class，勿靠文本）
+6. 在弹窗中点 **`.appmsg_content_img_item` / `span.appmsg_content_img.cover`**（背景图缩略图，约 115×115）出现勾选 → **「下一步」** → 裁剪页 **「确认」**（不是「完成」）
+7. 「保存为草稿」；成功信号：`appmsgid=` 仍在 URL，或底栏「已保存」
+
+**验收（DOM，比肉眼稳）**：
+- `#js_cover_area .js_cover_preview_new` 的 `background-image` 含 `mmbiz.qpic.cn` / `mmbiz_jpg`
+- 左侧内容卡片已显示封面图
+- 允许仍短暂残留「拖拽或选择封面」文案节点，以 **preview 背景图** 为准
+
+**备选**：直接对封面相关 `input[type=file][accept*=image]` `setInputFiles`；若只改了 preview 背景但 UI 文案未切换，仍以 preview URL + 左卡缩略图为准。
 
 **关键点**：
-- 必须先通过工具栏上传图片到正文，不能用 innerHTML 注入
-- Hover 才能显示选项菜单，直接 click 不触发
-- 「从正文选择」必须用 class 选择器，文本匹配找不到
+- 必须先把图插入正文，再「从正文选择」
+- 缩略图可能不是 `<img>`，用 class + 坐标点击
+- 裁剪确认按钮文案是 **「确认」**
+- 封面失败不阻塞草稿（v3.5.0）
 
 ### 🔴 公众号赞赏弹窗 checkbox 结构（v1.7.0 新增）
 **问题**：「我已阅读并同意」checkbox 在 `label > div` 结构中，不是标准 `input[type="checkbox"]`。
@@ -4023,7 +4055,41 @@ await inputs[1].setInputFiles('cover.png');
 **Why:** 周报文件可能不存在（首次生成或文件被清理）
 **How to apply:** Phase 1 周报去重时，先检查上周周报文件是否存在，不存在则跳过
 
+### 🔴 MCP 与独立 Playwright 互抢 Profile（v3.7.0 / 2026-07-18）
+**问题**：流水线中为视频号上传反复 `pkill` 共用 profile，用户感知「浏览器老是退出」。
+**解决**：见文首「浏览器与 Profile 全局铁律」；仅在切换驱动时 scoped kill；向用户解释关闭原因。
+**Why:** 同一 `user-data-dir` 不能被两个 Chromium 同时占用。
+**How to apply:** 视频号优先 MCP 闭环；独立脚本仅作 fallback。
+
+### 🔴 视频号双 body 导致 MCP 工具层崩溃（v3.7.0 / 2026-07-18）
+**问题**：`strict mode violation: locator('body') resolved to 2 elements`（外层 + wujie-app body）。
+**解决**：单次 `browser_run_code_unsafe` 完成关键步骤；返回前导航到 baidu/about:blank；禁止在双 body 页用 snapshot/find/file_upload。
+**How to apply:** Phase 13 全程遵守。
+
+### 🔴 视频号封面 3:4/4:3 与 CDP setFileInputFiles（v3.7.0 / 2026-07-18）
+**问题**：`input[accept=image/*]` 在 `.single-cover-uploader-wrap` 中 `display:none`，跨 frame `setInputFiles` 报 detached；须等「预览图生成中」结束。
+**解决**：点对应比例「编辑」后，用 CDP `DOM.performSearch` + `backendNodeId` + `DOM.setFileInputFiles`；4:3 已多次验证成功，3:4 同法但须点中 `.vertical-cover-wrap` 的编辑。
+**How to apply:** Phase 13 封面步骤。
+
+### 🔴 公众号「从正文选择」缩略图非 img 标签（v3.7.0 / 2026-07-18）
+**问题**：弹窗缩略图是 `span.appmsg_content_img.cover` + background-image，`img` 列表为空导致无法选中、「下一步」不进入裁剪。
+**解决**：点 `.appmsg_content_img_item`；裁剪点「确认」；验收看 `#js_cover_area .js_cover_preview_new` 的 background-image。
+**How to apply:** Phase 12 封面。
+
+### 🟡 抖音竖封面必须带日期（v3.7.0 / 2026-07-18）
+**问题**：竖封面生成失败时用 scene 图回退，用户反馈「上面没日期」。
+**解决**：`douyin-vertical-3-4.png` 失败必须重试 GEN_IMG，prompt 强制底部 `YYYY-MM-DD` 与右上「今日羊报 AI」；禁止无品牌 scene 回退当封面。
+**How to apply:** Phase 5.5 / 14.6。
+
 ## 更新日志
+
+### v3.7.0（2026-07-18）
+- **浏览器 Profile 铁律**：MCP 与独立 Playwright 互斥；scoped pkill；解释「退出」原因
+- **视频号双 body**：单次 run_code 闭环、返回前离开 channels 页、避免 snapshot/file_upload 拆分
+- **视频号封面**：等预览生成；CDP `backendNodeId` 写 image input；草稿箱条数/标题验收
+- **公众号封面**：正文图 → 从正文选择 → 非 img 缩略图 class → 下一步 → **确认**；preview 背景 URL 验收
+- **抖音竖封面**：强制日期+品牌，禁止 scene 无日期回退
+- **版本**：3.6.0 → 3.7.0
 
 ### v3.6.0（2026-07-17）
 - **抖音封面完成按钮（Phase 14.6）**：`getByRole('button','完成')` 常 count=0 → 改用 `locator('text=完成').last()` + evaluate 点底部主按钮；`setFiles` 后等 1.5–3s 再完成
@@ -4098,4 +4164,3 @@ await inputs[1].setInputFiles('cover.png');
 - 视频号 AI 标识
 - 标题党检查
 - 图片-脚本映射铁律
-```
