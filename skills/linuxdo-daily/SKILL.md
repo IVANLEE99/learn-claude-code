@@ -1,13 +1,14 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 15.3.0
+version: 15.4.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v15.4 核心改进（2026-07-19 周报实测）**：周聚合浏览量解析 `6.2k/万`；同 id 保留更高 views；`week_posts[id]['_day']` 记录来源日；周 PDF/Typst 同步落盘；与 ai-news-factory 衔接时 **PDF 落盘后再开视频**。
 > **v15.3 核心改进（2026-07-18 实测）**：全量 19 批 / 531 帖闭环；Playwright 批抓与「浏览器退出」解耦说明；batch 保存脚本固化；二次过滤后再 Writer；与 ai-news-factory 衔接时避免边抓边开多浏览器。
 > **v15.2 核心改进（2026-07-17 实测）**：固定项目 cwd；「过滤后全部抓取完」冷启动协议；`crawl_queue`/`batch_ids` 预切分；transcript 回填 batch；正文二次公益站过滤；列表页 views 合并；全量规模 500+ 帖。
 > **v15.1 核心改进**：概念候选受控入库——日报附录经去重/过滤后只追加最小 `candidate`，不写口播、不晋升 ready。
@@ -964,9 +965,26 @@ for f in sorted(glob.glob('data/daily/2026-*.json')):
             covered_days.append(fname)
             for p in posts:
                 pid = str(p.get('id', ''))
-                if pid and p.get('title'):
+                if not (pid and p.get('title')):
+                    continue
+                # v15.4：同 id 保留更高浏览量；记下来源日
+                def vn(x):
+                    s = str(x or '0').strip().lower().replace(',', '')
+                    m = re.match(r'([\d.]+)\s*([km万])?', s)
+                    if not m:
+                        return int(re.sub(r'\D', '', s) or 0)
+                    n = float(m.group(1)); u = m.group(2)
+                    if u == 'k': n *= 1000
+                    elif u == 'm': n *= 1e6
+                    elif u == '万': n *= 10000
+                    return int(n)
+                prev = week_posts.get(pid)
+                if not prev or vn(p.get('views')) >= vn(prev.get('views')):
+                    p = dict(p)
+                    p['id'] = pid
+                    p['_day'] = fname
                     week_posts[pid] = p
-        except:
+        except Exception:
             pass
 
 # 扫描本周日报提取亮点
@@ -986,7 +1004,7 @@ for f in sorted(glob.glob('data/reports/2026-*.md')):
                 bullets = [b.strip() for b in m.group(1).strip().split('\n') if b.strip()]
                 if bullets:
                     weekly_highlights[fname] = bullets
-        except:
+        except Exception:
             pass
 
 os.makedirs('data/weekly', exist_ok=True)
@@ -1001,7 +1019,16 @@ week_data = {
 }
 with open(f'data/weekly/{week_id}.json', 'w') as f:
     json.dump(week_data, f, ensure_ascii=False, indent=2)
+print(f'week={week_id} days={covered_days} total={len(week_posts)}')
 ```
+
+### 周报 TOP 排序注意（v15.4）
+
+列表页 `views` 常为 **`6.2k` / `1.1万` 字符串**，TOP 排序必须用上面的 `vn()`（k/m/万）解析，**禁止** `int(re.sub(r'\D','', views))`（会把 `6.2k` 变成 `62` 或丢掉数量级）。
+
+输出文件（建议齐全）：
+- `data/weekly/{week_id}.json` / `.md` / `_press.md` / `.typ` / `.pdf`
+- 可选：`{week_id}_topics.json`（主题分组计数 + hard-news TOP）
 
 ### 周报多 Agent 流程
 
@@ -1321,6 +1348,21 @@ print(f'cleaned {n} files')
 ---
 
 ## 更新日志
+
+### v15.4.0 (2026-07-19)
+基于 **2026-W28 周报**（07-13~07-19）实战：
+
+**周聚合浏览量与去重**
+- `views` 支持 `6.2k` / `万` 解析；同 id 合并时保留更高 views
+- 帖子写入 `_day` 来源日期，便于大事记与 TOP 标注
+- 覆盖检查：本周 7 日 `daily/*.json` + `reports/*.md` 齐全后再写周报
+
+**产物与衔接**
+- 周报 md/press/typ/**pdf** 必须落盘；`typst compile data/weekly/{week_id}.typ …pdf`
+- 实测：去重主题 **2823**；日帖 374/491/454/390/490/531/668
+- 与 ai-news-factory：**周 PDF 落盘后再开视频流水线**；批抓阶段只保留一个 Playwright
+
+**版本**：15.3.0 → 15.4.0
 
 ### v15.2.0 (2026-07-17)
 基于 2026-07-17 全量日报实战优化：

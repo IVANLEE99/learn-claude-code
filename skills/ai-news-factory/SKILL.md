@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.7.0
+version: 3.8.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.7.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.8.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -399,6 +399,11 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 ```
 
 **Step 1.3**: 用户确认选择要制作视频的事件（建议 4-6 个）。
+
+**⚡ 免确认模式（v3.8.0）**：用户消息含「事件按推荐自动选定 / 不用再确认 / 权限给足直接跑 / 不要中途确认」时：
+- 自动按评分取 TOP 事件（日报 4–6 / 周报 5–6 / 月报 4 趋势）
+- **跳过** Step 1.3 人工确认与 Phase 2 脚本人工审核展示等待
+- 仍须：去重、灰渠道配额、Step 1.6 锚点选题、写 usage-log、平台一律存草稿
 
 **Step 1.3b（v3.4.0 强制）**: 灰色渠道配额 + 传闻跟踪 + 上游字段
 
@@ -1869,118 +1874,169 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png")
 # 重复以上步骤插入多张图片
 ```
 
-#### 12.7 上传封面（已验证流程 v1.9.1 + v3.5.0 降级策略）
+#### 12.7 上传封面（已验证流程 v3.8.0 / 2026-07-19 周报实测）
 
 **🔴 完整推荐流程：先把 `wechat-21-9.png` 插入正文，再「从正文选择」设封面。**  
 **🔴 降级原则（v3.5.0）**：封面步骤不稳定时，**不得阻塞整篇草稿**——先保证标题/作者/正文/原创/「保存为草稿」成功；封面可留草稿箱手补。
 
+**🔴 v3.8.0 铁律（今日踩坑总结）**：
+1. 裁剪弹窗标题是 **「编辑封面」**，主按钮文案是 **「确认」**（不是「完成」；页面上另有 **disabled 的「确定」**，`getByRole/locator('确定')` 会点到灰按钮失败）
+2. **裁剪弹窗打开期间禁止 `Escape`**——会关掉未确认的裁剪，封面不落库
+3. 验收必须以 **`.js_cover_preview_new` 的 `display===block` 且 `background-image` 含 `mmbiz`/`qpic`** 为准；`#js_cover_area` 内文案可仍残留「拖拽或选择封面」
+4. 点「确认」后 **轮询 3–8s**：`dialogOpen=false && previewDisplay=block && hasQpic` 才算成功；失败再点一次「确认」
+5. 「从正文选择」节点常 `display:none`：先 hover `#js_cover_area .js_cover_btn_area`，再 **强制 style 显示** 后点 `.js_selectCoverFromContent`
+6. 缩略图是 **`span.appmsg_content_img.cover` + background-image**，优先点带 `mmbiz` 背景的 `.appmsg_content_img_item`
+7. 已有草稿可直接打开：`appmsg?…&appmsgid={id}&token=…`（比「新的创作」稳）
+
 ```
 # 步骤1：上传封面图到正文（工具栏「图片」→「本地上传」）
-# 先 focus 正文（第二个 ProseMirror / contenteditable）
 browser_run_code_unsafe("""async (page) => {
+  const cover = '/ABS/PATH/wechat-21-9.png'; // 周报用 weekly/.../wechat-21-9.png
   const prose = document.querySelectorAll('.ProseMirror');
-  if (prose[1]) prose[1].click();
-  return 'body focused';
-}""")
-
-# 点击工具栏「图片」（顶部 y < 50），再点「本地上传」
-browser_run_code_unsafe("""async (page) => {
+  if (prose[1]) { prose[1].click(); }
+  // 工具栏「图片」→「本地上传」
   await page.evaluate(() => {
     for (const item of document.querySelectorAll('li, a, span')) {
-      if (item.textContent.trim() === '图片' && item.offsetParent !== null) {
-        const rect = item.getBoundingClientRect();
-        if (rect.y < 50 && rect.y > 0) { item.click(); return; }
+      if ((item.textContent || '').trim() === '图片' && item.offsetParent) {
+        const r = item.getBoundingClientRect();
+        if (r.y < 80 && r.y >= 0) { item.click(); return; }
       }
     }
   });
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(600);
   await page.evaluate(() => {
     for (const item of document.querySelectorAll('*')) {
-      if (item.textContent.trim() === '本地上传' && item.offsetParent !== null) {
+      if ((item.textContent || '').trim() === '本地上传' && item.offsetParent) {
         item.click(); return;
       }
     }
   });
-  return 'clicked 本地上传';
-}""")
-
-# 优先 file_upload；若 chooser 未弹出，直接 setInputFiles（v3.5.0）
-# browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-21-9.png")
-browser_run_code_unsafe("""async (page) => {
-  const cover = 'news-pipeline/YYYY-MM-DD/wechat-21-9.png';
-  // 等 chooser 由 MCP browser_file_upload 处理；此处作兜底
+  await page.waitForTimeout(800);
   const input = await page.$('input[type="file"][accept*="image"]')
     || (await page.$$('input[type="file"]'))[0];
-  if (input) {
-    await input.setInputFiles(cover);
-    return 'setInputFiles ok';
-  }
-  return 'no file input — use browser_file_upload';
-}""")
-# 上传后可能出现「图片上传中，请稍后」弹窗：等 8–15s，必要时 Escape
-
-# 步骤2：Hover「拖拽或选择封面」，显示选项菜单（直接 click 常无效）
-browser_hover(target={拖拽或选择封面ref})
-
-# 步骤3：「从正文选择」必须用 class，不要文本匹配
-browser_evaluate("""() => {
-  const btn = document.querySelector('.js_selectCoverFromContent');
-  if (btn) { btn.click(); return 'clicked'; }
-  return 'not found';
+  if (input) await input.setInputFiles(cover);
+  await page.waitForTimeout(8000); // 等上传完成
+  await page.keyboard.press('Escape'); // 仅关「上传中」类挡层，此时还没开裁剪弹窗
+  return 'body image ready';
 }""")
 
-# 步骤4：弹窗中点图（出现勾选）→「下一步」→ 裁剪「确认/确定」
+# 步骤2+3+4：hover 封面 → 从正文选择 → 选图 → 下一步 → 等待「编辑封面」→ 点「确认」→ 轮询 preview
 browser_run_code_unsafe("""async (page) => {
-  await page.mouse.click(313, 340);
-  await page.waitForTimeout(800);
+  const coverLoc = page.locator('#js_cover_area .js_cover_btn_area').first();
+  await coverLoc.scrollIntoViewIfNeeded();
+  await coverLoc.hover({ force: true });
+  await page.waitForTimeout(700);
+  // 强制显示「从正文选择」
   await page.evaluate(() => {
-    for (const btn of document.querySelectorAll('button, a')) {
-      if ((btn.textContent || '').trim() === '下一步' && btn.offsetParent) {
-        btn.click(); return;
-      }
+    const btn = document.querySelector('.js_selectCoverFromContent');
+    if (btn) {
+      btn.style.cssText = 'display:block!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;';
+      btn.click();
     }
   });
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(1500);
+  // 优先点带 mmbiz 背景的正文图
   await page.evaluate(() => {
-    for (const btn of document.querySelectorAll('button, a')) {
-      const t = (btn.textContent || '').trim();
-      if ((t === '确定' || t === '确认') && btn.offsetParent) {
-        btn.click(); return;
-      }
+    const items = Array.from(document.querySelectorAll('.appmsg_content_img_item'));
+    for (const el of items) {
+      const span = el.querySelector('.appmsg_content_img.cover, span');
+      const bg = span ? getComputedStyle(span).backgroundImage : '';
+      if (bg.includes('mmbiz')) { el.click(); return; }
     }
+    if (items[0]) items[0].click();
   });
-  return 'cover crop done';
-}""")
-
-# 步骤5：保存前处理弹窗 + 保存草稿（v3.3.0 / v3.5.0）
-browser_run_code_unsafe("""async (page) => {
-  await page.waitForTimeout(8000);
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(400);
-  await page.keyboard.press('Escape');
   await page.waitForTimeout(500);
+  // 下一步
   await page.evaluate(() => {
     for (const btn of document.querySelectorAll('button')) {
-      if ((btn.textContent || '').trim() === '保存为草稿' && btn.offsetParent) {
+      if ((btn.textContent || '').trim() === '下一步' && btn.className.includes('primary') && btn.offsetParent) {
         btn.click(); return;
       }
+    }
+  });
+  // 等裁剪弹窗「编辑封面」
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(500);
+    const open = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('.weui-desktop-dialog__title'))
+        .some(el => (el.textContent || '').includes('编辑封面') && el.getBoundingClientRect().width > 50));
+    if (open) break;
+  }
+  await page.waitForTimeout(1200);
+  // 等「确认」可点（非 disabled）再 click —— 禁止点「确定」灰按钮
+  for (let i = 0; i < 20; i++) {
+    const ok = await page.evaluate(() => {
+      for (const btn of document.querySelectorAll('button')) {
+        if ((btn.textContent || '').trim() === '确认'
+          && btn.className.includes('weui-desktop-btn_primary')
+          && !btn.className.includes('disabled') && !btn.disabled) {
+          btn.click(); return true;
+        }
+      }
+      return false;
+    });
+    if (ok) break;
+    await page.waitForTimeout(400);
+  }
+  // 轮询验收（关键！点确认后可能要 1–4s 才写 preview）
+  for (let i = 0; i < 10; i++) {
+    await page.waitForTimeout(800);
+    const st = await page.evaluate(() => {
+      const dialogOpen = Array.from(document.querySelectorAll('.weui-desktop-dialog__title'))
+        .some(el => (el.textContent || '').includes('编辑封面') && el.getBoundingClientRect().width > 50);
+      const preview = document.querySelector('.js_cover_preview_new');
+      const style = preview ? getComputedStyle(preview) : null;
+      const bg = style ? style.backgroundImage : '';
+      return {
+        dialogOpen,
+        display: style ? style.display : null,
+        hasQpic: /mmbiz|qpic/.test(bg),
+        bg: bg.slice(0, 120)
+      };
+    });
+    if (st.hasQpic && st.display === 'block' && !st.dialogOpen) return { ok: true, st };
+    if (st.dialogOpen) {
+      // 再点一次确认，仍不要 Escape
+      await page.evaluate(() => {
+        for (const btn of document.querySelectorAll('button')) {
+          if ((btn.textContent || '').trim() === '确认' && btn.className.includes('primary')
+            && !btn.className.includes('disabled')) btn.click();
+        }
+      });
+    }
+  }
+  return { ok: false };
+}""")
+
+# 步骤5：封面已生效后再保存草稿（此时才允许 Escape）
+browser_run_code_unsafe("""async (page) => {
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    for (const btn of document.querySelectorAll('button')) {
+      if ((btn.textContent || '').trim() === '保存为草稿' && btn.offsetParent) btn.click();
     }
   });
   await page.waitForTimeout(3000);
-  // 成功信号：URL 出现 appmsgid= 或文案含「已保存」/「草稿」
-  return { url: page.url(), savedHint: document.body.innerText.includes('已保存')
-    || page.url().includes('appmsgid=') };
+  const preview = document.querySelector('.js_cover_preview_new');
+  const bg = preview ? getComputedStyle(preview).backgroundImage : '';
+  return {
+    appmsgid: page.url().includes('appmsgid='),
+    coverOk: /mmbiz|qpic/.test(bg) && getComputedStyle(preview).display === 'block',
+    bg: bg.slice(0, 160)
+  };
 }""")
 ```
 
-**🔴 关键经验（v1.9.1 + v3.5.0）：**
+**🔴 关键经验（v1.9.1 + v3.5.0 + v3.8.0）：**
 1. **必须先「图片」→「本地上传」把 `wechat-21-9.png` 插入正文**，「从正文选择」才可用  
 2. **file chooser 不弹时**：`input[type=file][accept*=image].setInputFiles(path)` 可兜底  
-3. **Hover 封面区**才出菜单；「从正文选择」只用 **`.js_selectCoverFromContent`**  
-4. **「图片上传中」弹窗会挡住「保存为草稿」**：等上传完 + Escape，再保存（见 v3.3.0）  
-5. **封面失败不阻塞草稿**：标题/正文/原创/保存优先；封面可草稿箱补  
-6. **保存成功判定**：URL 含 `appmsgid=` 比「已保存」文案更稳（文案有时不出现）  
-7. 裁剪一般无需手调，点「确认/确定」即可
+3. **Hover 封面区**才出菜单；「从正文选择」用 **`.js_selectCoverFromContent` + 强制显示**  
+4. **「图片上传中」弹窗会挡住保存**：等上传完 + Escape（仅此阶段）  
+5. **封面失败不阻塞草稿**：标题/正文/原创/保存优先  
+6. **保存成功判定**：`appmsgid=` 比「已保存」文案更稳  
+7. **裁剪确认 =「确认」**；禁用点 disabled「确定」  
+8. **验收 = preview `display:block` + `mmbiz` 背景**，勿被残留「拖拽或选择封面」文案误导
 
 #### 12.8 设置原创声明（已验证 v1.9.1）
 
@@ -2927,28 +2983,32 @@ await titleInput.fill('代码偷吃SSD+豆包对标Opus｜今日羊报AI');
 
 **解决**：创建文章后，切换到最新标签页（index 最大的）。关闭其他重复标签页。
 
-### 🔴 公众号封面上传正确流程（v1.9.1 更新 / v3.7.0 强化 2026-07-18）
-**问题**：坐标点击、innerHTML 注入不可靠；弹窗缩略图常为 **background-image 的 span**，不是 `<img>`，`querySelectorAll('img')` 会漏选。
+### 🔴 公众号封面上传正确流程（v1.9.1 / v3.7.0 / **v3.8.0 2026-07-19 闭环**）
+**问题**：坐标点击、innerHTML 注入不可靠；弹窗缩略图常为 **background-image 的 span**，不是 `<img>`；裁剪页有 **disabled「确定」** 干扰；过早 Escape 会取消裁剪。
 
 **已验证的正确流程（优先「从正文选择」）**：
-1. Focus 正文：`.ProseMirror` 第二个 / `[contenteditable=true][2]`
-2. 工具栏「图片」→「本地上传」→ `input[accept*=image].setInputFiles(wechat-21-9.png)`
-3. 等「图片上传中」消失；必要时 Escape
-4. 封面区 `#js_cover_area` scrollIntoView → hover `.js_cover_btn_area`（仅 click 常不出菜单）
-5. **`.js_selectCoverFromContent`** 点「从正文选择」（class，勿靠文本）
-6. 在弹窗中点 **`.appmsg_content_img_item` / `span.appmsg_content_img.cover`**（背景图缩略图，约 115×115）出现勾选 → **「下一步」** → 裁剪页 **「确认」**（不是「完成」）
-7. 「保存为草稿」；成功信号：`appmsgid=` 仍在 URL，或底栏「已保存」
+1. Focus 正文：`.ProseMirror` 第二个
+2. 工具栏「图片」→「本地上传」→ `setInputFiles(wechat-21-9.png)` → 等 8s → Escape 关上传挡层
+3. `#js_cover_area` scrollIntoView → **hover** `.js_cover_btn_area`
+4. **强制显示**后点 **`.js_selectCoverFromContent`**
+5. 点带 `mmbiz` 背景的 **`.appmsg_content_img_item`** → **「下一步」**
+6. 等待弹窗标题 **「编辑封面」** → 点 **enabled「确认」**（`weui-desktop-btn_primary` 且非 disabled）
+7. **轮询**：`dialogOpen=false` 且 `.js_cover_preview_new{display:block; background-image: url(...mmbiz...)}`  
+8. 再「保存为草稿」（`appmsgid=` 保留即可）
 
 **验收（DOM，比肉眼稳）**：
-- `#js_cover_area .js_cover_preview_new` 的 `background-image` 含 `mmbiz.qpic.cn` / `mmbiz_jpg`
-- 左侧内容卡片已显示封面图
-- 允许仍短暂残留「拖拽或选择封面」文案节点，以 **preview 背景图** 为准
+- `.js_cover_preview_new`：`display === 'block'` 且 `background-image` 含 `mmbiz.qpic.cn` / `mmbiz_jpg`
+- 允许 `#js_cover_area` 文案仍含「拖拽或选择封面」——**以 preview 背景为准**
+- 失败信号：`previewDisplay:none` 或 bg 为空 / `url("")`
 
-**备选**：直接对封面相关 `input[type=file][accept*=image]` `setInputFiles`；若只改了 preview 背景但 UI 文案未切换，仍以 preview URL + 左卡缩略图为准。
+**禁止**：
+- 裁剪弹窗打开时 `Escape` / 点「取消」
+- 用 `locator('button:has-text("确定")')` 当确认（会命中 disabled）
+- 只看「已保存」文案（常不出现）
 
 **关键点**：
 - 必须先把图插入正文，再「从正文选择」
-- 缩略图可能不是 `<img>`，用 class + 坐标点击
+- 缩略图不是 `<img>`，用 class + bg 筛选
 - 裁剪确认按钮文案是 **「确认」**
 - 封面失败不阻塞草稿（v3.5.0）
 
@@ -4076,12 +4136,61 @@ await inputs[1].setInputFiles('cover.png');
 **解决**：点 `.appmsg_content_img_item`；裁剪点「确认」；验收看 `#js_cover_area .js_cover_preview_new` 的 background-image。
 **How to apply:** Phase 12 封面。
 
+### 🔴 公众号裁剪确认与验收（v3.8.0 / 2026-07-19 周报实测）
+**问题**：
+1. 点「下一步」后进入「编辑封面」，页面同时存在 **disabled「确定」** 与 **「确认」**；点错会超时/`Element is not visible`
+2. 过早 `Escape` 会关掉裁剪，preview 仍为 `display:none` / `url("")`
+3. 成功后文案区仍可能显示「拖拽或选择封面」，误判为失败
+
+**解决**：
+1. 只点 `button` 文本精确为 **「确认」** 且 `class` 含 `weui-desktop-btn_primary`、**不含** `disabled`
+2. 裁剪弹窗打开期间 **禁止 Escape**
+3. 成功条件：`.js_cover_preview_new` 的 `display==='block'` 且 `background-image` 含 `mmbiz`/`qpic`；可再存草稿（`appmsgid=` 保留）
+4. 已有草稿用 `appmsg?…&appmsgid=` 直达编辑，比「新的创作」稳
+
+**Why:** 2026-07-19 周报 `appmsgid=100000479` 封面链路完整复现后才闭环。  
+**How to apply:** Phase 12.7 一律走 v3.8.0 轮询验收。
+
+### 🟡 B站存草稿成功信号（v3.8.0 / 2026-07-19）
+**问题**：第二次再找「存草稿」按钮可能 `not found`，但 URL 已跳到 `upload-manager/article?group=draft`。
+**解决**：以 **URL 含 `group=draft`** 为成功；中文文件名先复制为 `upload-weekly-w28.mp4` / `upload-YYYY-MM-DD.mp4` 再传。
+**How to apply:** Phase 11 末检查 URL。
+
+### 🟡 视频号未登录不阻塞流水线（v3.8.0 / 2026-07-19）
+**问题**：`channels.weixin.qq.com` 落到 `login.html` 扫码页时整条流水线挂起。
+**解决**：检测到登录页 → 标记 `channels: login_required`，继续抖音/公众号；向用户汇报需扫码后手传。
+**How to apply:** Phase 13 开头检查 title/URL 含 login。
+
+### 🟡 图片/TTS API 读 settings.env（v3.8.0）
+**问题**：主会话手写 API 易漏备选；打印 key 被安全策略拦截。
+**解决**：从 `~/.claude/settings.json` 的 `env` 读 `GEN_IMG_API_URL`/`GEN_IMG_API_KEY`（及 `_001/_002`）、`MIMO_TTS_API_URL`/`MIMO_TTS_API_KEY`；脚本内 fallback，**日志禁止打印 key**。
+**How to apply:** Phase 5/6 生成脚本。
+
 ### 🟡 抖音竖封面必须带日期（v3.7.0 / 2026-07-18）
 **问题**：竖封面生成失败时用 scene 图回退，用户反馈「上面没日期」。
 **解决**：`douyin-vertical-3-4.png` 失败必须重试 GEN_IMG，prompt 强制底部 `YYYY-MM-DD` 与右上「今日羊报 AI」；禁止无品牌 scene 回退当封面。
 **How to apply:** Phase 5.5 / 14.6。
 
 ## 更新日志
+
+### v3.8.0（2026-07-19）
+基于 **2026-W28 全量周报视频流水线**（`data/weekly/2026-W28.pdf` 落盘后 → 视频 → 多平台草稿）实战：
+
+**公众号封面闭环（核心）**
+- 裁剪弹窗标题「编辑封面」；主按钮 **「确认」**（避开 disabled「确定」）
+- 裁剪中禁止 Escape；点确认后 **轮询 preview `display:block` + mmbiz 背景**
+- 从正文选择：hover + 强制显示 `.js_selectCoverFromContent`；缩略图优先 mmbiz 背景 item
+- 直达草稿：`appmsgid=` 编辑 URL；`wechat-21-9.png` 必须先入正文
+
+**上传与联跑**
+- B站：中文文件名 → 简单路径；成功看 `group=draft`
+- 视频号：未登录（login.html）不阻塞其他平台
+- 用户说「事件按推荐自动选定 / 不用确认」时，Phase 1/2 **跳过人工确认**（仍写 usage-log）
+- GEN_IMG / MIMO_TTS 从 settings.env 读取 + fallback；禁止日志打印 key
+
+**实测数据**
+- 周报视频约 155.8s / 8 场景；公众号草稿 `appmsgid=100000479` 封面 `mmbiz_jpg` 验收通过
+- **版本**：3.7.0 → 3.8.0
 
 ### v3.7.0（2026-07-18）
 - **浏览器 Profile 铁律**：MCP 与独立 Playwright 互斥；scoped pkill；解释「退出」原因
