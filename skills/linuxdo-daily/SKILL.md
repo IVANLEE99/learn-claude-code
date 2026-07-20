@@ -1,13 +1,14 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 15.4.0
+version: 15.5.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v15.5 核心改进（2026-07-20 日报实测）**：批抓 MCP 长静默超时；`ERR_ABORTED` 重置浏览器重试；batch 污染校验；`retryN` 批号；中断后续跑；实测 364 帖 / 26+ 批。
 > **v15.4 核心改进（2026-07-19 周报实测）**：周聚合浏览量解析 `6.2k/万`；同 id 保留更高 views；`week_posts[id]['_day']` 记录来源日；周 PDF/Typst 同步落盘；与 ai-news-factory 衔接时 **PDF 落盘后再开视频**。
 > **v15.3 核心改进（2026-07-18 实测）**：全量 19 批 / 531 帖闭环；Playwright 批抓与「浏览器退出」解耦说明；batch 保存脚本固化；二次过滤后再 Writer；与 ai-news-factory 衔接时避免边抓边开多浏览器。
 > **v15.2 核心改进（2026-07-17 实测）**：固定项目 cwd；「过滤后全部抓取完」冷启动协议；`crawl_queue`/`batch_ids` 预切分；transcript 回填 batch；正文二次公益站过滤；列表页 views 合并；全量规模 500+ 帖。
@@ -530,10 +531,62 @@ if deleted_count > 0:
 
 #### 速度优化
 
-- **每批 30 帖**：处理完一批后保存到 `data/batch_browser_N.json`
+- **每批 10–15 帖优先（v15.5）**：全量日长批（30）易触发 MCP 静默超时；稳定优先用 15，失败多时降到 10
 - **每帖等待 2 秒**：帖子页加载后等待 2 秒再提取
 - **帖间等待 1.5 秒**：避免触发限流（不回列表页，直接导航下一帖）
-- **超时 20 秒**：单帖加载超时 20 秒则跳过
+- **超时 20 秒**：单帖加载超时 20 秒则记 `error`，不中断整批
+
+#### ⚠️ 批抓稳定性（v15.5 / 2026-07-20 实测）
+
+**1) MCP 长静默超时**
+
+`browser_run_code_unsafe` 一批跑很久无 progress 时，可能被 abort（实测约 **2491s**）：
+> `MCP server "playwright" tool "browser_run_code_unsafe" sent no response or progress for 2491s; aborting`
+
+**处理**：
+- 优先 **缩小批次**（15 → 10），不要硬等超时
+- 若可改 MCP 配置：为 playwright 设更大 per-server `timeout`（ms）
+- 超时后：**不要当成功**；检查是否已有 partial 结果可回填；否则重跑该批
+
+**2) `net::ERR_ABORTED` 批量失败**
+
+`page.goto` 连续 `ERR_ABORTED` 时浏览器会话多半已坏。
+
+**处理**：
+1. 立即把本批结果落盘（含 `error` 项）
+2. `pkill -f "mcp-chrome"` → `sleep 2` → `browser_navigate https://linux.do` 重建会话
+3. 失败 id 写入 `data/rem_batch_*.json` 或单独 `batch_browser_retryN.json`
+4. 重试成功后再并入 daily；**禁止**把全 error 批当 valid
+
+**3) batch 文件污染**
+
+旧 session / 错 cwd / 回填脚本把 **别日或非本批** 内容写入 `batch_browser_0.json` 等。
+
+**合并前必须校验**每个 batch：
+```python
+import json, glob
+for f in sorted(glob.glob('data/batch_browser_*.json')):
+    d = json.load(open(f))
+    results = d.get('results', d if isinstance(d, list) else [])
+    if not results:
+        print('EMPTY', f); continue
+    # 本批应含 title 或 error；全空 / 结构不对则删除重抓
+    ok = sum(1 for r in results if r.get('title') or r.get('error'))
+    print(f, 'n=', len(results), 'okish=', ok)
+```
+污染文件：**删除** → 重算剩余 queue → 只抓缺失 id。
+
+**4) 重试批命名**
+
+`batch_browser_retry1.json` 等 **非纯数字** 批号合法。`save_latest_batch.py` 解析 batch 号时勿 `int()` 强制数字文件名；合并用 `glob('data/batch_browser_*.json')`。
+
+**5) 中断 / 工具丢失后续跑**
+
+用户 interrupt 或会话只剩部分工具时：
+1. 先 `ls data/batch_browser_*.json` + 是否已有 `data/daily/{date}.json`
+2. 有 batch 无 daily → **只合并 + Writer**，不冷启动清 queue
+3. 有 daily+pdf → 直接交 ai-news-factory
+4. **禁止**在工具不全时重写「手动 bash 教程」假装完成；恢复 MCP/Bash 后再跑
 
 ### 1.7 数据保存
 
@@ -1287,9 +1340,11 @@ Typst 特殊字符转义规则与日报一致（`$` → `\$`、`#` → `\#`、�
 - **Cloudflare 挑战**：标题含 "Just a moment" 则等待 15 秒；预授权可点击验证区域（v14）。**0717 实测有时可直接进入站点**——以 `document.title` 为准
 - **不回列表页**：直接从一个帖子导航到下一个帖子
 - **每帖等待 1.5 秒** + 页载后 2 秒：避免触发限流
-- **每批 30 帖**：处理完一批保存，继续下一批
+- **每批 10–15 帖（v15.5 默认）**：全量稳定优先；标准模式仍可 30
 - **提前终止**：仅标准日报可在 120–150 帖后进入生成
-- **全量抓取**：「全部抓取 / 过滤后全部抓取完」必须跑完 queue；规模可达 **15–20 批 / 450–550 帖**（0717：517→18 批→490 有效）
+- **全量抓取**：「全部抓取 / 过滤后全部抓取完」必须跑完 queue；规模约 **20–30 批 / 350–550 帖**（0717：517→490 有效；**0720：26+ 批 → 364 有效**）
+- **单 Playwright**：批抓阶段禁止并行独立 Chrome 抢 profile（v15.3）
+- **ERR_ABORTED / MCP 静默超时**：重置浏览器、缩小批次、retry 批号（v15.5）
 
 ### ⚠️ 反检测规则（必须遵守）
 1. **逐帖浏览间隔 1.5 秒**
@@ -1297,11 +1352,12 @@ Typst 特殊字符转义规则与日报一致（`$` → `\$`、`#` → `\#`、�
 3. **检测官方警告**：内容含 "异常的自动化访问行为" 或 "系统检测到" 则立即停止
 4. **429 限流处理**：等待 30 秒后重试
 5. **单帖 timeout 20s**：超时记 `error`，不中断整批
+6. **连续 ERR_ABORTED ≥3**：停止本批，重置 MCP 浏览器后再抓（v15.5）
 
-### ⚠️ 旧 Batch 文件清理（v14 + v15.2）
+### ⚠️ 旧 Batch 文件清理（v14 + v15.2 + v15.5）
 跨 session 时 `batch_browser_*` / `batch_ids_*` / `rem_batch_*` 会污染合并计数。
 
-**每次抓取前删除**（必须在项目 cwd）：
+**冷启动抓取前删除**（必须在项目 cwd；**续跑有今日 batch 时不要清**）：
 ```python
 import glob, os
 os.chdir('/Users/youngsdream/Documents/learn-claude-code')
@@ -1316,13 +1372,16 @@ for pat in patterns:
 print(f'cleaned {n} files')
 ```
 
-### 数据保存（v12 + v15.2）
-- **每批立即保存**到 `data/batch_browser_N.json`
+**合并前污染检查（v15.5）**：空 results / 结构异常 / mtime 明显非本 run → 删除该文件并只补抓缺失 id。
+
+### 数据保存（v12 + v15.2 + v15.5）
+- **每批立即保存**到 `data/batch_browser_N.json`（或 `batch_browser_retryN.json`）
 - **不要等所有批次完成再保存**
 - **空帖过滤**：无 `title` 不入库
 - **大结果回填**：无法管道时用 session transcript / `save_latest_batch.py`（v15.2）
 - **合并时二次公益站过滤**（标题+标签+content 前 200 字）
 - **列表 views 合并**：帖子页 views=0 时用 crawl_queue 列表 views
+- **error 帖单独重试**：不要把 error 计入 with_content
 
 ### 日期与过滤
 
@@ -1348,6 +1407,25 @@ print(f'cleaned {n} files')
 ---
 
 ## 更新日志
+
+### v15.5.0 (2026-07-20)
+基于 **2026-07-20 全量日报**（过滤后全部抓取完）实战：
+
+**批抓稳定性**
+- MCP `browser_run_code_unsafe` 长静默可被 abort（~2491s）→ 默认批大小 **10–15**，必要时加 MCP timeout
+- 连续 `page.goto` **`net::ERR_ABORTED`** → 立即落盘 → 重置 mcp-chrome → `rem_batch` / `batch_browser_retryN` 重试
+- 合并前 **batch 污染校验**（旧 session 可写坏 `batch_browser_0.json`）
+- 批号支持 `retry1` 等非纯数字；合并用 glob，勿假设 `int(N)` 文件名
+
+**续跑协议**
+- 中断后以磁盘为准：有 batch 无 daily → 合并；有 daily+pdf → 交视频；工具不全时不假装完成
+
+**实测数据（2026-07-20）**
+- 全量约 26 批 + retry → `data/daily/2026-07-20.json` **total=364 / with_content=364**
+- 报告：`data/reports/2026-07-20.md` + press + typ + pdf
+- PDF 落盘后接 ai-news-factory 免视频
+
+**版本**：15.4.0 → 15.5.0
 
 ### v15.4.0 (2026-07-19)
 基于 **2026-W28 周报**（07-13~07-19）实战：

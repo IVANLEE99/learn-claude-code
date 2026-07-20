@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.8.0
+version: 3.9.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.8.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.9.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -400,9 +400,10 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 
 **Step 1.3**: 用户确认选择要制作视频的事件（建议 4-6 个）。
 
-**⚡ 免确认模式（v3.8.0）**：用户消息含「事件按推荐自动选定 / 不用再确认 / 权限给足直接跑 / 不要中途确认」时：
+**⚡ 免确认模式（v3.8.0 / v3.9.0）**：用户消息含「事件按推荐自动选定 / 不用再确认 / 权限给足直接跑 / 不要中途确认」时：
 - 自动按评分取 TOP 事件（日报 4–6 / 周报 5–6 / 月报 4 趋势）
-- **跳过** Step 1.3 人工确认与 Phase 2 脚本人工审核展示等待
+- **跳过** Step 1.3 人工确认与 Phase 2 脚本人工审核**展示等待**
+- **仍须内部执行审核清单**（禁止词/黑名单/灰渠道/锚点 eligible/3W），结果写入 `news-pipeline/{date}/scripts/review-checklist.md`（或 script 文末自检表），**禁止**只口头说「结构合格」而不落盘
 - 仍须：去重、灰渠道配额、Step 1.6 锚点选题、写 usage-log、平台一律存草稿
 
 **Step 1.3b（v3.4.0 强制）**: 灰色渠道配额 + 传闻跟踪 + 上游字段
@@ -1061,6 +1062,12 @@ bash ~/Documents/learn-claude-code/skills/mimo-tts/scripts/mimo-tts.sh \
 - 环境变量方式可以绕过 settings.json 配置问题
 - TTS API URL 和 Key 通常与图片 API 不同，需要单独收集
 - 如果用户未提供 TTS API 信息，先检查 settings.json，再询问用户
+
+**🔴 TTS 网关 503（v3.9.0 / 2026-07-20 实测）**：
+- 响应 `gateway_error` / `没有可用的内网节点` / HTTP 503 时：**指数退避重试**（如 5s → 15s → 30s，最多 3–5 次）
+- 仍失败：切换 settings.env 中的 fallback 节点（`MIMO_TTS_API_URL` 备选）
+- **禁止**把空 wav / 半截 scene 当成功；每 scene 校验文件大小与时长
+- 日志只记 status/body 摘要，**禁止打印 API key**
 
 #### 6.2 备选方案：Python 直接调用 MiMo TTS API
 
@@ -3600,6 +3607,22 @@ browser_run_code_unsafe("""async (page) => {
 # 方法2：如果没有「暂存离开」，直接关闭标签页（视频已自动保存）
 ```
 
+**🔴 草稿落库验收（v3.9.0 / 2026-07-20 实测 — 不可省略）**
+
+仅点「暂存离开」**不够**。0720 首次上传后用户在创作者中心**看不到草稿**，必须重传。
+
+**成功信号（满足其一即可记 ✅）**：
+1. 回到上传页出现 **「继续编辑」** / 「上次未发布」类恢复入口
+2. **内容管理 / 草稿**列表可见当日标题关键词（如 `Fable` / `通义` / `2026-07-20`）
+3. 打开 `post/video?enter_from=draft` 时**表单非空**（标题长度 > 0，有视频预览）
+
+**失败信号 → 必须整段重传（视频+标题+双封面+暂存）**：
+- 内容管理无当日条目
+- 上传页无「继续编辑」
+- `enter_from=draft` 打开是空表单（标题 0/30）
+
+**竖封面文件**：只使用本期 `news-pipeline/{date}/douyin-vertical-3-4.png`（含日期+品牌）。用户指定该文件时**禁止**用 scene 图或其它日期文件替代。
+
 #### 抖音上传组件操作总结（v3.6.0 实测）
 
 | 组件 | 类型 | 操作方式 | 可靠性 |
@@ -4156,10 +4179,41 @@ await inputs[1].setInputFiles('cover.png');
 **解决**：以 **URL 含 `group=draft`** 为成功；中文文件名先复制为 `upload-weekly-w28.mp4` / `upload-YYYY-MM-DD.mp4` 再传。
 **How to apply:** Phase 11 末检查 URL。
 
-### 🟡 视频号未登录不阻塞流水线（v3.8.0 / 2026-07-19）
+### 🟡 视频号未登录不阻塞流水线（v3.8.0 / v3.9.0）
 **问题**：`channels.weixin.qq.com` 落到 `login.html` 扫码页时整条流水线挂起。
 **解决**：检测到登录页 → 标记 `channels: login_required`，继续抖音/公众号；向用户汇报需扫码后手传。
 **How to apply:** Phase 13 开头检查 title/URL 含 login。
+
+### 🔴 视频号「用户已登录」≠ MCP 已登录（v3.9.0 / 2026-07-20 实测）
+**问题**：用户说「视频号已经登录」后，MCP 仍停在 `login.html`；`net::ERR_HTTP_RESPONSE_CODE_FAILURE`；QR iframe「加载失败，点击重试」；在错误 profile 上反复刷新二维码空转。
+**解决**：
+1. **以 MCP 页为准**：`page.url()` 含 `login.html` 或标题/正文含「登录视频号助手」→ 仍 `login_required`
+2. 用户本机其它 Chrome 已登录**不能**代替 MCP profile
+3. 需要扫码时：在 **MCP 当前标签**出码，等 URL 离开 login 再上传；二维码加载失败可 `page.reload` 1–2 次，仍失败则写 `upload-status.md` 为 ⏭ 并**停止空转**
+4. `ERR_HTTP_RESPONSE_CODE_FAILURE` 于 channels 域名：等 5–10s 重试 1 次；持续失败按未登录跳过
+5. 禁止生成大量无执行价值的 `CHANNELS_*_GUIDE.md` 代替实际上传
+**Why:** 0720 多轮「已经登录继续上传」仍卡 QR，浪费会话。
+**How to apply:** Phase 13 入口硬判定 + upload-status 落盘。
+
+### 🔴 抖音「暂存」不等于草稿可见（v3.9.0 / 2026-07-20）
+**问题**：上传页操作看似成功，内容管理无当日草稿；用户反馈「抖音没看到草稿」。
+**解决**：以「继续编辑」/ 内容管理标题 / draft 页非空表单验收；失败整段重传。
+**How to apply:** Phase 14.10 验收三信号。
+
+### 🔴 竖封面必须用当期 douyin-vertical-3-4.png（v3.9.0）
+**问题**：补封面时用错图或比例不对，用户明确「竖封面3:4 不对」。
+**解决**：只认 `news-pipeline/{date}/douyin-vertical-3-4.png`；上传后仍要 `missingV=false`。
+**How to apply:** Phase 5.5 生成 + 14.6/14.10 补传。
+
+### 🟡 TTS 503 网关无节点（v3.9.0）
+**问题**：`gateway_error: 没有可用的内网节点`。
+**解决**：退避重试 + fallback URL；校验 wav 非空。
+**How to apply:** Phase 6。
+
+### 🟡 免确认仍要审核落盘（v3.9.0）
+**问题**：免确认时只自检不落盘，用户追问「有没有通过审核清单」。
+**解决**：写 `review-checklist.md` 或 script 文末表。
+**How to apply:** Phase 2 末。
 
 ### 🟡 图片/TTS API 读 settings.env（v3.8.0）
 **问题**：主会话手写 API 易漏备选；打印 key 被安全策略拦截。
@@ -4172,6 +4226,25 @@ await inputs[1].setInputFiles('cover.png');
 **How to apply:** Phase 5.5 / 14.6。
 
 ## 更新日志
+
+### v3.9.0（2026-07-20）
+基于 **2026-07-20 日报视频**（`data/reports/2026-07-20.md` → 成片 → 多平台草稿）实战：
+
+**抖音草稿闭环（核心）**
+- 「暂存离开」后必须验收：继续编辑 / 内容管理可见 / draft 表单非空
+- 验收失败 → 视频+元数据+双封面整段重传，不可只报「已点暂存」
+- 竖封面只使用当期 `douyin-vertical-3-4.png`（用户可点名文件）
+
+**视频号登录判定**
+- 用户口头「已登录」无效；以 MCP `login.html` 为准
+- QR 加载失败有限次重试后跳过；禁止空转刷码与堆指南 md
+
+**其它**
+- TTS `gateway_error`/503：退避 + fallback + wav 校验
+- 免确认：内部审核清单仍须执行并落盘
+- 实测：B站 `group=draft` ✅；公众号 `appmsgid=100000487` ✅；抖音重传后草稿可恢复 ✅；视频号 login_required ⏭
+- 视频：`news-pipeline/2026-07-20/video/【今日羊报AI】Fable永久留Max，通义3.8预览上线 | 2026-07-20.mp4`（≈172.8s）
+- **版本**：3.8.0 → 3.9.0
 
 ### v3.8.0（2026-07-19）
 基于 **2026-W28 全量周报视频流水线**（`data/weekly/2026-W28.pdf` 落盘后 → 视频 → 多平台草稿）实战：
