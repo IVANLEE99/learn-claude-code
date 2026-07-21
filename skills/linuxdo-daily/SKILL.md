@@ -1,13 +1,14 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 15.5.0
+version: 15.6.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v15.6 核心改进（2026-07-21 日报实测）**：冷启动禁 `rm` 旧 batch（改 **archive 挪移**）；预生成 `data/crawl_js/batch_N.js` + `filename` 批抓；`concepts.json` 是 `{concepts:[]}` 根对象；候选去重读 `data['concepts']`；实测 469 队列 → **447** 有效 / 32 批。
 > **v15.5 核心改进（2026-07-20 日报实测）**：批抓 MCP 长静默超时；`ERR_ABORTED` 重置浏览器重试；batch 污染校验；`retryN` 批号；中断后续跑；实测 364 帖 / 26+ 批。
 > **v15.4 核心改进（2026-07-19 周报实测）**：周聚合浏览量解析 `6.2k/万`；同 id 保留更高 views；`week_posts[id]['_day']` 记录来源日；周 PDF/Typst 同步落盘；与 ai-news-factory 衔接时 **PDF 落盘后再开视频**。
 > **v15.3 核心改进（2026-07-18 实测）**：全量 19 批 / 531 帖闭环；Playwright 批抓与「浏览器退出」解耦说明；batch 保存脚本固化；二次过滤后再 Writer；与 ai-news-factory 衔接时避免边抓边开多浏览器。
@@ -841,6 +842,19 @@ ai-concept-bank/extracts/term-frequency.json
 
 #### 5. 追加最小 candidate
 
+> **v15.6 结构铁律**：`ai-concept-bank/concepts.json` 根对象是  
+> `{ "version", "updated", "reuse_gap_days", "narrator_agent", "corpus_extract", "concepts": [ ... ] }`，  
+> **不是**顶层数组。读写必须：
+> ```python
+> data = json.load(open('ai-concept-bank/concepts.json'))
+> concepts = data['concepts']          # list
+> # ... append / mutate concepts ...
+> data['concepts'] = concepts
+> data['updated'] = 'YYYY-MM-DD'
+> json.dump(data, open(...), ensure_ascii=False, indent=2)
+> ```
+> 禁止 `for c in json.load(...): c.get(...)`（根是 dict 会 AttributeError）。
+
 通过去重与过滤后，只能追加最小 `candidate`，字段模板：
 
 ```json
@@ -894,11 +908,12 @@ ai-concept-bank/extracts/term-frequency.json
 
 ```bash
 jq empty ai-concept-bank/concepts.json
+jq '.concepts | type' ai-concept-bank/concepts.json   # 期望 "array"
 ```
 
 并人工确认：
 
-- 新增条目 `status == "candidate"`。
+- 新增条目在 `data['concepts']` 内，且 `status == "candidate"`。
 - `script_15s == ""`。
 - `script_meta.reviewed == false`。
 - 未修改 `usage-log.json`。
@@ -1354,33 +1369,39 @@ Typst 特殊字符转义规则与日报一致（`$` → `\$`、`#` → `\#`、�
 5. **单帖 timeout 20s**：超时记 `error`，不中断整批
 6. **连续 ERR_ABORTED ≥3**：停止本批，重置 MCP 浏览器后再抓（v15.5）
 
-### ⚠️ 旧 Batch 文件清理（v14 + v15.2 + v15.5）
+### ⚠️ 旧 Batch 文件清理（v14 + v15.2 + v15.5 + **v15.6**）
 跨 session 时 `batch_browser_*` / `batch_ids_*` / `rem_batch_*` 会污染合并计数。
 
-**冷启动抓取前删除**（必须在项目 cwd；**续跑有今日 batch 时不要清**）：
-```python
-import glob, os
-os.chdir('/Users/youngsdream/Documents/learn-claude-code')
-patterns = [
-    'data/batch_browser_*.json', 'data/batch_ids_*.json',
-    'data/rem_batch_*.json', 'data/crawl_queue*.json', 'data/remaining_todo.json',
-]
-n = 0
-for pat in patterns:
-    for f in glob.glob(pat):
-        os.remove(f); n += 1
-print(f'cleaned {n} files')
+**冷启动抓取前处理**（必须在项目 cwd；**续跑有今日 batch 时不要清**）：
+
+> **v15.6 / 2026-07-21**：自动模式可能 **拒绝 `os.remove`/`rm` 清理既有 `data/batch_*`**（不可逆破坏策略）。  
+> **正确做法：挪移归档，不要删。**
+
+```bash
+# 推荐：归档昨日/跨 session 中间文件（不删）
+mkdir -p data/archive/$(date +%Y-%m-%d)-prev
+for f in data/batch_browser_*.json data/batch_ids_*.json data/rem_batch_*.json \
+         data/crawl_queue*.json data/remaining_todo.json \
+         data/source_a.json data/source_b.json data/merged_ids.json; do
+  [ -e "$f" ] && mv "$f" data/archive/$(date +%Y-%m-%d)-prev/
+done
+ls data/batch_browser_*.json 2>/dev/null | wc -l   # 期望 0
 ```
 
-**合并前污染检查（v15.5）**：空 results / 结构异常 / mtime 明显非本 run → 删除该文件并只补抓缺失 id。
+仅在用户明确授权删除时，才可用 `os.remove` 脚本。
 
-### 数据保存（v12 + v15.2 + v15.5）
+**合并前污染检查（v15.5）**：空 results / 结构异常 / mtime 明显非本 run → 挪到 archive 并只补抓缺失 id。
+
+### 数据保存（v12 + v15.2 + v15.5 + v15.6）
 - **每批立即保存**到 `data/batch_browser_N.json`（或 `batch_browser_retryN.json`）
 - **不要等所有批次完成再保存**
 - **空帖过滤**：无 `title` 不入库
 - **大结果回填**：无法管道时用 session transcript / `save_latest_batch.py`（v15.2）
+- **预生成批抓脚本（v15.6）**：队列切分后写 `data/crawl_js/batch_{N}.js`，用  
+  `browser_run_code_unsafe(filename=".../data/crawl_js/batch_N.js")`  
+  减少每批粘贴 15 个 ID 的 token 开销；仍每批后 `python3 data/save_latest_batch.py N`
 - **合并时二次公益站过滤**（标题+标签+content 前 200 字）
-- **列表 views 合并**：帖子页 views=0 时用 crawl_queue 列表 views
+- **列表 views 合并**：帖子页 views=0 时用 crawl_queue 列表 views（解析 `k/万`）
 - **error 帖单独重试**：不要把 error 计入 with_content
 
 ### 日期与过滤
@@ -1407,6 +1428,29 @@ print(f'cleaned {n} files')
 ---
 
 ## 更新日志
+
+### v15.6.0 (2026-07-21)
+基于 **2026-07-21 全量日报**（过滤后全部抓取完 + 视频工厂联跑）实战：
+
+**冷启动与权限**
+- 自动模式拒绝 `rm`/`os.remove` 清理既有 `data/batch_*` → **改 archive 挪移**（`data/archive/YYYY-MM-DD-prev/`）
+- 同时归档 `source_a/b.json`、`merged_ids.json`、`crawl_queue*`，避免跨日污染
+
+**批抓效率**
+- 32h 后写 `data/batch_ids_N.json`（默认每批 **15**）
+- 预生成 `data/crawl_js/batch_N.js`，用 `browser_run_code_unsafe(filename=...)` 跑批，减 token
+- 每批仍 `python3 data/save_latest_batch.py N`；合并前校验 + 二次公益站过滤 + k/万 views
+
+**概念库**
+- `concepts.json` 根为 **dict**（`data['concepts']` 才是数组）；候选入库/usage-log 必须按此结构
+- 去重/append 后 `jq empty` + 确认 `status=candidate` / 空口播 / 未改 ready
+
+**实测数据（2026-07-21）**
+- Source A 929 + Source B AI 456 → 合并 1321 → 历史+列表过滤 → 32h **469** → 正文 32 批 → 二次过滤 **447**
+- `data/daily/2026-07-21.json` total=447 / with_content=447
+- 报告：md + press + typ + pdf；PDF 后接 ai-news-factory
+
+**版本**：15.5.0 → 15.6.0
 
 ### v15.5.0 (2026-07-20)
 基于 **2026-07-20 全量日报**（过滤后全部抓取完）实战：

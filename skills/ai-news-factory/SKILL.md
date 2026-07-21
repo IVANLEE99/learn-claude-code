@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.9.0
+version: 3.10.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.9.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.10.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -930,12 +930,15 @@ curl -s --resolve api.luka77.cc:443:$REAL_IP ...
 
 **注意事项**:
 - 使用 `1536x1024` (16:9 横屏)
-- **必须逐张生成**：API 有并发限制
+- **必须逐张生成**：API 有并发限制；**禁止**整段 7 张串行卡在一个 10 分钟 Bash 超时里——可按 scene 拆命令或仅生成缺失文件
 - **必须从 JSON 文件读取 Prompt**，不能用简化版本
 - 每张图片生成后重试一次（如果失败）
 - **HTTP API 优先**：HTTP（如 luka77）比 HTTPS 更稳定，避免 SSL/DNS 问题
-- **超时设置**：图片生成可能需要 30-120 秒，`--max-time` 设为 300
+- **超时设置**：图片生成可能需要 30-180 秒，单张 curl `--max-time` 建议 90–180；整批脚本 timeout 按张数放大
 - **DNS 劫持**：如遇连接超时，用 `nslookup` + `curl --resolve` 绕过
+- **🔴 settings.env 多端点（v3.10 / 2026-07-21）**：从 `~/.claude/settings.json` 的 `env` 读取 `GEN_IMG_API_URL`/`GEN_IMG_API_KEY` 及 `_001`/`_002` fallback；日志**禁止**打印 key（只允许 set/empty/len）
+- **🔴 部分成功续跑**：已存在且 >5KB 的 `sceneN.png` 跳过；失败端点记 http 状态后切下一端点
+- **scene CTA 兜底**：最后 1 张若全端点失败，可用昨日同结构 CTA 图或 scene1 临时顶替，**封面竖图禁止**此兜底
 
 ### Phase 5.5: 异步生成封面（与 TTS 并行）
 
@@ -4225,7 +4228,55 @@ await inputs[1].setInputFiles('cover.png');
 **解决**：`douyin-vertical-3-4.png` 失败必须重试 GEN_IMG，prompt 强制底部 `YYYY-MM-DD` 与右上「今日羊报 AI」；禁止无品牌 scene 回退当封面。
 **How to apply:** Phase 5.5 / 14.6。
 
+
+### 🔴 GEN_IMG 多端点与 Bash 超时（v3.10.0 / 2026-07-21）
+**问题**：7 张 scene 串行生成时 Bash 默认 10 分钟超时被 kill（exit 143）；部分端点 HTTP 000/502。
+**解决**：
+1. 从 settings.env 组装 endpoint 列表 `['', '_001', '_002']`，逐张生成、已有文件跳过
+2. 单张 max-time 90–180s；整批超时按张数放大或拆成多条 Bash
+3. 日志只打印 `set/empty/len`，禁止打印 key 前缀（安全策略会拦）
+4. CTA scene 可兜底；`douyin-vertical-3-4.png` 必须当期生成成功
+**How to apply:** Phase 5 / 5.5
+
+### 🔴 usage-log 与 concepts 根结构（v3.10.0 / 2026-07-21）
+**问题**：把 `concepts.json` 当 list 迭代 → `AttributeError: str has no get`。
+**解决**：`data = json.load(...); concepts = data['concepts']`；usage-log 可能是 list 或 `{entries:[]}`，append 时兼容两种。
+**How to apply:** Step 1.6 / Phase 2 写 log
+
+### 🟡 公众号草稿成功但封面未闭环（v3.10.0 / 2026-07-21）
+**问题**：`appmsgid=` 已出现，`.js_cover_preview_new` 仍 `display:none`。
+**解决**：草稿优先；封面失败写 upload-status「可手补 wechat-21-9.png」；不因封面阻塞汇报成功。
+**How to apply:** Phase 12 + upload-status.md
+
+### 🟡 B站存草稿后 URL 已是 group=draft（v3.10 再确认）
+**问题**：脚本 `draftClicked=false` 但 URL 已跳转草稿箱。
+**解决**：以 `group=draft` 为成功信号，不依赖按钮二次查找。
+**How to apply:** Phase 11
+
 ## 更新日志
+
+### v3.10.0（2026-07-21）
+基于 **2026-07-21 日报视频**（daily 447 → 成片 ≈143s → 多平台草稿）实战：
+
+**图片生成稳定性（核心）**
+- GEN_IMG 多端点 `URL/KEY` + `_001/_002` fallback；禁止日志打印 key
+- 按 scene 跳过已生成文件；避免整批 10 分钟 Bash 超时（exit 143）
+- CTA 图可临时兜底；竖封面必须当期 `douyin-vertical-3-4.png`
+
+**概念锚点 / usage-log**
+- `concepts.json` 根 dict + `concepts[]`；usage-log 兼容 list / `{entries}`
+- 免确认仍写 `review-checklist.md` + usage-log
+
+**上传验收**
+- B站：`group=draft` ✅（0721）
+- 抖音：暂存后「继续编辑」+ 无竖/双封面缺失 ✅
+- 公众号：`appmsgid=100000492` ✅（封面可手补）
+- 视频号：`login.html` → login_required ⏭（不空转）
+
+**实测**
+- 视频：`news-pipeline/2026-07-21/video/【今日羊报AI】Kimi停售与开源争议，国模密集冲榜 | 2026-07-21.mp4`（≈143.1s / 7 场景）
+- 锚点：`rate_limit`
+- **版本**：3.9.0 → 3.10.0
 
 ### v3.9.0（2026-07-20）
 基于 **2026-07-20 日报视频**（`data/reports/2026-07-20.md` → 成片 → 多平台草稿）实战：
