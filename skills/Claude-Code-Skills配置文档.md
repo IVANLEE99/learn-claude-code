@@ -202,6 +202,48 @@ Skills（技能）是 Claude Code 的扩展机制，允许定义可复用的专�
 
 ---
 
+### 12. gen-img — 图片生成
+
+| 属性 | 说明 |
+|------|------|
+| **功能** | OpenAI 兼容 Images API 文生图，保存本地 |
+| **触发关键词** | 画图、生图、生成图片、generate image |
+| **详细文档** | [Claude-Code-Skill详解-gen-img.md](Claude-Code-Skill详解-gen-img.md) |
+
+```bash
+# 手动调用脚本
+bash ~/.claude/skills/gen-img/scripts/gen-img.sh "一只戴墨镜的猫"
+
+# 自动触发
+# 说 "画一张赛博朋克城市夜景" 即可
+```
+
+---
+
+### 13. post-to-img — 帖子/长文 → 手账信息图
+
+| 属性 | 说明 |
+|------|------|
+| **功能** | 论坛帖子/长文结构化为日系手账风信息图，经 gen-img 出图 |
+| **触发关键词** | 帖子生图、长文转图、复盘信息图、手账风海报、linux.do 帖子配图 |
+| **依赖** | gen-img（唯一生图出口） |
+| **详细文档** | [Claude-Code-Skill详解-post-to-img.md](Claude-Code-Skill详解-post-to-img.md) |
+
+```bash
+# 自动触发
+# 说 "把 https://linux.do/t/topic/2609603 做成手账风信息图" 即可
+
+# 手动：拼 prompt + 出图
+python3 ~/.claude/skills/post-to-img/scripts/build_prompt.py \
+  --content generated-images/post-to-img/<slug>/content.json \
+  --preset kawaii-journal \
+  --out-dir generated-images/post-to-img/<slug>
+bash ~/.claude/skills/post-to-img/scripts/run_gen.sh \
+  generated-images/post-to-img/<slug>
+```
+
+---
+
 ## Skills 对比总览
 
 | Skill | 类型 | 手动调用 | 自动触发 | 适用场景 |
@@ -217,6 +259,8 @@ Skills（技能）是 Claude Code 的扩展机制，允许定义可复用的专�
 | init | 文档 | `/init` | 初始化相关 | 项目文档 |
 | review | 代码 | `/review` | 审查相关 | PR 审查 |
 | security-review | 代码 | `/security-review` | 安全相关 | 安全检查 |
+| gen-img | 媒体 | 脚本 / 自然语言 | 画图/生图 | 文生图 |
+| post-to-img | 媒体 | 脚本 / 自然语言 | 帖子生图/手账海报 | 长文→信息图 |
 
 ---
 
@@ -235,6 +279,7 @@ Skills（技能）是 Claude Code 的扩展机制，允许定义可复用的专�
 3. **配置管理**：使用 `update-config` 和 `fewer-permission-prompts` 优化工作流
 4. **安全检查**：合并前使用 `security-review` 进行安全审查
 5. **定时任务**：使用 `loop` 实现定时检查和轮询
+6. **文生图**：自由描述用 `gen-img`；帖子/长文信息图用 `post-to-img`（内部仍调 gen-img）
 
 ---
 
@@ -243,3 +288,5 @@ Skills（技能）是 Claude Code 的扩展机制，允许定义可复用的专�
 - Claude Code 官方文档: https://docs.anthropic.com/en/docs/claude-code
 - GitHub API 文档: https://docs.github.com/en/rest
 - MCP 协议: https://modelcontextprotocol.io
+- gen-img 详解: [Claude-Code-Skill详解-gen-img.md](Claude-Code-Skill详解-gen-img.md)
+- post-to-img 详解: [Claude-Code-Skill详解-post-to-img.md](Claude-Code-Skill详解-post-to-img.md)
