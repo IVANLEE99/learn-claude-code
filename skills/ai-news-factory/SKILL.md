@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.10.0
+version: 3.12.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.10.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.12.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -1592,7 +1592,7 @@ const inputs = await page.$$('input[type="file"]');
 await inputs[1].setInputFiles('cover.png');
 ```
 
-**⚠️ 实测经验（v3.3.0）**：B站封面自动上传成功率不稳定，建议跳过自动封面，提示用户在草稿箱中手动上传封面。
+**⚠️ 实测经验（v3.3.0 / 被 v3.12.0 覆盖）**：旧文档建议「封面不稳就跳过」。**2026-07-25 实测可自动补封面**，见下方 v3.12 草稿编辑页流程；首次投稿若封面失败，可**打开草稿再补**，不要默认放弃。
 
 #### 11.4 设置创作声明（自定义下拉框）
 
@@ -4253,9 +4253,124 @@ await inputs[1].setInputFiles('cover.png');
 **解决**：以 `group=draft` 为成功信号，不依赖按钮二次查找。
 **How to apply:** Phase 11
 
+
+### 🔴 GEN_IMG 整批 10 分钟超时后必须续跑缺失文件（v3.11.0 / 2026-07-22）
+**问题**：scene1–7 已生成，`cover.png` 也生成了，但后续 4 张平台封面还没跑完时 Bash 10min kill（exit 143）。若当成「封面全失败」会重跑 scene 浪费时间。
+**解决**：
+1. 超时后立刻 `ls` 校验每张 `sceneN.png` / 平台封面的 size（>5KB 视为成功）
+2. **只补缺失文件**，禁止无条件重跑已有 scene
+3. 封面可单独一条 Bash；scene 与 cover 可拆开执行
+**How to apply:** Phase 5 / 5.5 超时后先盘点再补齐
+
+### 🔴 抖音 filechooser 链式打断后的恢复（v3.11.0 / 2026-07-22）
+**问题**：横/竖封面 `waitForEvent('filechooser')` 与后续步骤叠在一次长 `run_code` 里时，工具层会停在「Modal state: File chooser」，后续逻辑不返回；取消 chooser 后可能落到 `upload?enter_from=publish` 空页。
+**解决**：
+1. **横封面 / 竖封面上传拆成独立短步骤**；出现 File chooser 模态时用 `browser_file_upload(paths=[...])` 处理，禁止在同一长脚本里「点上传+等 chooser+再点完成」硬串
+2. 若被带回上传页：以是否出现 **「你还有上次未发布的视频 / 继续编辑」** 判定草稿已落库
+3. 点「继续编辑」验收描述/视频是否在；封面缺失可手补，不必整段重传视频
+**How to apply:** Phase 14 封面步骤拆分 + 上传页「继续编辑」验收
+
+### 🔴 公众号「新的创作」菜单项 class（v3.11.0 / 2026-07-22）
+**问题**：只点 heading「新的创作」不会开文章；文本匹配「文章」易命中别处。
+**解决**：`.new-creation__menu-item` 第一项即「文章」，`menu[0].click()` 会新开 `appmsg_edit` 标签；再 `browser_tabs(select, index=最新)`。
+**How to apply:** Phase 12.2
+
+### 🟡 浏览器崩溃后先重建再上传（v3.11.0）
+**问题**：连续 `mp.weixin` / `channels` / `baidu` 导航 Timeout 后，下一调用报 `Target page, context or browser has been closed`。
+**解决**：`pkill -f mcp-chrome` → sleep → 重新 `browser_navigate`；不要在 closed target 上继续堆工具调用。
+**How to apply:** 任意 Phase 11–14 导航连环超时后
+
+### 🔴 TTS 禁止在工具参数里硬编码 API Key（v3.12.0 / 2026-07-25）
+**问题**：Bash/Python 参数文本含 `sk-mimo-…` 时，自动模式安全分类器 **Credential Leakage** 直接拒绝；会话卡住。
+**解决**：
+1. 写 `news-pipeline/{date}/scripts/gen_tts.py`：**只从** `MIMO_TTS_API_*` 环境变量、`~/.claude/settings.json` env、或历史 `news-pipeline/*/scripts/gen-tts.sh` 的 export **读 key**（脚本内解析，**不**把 key 写进工具调用文本）
+2. 运行：`python3 news-pipeline/{date}/scripts/gen_tts.py`（日志只打 `keylen` / 端点名）
+3. endpoint 列表：历史 gen-tts 的 URL + `token-plan-cn` / `token-plan-ams` fallback；失败退避重试
+4. 每 scene 校验 wav `>5KB`；已存在则跳过
+**Why:** 0725 首次 TTS 因硬编码 key 被拒。
+**How to apply:** Phase 6 一律「脚本读凭据」，禁止 `export MIMO_TTS_API_KEY=sk-...` 出现在工具参数里。
+
+### 🔴 B站草稿补封面闭环（v3.12.0 / 2026-07-25）
+**问题**：首次投稿常跳过封面；用户追问「封面上传了吗」。
+**解决（草稿编辑页）**：
+1. 打开 `upload-manager/article?group=draft` → 找当日标题 → `frame?type=draft&draftId=...`
+2. 点 **「封面设置」**（`.cover-empty` / 坐标点封面框）→ 弹窗 **「封面制作」**
+3. 弹窗内出现 `input[accept="image/png, image/jpeg"]`（可有多个：4:3 / 16:9）→ **`setInputFiles(bilibili-4-3.png)`**（16:9 可用 `cover.png`）
+4. 点底部 **「完成」**（y 较大的主按钮）
+5. 验收：`.cover-empty` / `.cover-empty.failed` **消失**；`.cover-img` 的 `background-image` 含 `archive.biliimg.com` 或 `bfs/archive`
+6. 再点 **「存草稿」**；成功信号仍是 URL `group=draft`
+**标题坑**：稿件标题 `maxLength=80`，用 **原生 `HTMLInputElement` value setter** + `input` 事件，不要只靠 React 假赋值。
+**Why:** 0725 草稿 `draftId=3685995` 封面补传成功。
+**How to apply:** Phase 11 首次可先存草稿；缺封面则走本闭环，**不要**默认「建议用户手传」就结束。
+
+### 🔴 视频号独立脚本 vs MCP Profile 锁（v3.12.0 / 2026-07-25）
+**问题**：MCP 仍占用 `mcp-chrome-*` 时，`channels_upload.js` 报 `Failed to create a ProcessSingleton` / SingletonLock。
+**解决**：
+1. 跑独立脚本前：`browser_close` 或 `pkill -f mcp-chrome` → `rm -f …/SingletonLock` → sleep 2
+2. 再用 `NODE_PATH=…/node_modules` + `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=…/Google Chrome for Testing` 启动
+3. 若 URL 仍是 `login.html` → `login_required` ⏭，写 `upload-status.md`，**禁止空转扫码循环**
+**Why:** 0725 视频号先被 profile 锁挡住，释放后仍 login_required。
+**How to apply:** Phase 13 独立脚本路径；与文首「浏览器 Profile 铁律」一致。
+
+### 🟡 抖音 filechooser + 暂存验收（v3.12 再确认 / 0725）
+- 视频 / 横竖封面：`waitForEvent` 触发后工具层停在 **File chooser** → 下一步必须 `browser_file_upload(paths=[...])`
+- 暂存后回上传页：出现 **「你还有上次未发布的视频…继续编辑」** 即草稿 ✅
+
+### 🟡 公众号 appmsgid 验收（v3.12 再确认 / 0725）
+- `.new-creation__menu-item[0]` 开文章；标题/作者/正文 ProseMirror 注入；**保存为草稿** 后 URL 含 `appmsgid=`（0725：`100000512`）
+- 封面可手补，不阻塞草稿成功
+
 ## 更新日志
 
+### v3.12.0（2026-07-25）
+基于 **2026-07-25 日报视频**（daily **455** → 成片 ≈**149.8s** → 多平台草稿）实战：
+
+**TTS**
+- 禁止工具参数硬编码 `sk-`；`gen_tts.py` 从 env / 历史 gen-tts.sh 读 key；7 scene 全成功
+
+**成片**
+- 字幕：加权字符 + silencedetect；Composition/Root 时长与 ffprobe 对齐
+- 视频：`news-pipeline/2026-07-25/video/【今日羊报AI】OpenAI沙箱越狱进立法，DeepSeek新思维链现身 | 2026-07-25.mp4`（≈149.8s / 14.4MB）
+
+**B站**
+- 存草稿 `group=draft`；**草稿页补封面**（封面制作弹窗 + image accept setInputFiles + 完成）→ `archive.biliimg.com` 预览 + 再存草稿
+
+**抖音**
+- filechooser 拆步；暂存后「继续编辑」验收 ✅
+
+**公众号**
+- `appmsgid=100000512` ✅（封面可手补）
+
+**视频号**
+- 独立脚本前必须释放 MCP profile；`login.html` → login_required ⏭
+
+**版本**：3.11.0 → 3.12.0
+
+### v3.11.0（2026-07-22）
+基于 **2026-07-22 日报视频**（daily 440 → 成片 ≈140.7s → 多平台草稿）实战：
+
+**图片续跑**
+- GEN_IMG 整批 10min 超时后：**盘点已有 scene/cover，只补缺失**（0722：scene1–7 + cover 已齐，再补 4 平台封面）
+
+**抖音上传**
+- filechooser 模态打断长脚本 → **封面上传拆短步骤** + `browser_file_upload`
+- 草稿验收：`继续编辑` 弹窗 + 描述含当日关键词（0722 描述已落库）
+
+**公众号**
+- `.new-creation__menu-item` 点「文章」新开标签；`appmsgid=100000497` 草稿成功
+- 封面仍可手补（不阻塞）
+
+**视频号**
+- `login.html` + 二维码「加载失败」→ `login_required` ⏭，不空转
+
+**实测**
+- 视频：`news-pipeline/2026-07-22/video/【今日羊报AI】OpenAI沙箱长程模型停用，Gemini3.6Flash全量上线 | 2026-07-22.mp4`（≈140.7s / 7 场景）
+- 锚点：`multimodal`
+- B站 `group=draft` ✅；抖音继续编辑 ✅；公众号 `appmsgid=100000497` ✅；视频号 login_required ⏭
+- **版本**：3.10.0 → 3.11.0
+
 ### v3.10.0（2026-07-21）
+
 基于 **2026-07-21 日报视频**（daily 447 → 成片 ≈143s → 多平台草稿）实战：
 
 **图片生成稳定性（核心）**
