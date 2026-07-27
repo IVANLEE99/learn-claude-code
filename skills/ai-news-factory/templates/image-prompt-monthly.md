@@ -30,7 +30,7 @@
 ### Prompt 模板
 
 ```
-A professional Chinese AI news studio scene {场景编号}. A male news anchor in a dark navy suit sits at a modern curved news desk. Behind him are multiple large display screens showing: {本月该趋势相关的视觉元素，如 OpenAI/Codex logo、智谱 GLM 标识、Anthropic Claude 图标、AI编程工具拼贴}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI月报" on the first line and "AI 月度盘点" on the second line in large white Chinese characters. In the bottom center, display the month "{YYYY-MM}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, 16:9 aspect ratio.
+A professional Chinese AI news studio scene {场景编号}. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens showing: {本月该趋势相关的视觉元素，如 OpenAI/Codex logo、智谱 GLM 标识、Anthropic Claude 图标、AI编程工具拼贴，勿放可识别真人}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI月报" on the first line and "AI 月度盘点" on the second line in large white Chinese characters. In the bottom center, display the month "{YYYY-MM}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, 16:9 aspect ratio. No people, no faces.
 ```
 
 ---

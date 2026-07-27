@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.12.0
+version: 3.13.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.12.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.13.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -175,7 +175,7 @@ version: 3.12.0
 ### 周报封面提示词模板
 
 ```
-A professional Chinese AI news studio weekly cover image. A male news anchor in a dark navy suit sits at a modern curved news desk. Behind him are multiple large display screens showing: {本周核心事件相关视觉元素}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI周刊" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date range "{YYYY-MM-DD} ~ {YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, 16:9 aspect ratio.
+A professional Chinese AI news studio weekly cover image. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens showing: {本周核心事件相关视觉元素，产品/抽象图形}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI周刊" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date range "{YYYY-MM-DD} ~ {YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, 16:9 aspect ratio. No people, no faces.
 ```
 
 ### 周报过滤规则
@@ -227,7 +227,7 @@ A professional Chinese AI news studio weekly cover image. A male news anchor in 
 ### 月报封面提示词模板
 
 ```
-A professional Chinese AI news studio monthly cover image. A male news anchor in a dark navy suit sits at a modern curved news desk. Behind him are multiple large display screens arranged in a grid showing: {本月4条趋势相关视觉元素，如 OpenAI/Codex logo、智谱 GLM 标识、Anthropic Claude 图标、AI编程工具拼贴}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI月报" on the first line and "AI 月度盘点" on the second line in large white Chinese characters. In the bottom center, display the month "{YYYY-MM}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, {ratio} aspect ratio.
+A professional Chinese AI news studio monthly cover image. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本月4条趋势相关视觉元素，如 OpenAI/Codex logo、智谱 GLM 标识、Anthropic Claude 图标、AI编程工具拼贴，勿放可识别真人}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI月报" on the first line and "AI 月度盘点" on the second line in large white Chinese characters. In the bottom center, display the month "{YYYY-MM}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces.
 ```
 
 ### 月报选材规则（最关键，区别于周报）
@@ -406,11 +406,15 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 - **仍须内部执行审核清单**（禁止词/黑名单/灰渠道/锚点 eligible/3W），结果写入 `news-pipeline/{date}/scripts/review-checklist.md`（或 script 文末自检表），**禁止**只口头说「结构合格」而不落盘
 - 仍须：去重、灰渠道配额、Step 1.6 锚点选题、写 usage-log、平台一律存草稿
 
-**Step 1.3b（v3.4.0 强制）**: 灰色渠道配额 + 传闻跟踪 + 上游字段
+**Step 1.3b（v3.4.0 强制）**: 灰色渠道配额 + 传闻跟踪 + 上游字段 + **平台选题档（v3.13）**
 
 1. **消费上游字段**：若报告条目含 `可信度：` / `技术锚点：` / `影响：`，在候选列表中一并展示，排序说明可引用。  
 2. **灰色渠道配额**：命中封号/KYC/土尼菲区/反代/号池/白嫖/薅羊毛/接码/代充等 → 本期独立成段 **≤1 条**；措辞改「风控/账号资产风险」，**禁止**教绕法（见 `templates/credibility-and-tone.md`）。  
 3. **传闻跟踪**：同一未确认事件前 3 天已报且无新事实 → 不单独成段或改一句状态更新。  
+4. **🔴 平台选题 A/B 档（v3.13.0）**：按 `templates/platform-compliance.md` 划分。  
+   - **A 档**（默认可上视频号/公众号）：产品发布、官方定价、开发者工具、开源项目、可复现实测  
+   - **B 档**（默认**不上**公众号/视频号标题与主推段落）：融资/IPO/外泄/监管/政策联署/「切断」类对抗叙事  
+   - 视频成片若保留 B 档：整期 ≤1 条，且标题禁止 B 档关键词；公众号图文默认删除全部 B 档  
 
 **Step 1.4**: 🔴 重要程度排序（精简模式必做；标准模式可选展示）
 
@@ -646,21 +650,33 @@ Hook：[破格类型] {开场，用破格制造意外感}
 4. **每条是否有 What / So What / Now What / 可信度**  
 5. **灰色渠道是否 ≤1 且无操作指南**  
 6. **专业锚点**：仅 1 个（或 SKIP）且 **eligible**（ready+narrator+reviewed）  
-7. **平台合规审查**  
+7. **平台合规审查**（见下方 + **`templates/platform-compliance.md`**，必须落盘）  
 
-### 🔴 平台合规审查规则（v2.8.0 新增）
+### 🔴 平台合规审查规则（v2.8.0 + **v3.13.0 强化**）
 
-**依据**：`bilibili社区公约.md`、`微信公众平台运营规范.md`、`微信视频号运营规范.md`、`抖音社区自律公约.md`
+**完整细则（选题 A/B 档、封面铁律、公众号/视频号专项、落盘清单）**：  
+→ **`templates/platform-compliance.md`**（Phase 1 选材 + Phase 2 脚本/标题/封面 + Phase 10 发布文案强制对照）
+
+**依据文件**（skill 根目录）：
+
+| 文件 | 平台 |
+|------|------|
+| `bilibili社区公约.md` | B站 |
+| `抖音社区自律公约.md` | 抖音 |
+| `微信公众平台运营规范.md` | 公众号 |
+| `微信视频号运营规范.md` | 视频号 |
+| **`微信视频号常见的不合规频道内容概述.md`** | **视频号限流/违规类型细目** |
+| **`微信公众号互联网用户公众账号信息服务管理规定.md`** | **公众号删文常见法规依据** |
 
 #### 禁止内容（所有平台通用）
 
 | 类别 | 具体规则 | 示例 |
 |------|---------|------|
 | 🚫 政治敏感 | 不得危害国家安全、泄露国家秘密、颠覆国家政权 | 不评论政治事件 |
-| 🚫 虚假信息 | 不得散播虚假、谣言等不实、误导性信息 | 新闻必须有来源依据 |
+| 🚫 虚假信息 | 不得散播虚假、谣言等不实、误导性信息 | 新闻必须有来源依据；媒体内容禁止标题写成定论 |
 | 🚫 暴力恐怖 | 不得展示血腥、惊悚、残忍等致人身心不适的内容 | 不描述暴力细节 |
 | 🚫 低俗内容 | 不得含有性暗示、性挑逗等易使人产生性联想的内容 | 不使用低俗用语 |
-| 🚫 侵权内容 | 不得侵犯他人名誉权、肖像权、隐私权、著作权等 | 引用需注明出处 |
+| 🚫 侵权内容 | 不得侵犯他人名誉权、肖像权、隐私权、著作权等 | 引用需注明出处；**慎用 AI 写实真人主播封面** |
 | 🚫 未成年人 | 不得发布有损未成年人身心健康的内容 | 不涉及未成年话题 |
 
 #### 标题规范（所有平台通用）
@@ -670,6 +686,7 @@ Hook：[破格类型] {开场，用破格制造意外感}
 | 🚫 标题党 | 标题必须与内容相符，不得使用夸张、惊悚、极端内容 | 「震惊！」「不看后悔！」 |
 | 🚫 误导性 | 不得使用侮辱、脏话词汇，引人不适 | 不使用攻击性语言 |
 | 🚫 文不对题 | 不得使用与实际内容不符的夸张、诱惑性词汇 | 标题与视频内容不匹配 |
+| 🚫 敏感捆绑 | 勿把融资/政策/外泄与产品发布绑成「同日升温/博弈」标题 | 「…融资同日升温」「开源还要被切断吗」 |
 
 #### 内容规范（各平台特殊要求）
 
@@ -679,11 +696,14 @@ Hook：[破格类型] {开场，用破格制造意外感}
 - 🚫 封面、标题突出展示违规内容将从严处置
 - ✅ AI生成内容需符合社区规范
 
-**视频号特别规则**：
-- 🔴 **AI生成内容必须显著标识**（6.4条）：利用深度学习、虚拟现实、生成式AI等新技术生成或合成的非真实音视频内容，应以显著方式予以标识
+**视频号特别规则**（对照 `微信视频号常见的不合规频道内容概述.md` + 运营规范）：
+- 🔴 **AI生成内容必须显著标识**：生成/合成非真实音视频须显著标识
+- 🔴 **封面禁止写实 AI 主播/假新闻脸**（易触肖像/虚假类；v3.13 封面 prompt 禁用 news anchor 人像）
+- 🚫 融资内幕、政策对抗、「切断/外泄」等话术默认不进短标题/描述（B 档，见 platform-compliance）
 - 🚫 不得使用夸张标题，内容与标题严重不符
 - 🚫 不得发布批量同质化、低质量内容
 - 🚫 视频配音与画面不相关
+- **2026-07-26 实测**：可出现「限制传播 + 存在敏感或者违规内容」且**不给细码** → 按封面 + 政策/融资话术优先整改
 
 **抖音特别规则**：
 - 🚫 不得借助社会负面事件、敏感事件进行商业营销宣传
@@ -691,27 +711,33 @@ Hook：[破格类型] {开场，用破格制造意外感}
 - 🚫 不得发布画质模糊、无完整内容、观感体验差的视频
 - ✅ 鼓励原创、优质内容，建议真人出镜或讲解
 
-**公众号特别规则**：
+**公众号特别规则**（对照 `微信公众号互联网用户公众账号信息服务管理规定.md` + 运营规范）：
+- 🔴 **无互联网新闻信息服务许可时**：避免「每日要闻/采编通稿」体；账号定位用「产品与开发者观察笔记」
+- 🔴 **B 档默认不上公众号**：融资/IPO/外泄/监管/政策联署/开源对抗叙事（见 platform-compliance 选题两档）
+- 🚫 标题禁止把「据媒体报道」写成已官宣定论（对应规定第十八条虚假信息等风险）
 - 🚫 不得发送垃圾信息并存在过度营销行为
 - 🚫 不得发布与账号功能介绍不符的内容
 - ✅ 提供具有价值的、持续性的并与该账号高度相关的内容
+- **2026-07-26 实测**：可「接投诉 + 违反《互联网用户公众账号信息服务管理规定》+ 已删除」且**不写条款号** → 优先按第五条/第十八条（三）（六）整改选题与包装
 
 #### AI News Video 合规检查清单
 
-在生成脚本时，必须逐项检查：
+在生成脚本时，必须逐项检查（**完整勾选表见 `templates/platform-compliance.md` §5，须写入 review-checklist.md**）：
 
 ```
 ✅ 合规检查清单：
-☐ 新闻内容是否有可靠来源？（避免虚假信息）
-☐ 标题是否与视频内容相符？（避免标题党）
+☐ 选题 A/B 档：公众号/视频号未强推融资·政策·外泄·监管类
+☐ 新闻/产品信息是否有可靠来源？媒体内容是否标「据报道/未独立核实」？
+☐ 标题是否与视频内容相符？是否避免「同日升温/切断/外泄/博弈/风暴」？
 ☐ 是否包含暴力、恐怖、低俗内容？（如有则删除或改写）
-☐ 是否涉及政治敏感话题？（如有则回避或中立表述）
-☐ 是否侵犯他人权益？（引用需注明出处）
+☐ 是否涉及政治敏感 / 舆论对抗叙事？（回避或降级，勿上标题）
+☐ 是否侵犯他人权益？（引用注明出处；封面无写实假主播）
 ☐ 是否涉及未成年人？（如有则删除）
-☐ 视频号上传时是否需要AI生成标识？（需要）
+☐ 视频号：AI 生成标识将开启；封面无真人感主播
+☐ 公众号：非新闻采编口吻；B 档已删或未进标题
 ☐ 描述/简介是否与视频内容一致？（避免误导）
-☐ 是否有过度营销内容？（避免广告嫌疑）
-☐ 整体内容是否符合社会主义核心价值观？（基本要求）
+☐ 是否有过度营销 / 强诱导内容？（避免广告与诱导刷量嫌疑）
+☐ 整体内容符合平台生态要求（基本要求）
 ```
 
 #### 违规后果
@@ -719,12 +745,12 @@ Hook：[破格类型] {开场，用破格制造意外感}
 | 平台 | 处罚措施 |
 |------|---------|
 | B站 | 删除下线、限制传播、添加提醒标识、封禁账号 |
-| 视频号 | 减少推荐、删除内容、暂停/终止服务、封禁账号 |
+| 视频号 | 减少推荐、限制传播、删除内容、暂停/终止服务、封禁账号 |
 | 抖音 | 删除/屏蔽内容、暂停/终止账号功能、封禁账号 |
 | 公众号 | 删除内容、限制功能、封禁账号 |
 
-**Why:** 四个平台都有严格的社区公约，违规内容会被删除下线甚至封号，影响账号权重和粉丝信任
-**How to apply:** Phase 2 脚本生成后，必须用此检查清单逐项审查，确保内容合规后再展示给用户
+**Why:** 四个平台都有严格公约/法规；2026-07-26 视频号限流 + 公众号按《公众账号信息服务管理规定》删文，证明仅有通用清单不够，必须区分选题档位与封面策略  
+**How to apply:** Phase 1 划分 A/B 档 → Phase 2 按 `platform-compliance.md` 写脚本/标题/封面 → 审核清单落盘 → 再进入 Phase 3
 
 **🔴 用户审核步骤**：脚本生成后，必须将完整脚本展示给用户审核，获得确认后才能进入 Phase 3。用户可能要求修改某些场景的文案。
 
@@ -957,7 +983,7 @@ API_URL = "用户提供的 API URL"  # 优先使用 eo.ioll.pp.ua
 API_KEY = "用户提供的 API Key"
 MODEL = "gpt-image-2"
 
-COVER_PROMPT = """A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, {ratio} aspect ratio."""
+COVER_PROMPT = """A professional Chinese AI news studio cover image. Empty modern curved news desk in a high-tech studio, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，产品/抽象图形，勿放可识别真人}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces."""
 
 # 封面配置
 COVERS = [
@@ -1389,8 +1415,14 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 | 抖音竖版 | 3:4 | 1152x1536 | `douyin-vertical-3-4.png` | 抖音个人主页卡片 |
 
 **封面模板 Prompt**（按 `REPORT_MODE` 读取品牌名与日期字段，**禁止硬编码**；周报用"羊报AI周刊"+日期范围，月报用"羊报AI月报"+`{YYYY-MM}` 见月报模式章节）：
+
+**🔴 v3.13.0 封面铁律（视频号 2026-07-26 限流教训）**：
+- 🚫 **禁止**写实真人主播 / news anchor / 假新闻脸出镜（易触肖像与虚假内容）
+- ✅ 用抽象科技视觉、产品 UI、芯片/屏幕信息拼贴、无人演播室空镜
+- 完整策略见 `templates/platform-compliance.md` §3.2
+
 ```
-A professional Chinese AI news studio cover image. A male news anchor in a dark navy suit with white shirt and dark tie sits at a modern curved news desk, hands clasped, looking directly at camera with serious expression. Behind him are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic, highly detailed, cinematic lighting, {ratio} aspect ratio.
+A professional Chinese AI news studio cover image. Empty modern curved news desk in a high-tech studio, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，产品/抽象图形，勿放可识别真人}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces.
 ```
 
 输出到 `{REPORT_MODE 对应的输出目录}`（daily `news-pipeline/YYYY-MM-DD/`；weekly `news-pipeline/weekly/...`；monthly `news-pipeline/monthly/YYYY-MM/`）
@@ -4280,6 +4312,19 @@ await inputs[1].setInputFiles('cover.png');
 **解决**：`pkill -f mcp-chrome` → sleep → 重新 `browser_navigate`；不要在 closed target 上继续堆工具调用。
 **How to apply:** 任意 Phase 11–14 导航连环超时后
 
+### 🔴 视频号限流 + 公众号按《公众账号信息服务管理规定》删文（v3.13.0 / 2026-07-26）
+**问题**：
+- 视频号：状态「限制传播」，问题说明「存在敏感或者违规内容」，仅引用《视频号常见违规内容概览》，**无细码**
+- 公众号：通知「接相关投诉，违反《互联网用户公众账号信息服务管理规定》，已删除」，**不写条款号**
+- 同期成片标题/脚本含：Opus5 发布 + DeepSeek 融资外泄/暂停 + 开源「切断」/政策升温；封面为写实 AI 主播
+**解决**：
+1. 强制对照新文件：`微信视频号常见的不合规频道内容概述.md`、`微信公众号互联网用户公众账号信息服务管理规定.md`
+2. 执行 `templates/platform-compliance.md`：选题 A/B 档；公众号默认不上 B 档；封面禁写实主播
+3. 标题禁「同日升温/切断/外泄/博弈/风暴」；媒体信息标题勿写成定论
+4. 视频号打 AI 生成标识；被处置后优先改封面+改文案重发，勿同题硬刚申诉
+**Why:** 0726 双端同时处置，根因是「新闻体包装 + 融资/政策话术 + AI 真人封面」叠加，而非单句脏话/低俗
+**How to apply:** Phase 1–2 / Phase 5.5 / Phase 10；review-checklist 必须含 platform-compliance §5
+
 ### 🔴 TTS 禁止在工具参数里硬编码 API Key（v3.12.0 / 2026-07-25）
 **问题**：Bash/Python 参数文本含 `sk-mimo-…` 时，自动模式安全分类器 **Credential Leakage** 直接拒绝；会话卡住。
 **解决**：
@@ -4321,6 +4366,23 @@ await inputs[1].setInputFiles('cover.png');
 - 封面可手补，不阻塞草稿成功
 
 ## 更新日志
+
+### v3.13.0（2026-07-26）
+基于 **2026-07-26 日报视频发布后处置**（视频号限制传播 + 公众号接投诉删除）实战：
+
+**合规文档**
+- 新增 skill 依据：`微信视频号常见的不合规频道内容概述.md`、`微信公众号互联网用户公众账号信息服务管理规定.md`
+- 新增模板：`templates/platform-compliance.md`（选题 A/B 档、封面铁律、两平台专项、落盘清单）
+- Phase 2「平台合规审查」升级：强制引用上述文件与模板；审核清单扩展
+
+**内容与封面**
+- 封面 prompt **禁止写实 news anchor / 真人主播**；改无人演播室 + 产品/抽象视觉
+- 公众号默认不上融资/政策/外泄/监管对抗类；标题禁「同日升温/切断/外泄」等
+
+**已知坑**
+- 视频号无细码限流、公众号无条款号删文的归因与整改路径
+
+**版本**：3.12.0 → 3.13.0
 
 ### v3.12.0（2026-07-25）
 基于 **2026-07-25 日报视频**（daily **455** → 成片 ≈**149.8s** → 多平台草稿）实战：
