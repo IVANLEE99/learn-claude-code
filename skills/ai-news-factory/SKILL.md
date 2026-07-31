@@ -1,7 +1,7 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.14.0
+version: 3.15.0
 ---
 
 # AI News Factory — 日报/周报/月报短视频自动生成 v3.14.0
@@ -1146,6 +1146,49 @@ def generate_tts(scene):
 ```
 
 **🔴 重要**：预置音色用 `mimo-v2.5-tts` 模型 + `voice: "白桦"`。克隆音色用 `mimo-v2.5-tts-voiceclone` 模型 + base64 音频，但效果差，不推荐。
+
+#### 6.3 兜底方案：edge-tts（v3.15.0 新增，mimo-tts 全部不可用时）
+
+**当 mimo-tts 所有端点（含环境变量配置、settings.env 中的 _001/_002 fallback）均返回 `Gateway Error: 没有可用的内网节点` 或 HTTP 503/502 时，自动切换到 edge-tts（Microsoft Azure Neural TTS）。**
+
+**edge-tts 优势**：
+- 无 API Key 依赖，`pip install edge-tts` 即可使用
+- 中文音色 `zh-CN-YunyangNeural`（男声，专业可靠，新闻风）效果接近 mimo-tts「白桦」
+- 响应稳定，无配额限制
+
+**切换条件**（满足任一即切换）：
+1. mimo-tts 返回 `Gateway Error: 没有可用的内网节点`
+2. mimo-tts 连续 3 次 HTTP 503/502
+3. mimo-tts 所有 fallback 端点均失败
+
+**执行步骤**：
+
+```bash
+# 安装 edge-tts
+pip install edge-tts>=7.2.8
+
+# 生成 MP3（edge-tts 原生输出 MP3）
+edge-tts --text "配音文本" \
+  --voice zh-CN-YunyangNeural \
+  --write-media /tmp/sceneN_edge.mp3
+
+# 转换为 WAV（24kHz PCM16LE 单声道，与 Phase 7 字幕生成兼容）
+ffmpeg -y -i /tmp/sceneN_edge.mp3 -acodec pcm_s16le -ar 24000 -ac 1 \
+  "news-pipeline/YYYY-MM-DD/voiceover/sceneN.wav"
+```
+
+**推荐音色**：
+| 音色 | Voice ID | 说明 |
+|------|----------|------|
+| 云扬（推荐） | `zh-CN-YunyangNeural` | 男声，专业可靠，新闻风，最接近「白桦」 |
+| 云健 | `zh-CN-YunjianNeural` | 男声，激情，适合快节奏 |
+| 云希 | `zh-CN-YunxiNeural` | 男声，活泼阳光 |
+| 晓伊 | `zh-CN-XiaoyiNeural` | 女声，活泼（卡通风） |
+
+**注意**：
+- edge-tts 输出为 MP3，必须用 ffmpeg 转为 WAV（24kHz）才能与 Phase 7 字幕流程兼容
+- 转换后音频时长不变，无需调整 Composition.tsx 的 duration
+- 重新生成 TTS 后必须同步更新：Composition.tsx sceneConfig → Root.tsx TOTAL_DURATION_SEC → 重算 captions.json → 重渲染
 
 ### Phase 7: 字幕生成（原始脚本文本 + 加权字符估算 + silencedetect 吸附）
 
@@ -3671,6 +3714,49 @@ browser_run_code_unsafe("""async (page) => {
 
 **竖封面文件**：只使用本期 `news-pipeline/{date}/douyin-vertical-3-4.png`（含日期+品牌）。用户指定该文件时**禁止**用 scene 图或其它日期文件替代。
 
+#### 🔴 抖音违规审核与处理（v3.15.0 新增，2026-07-31 实测）
+
+**常见违规原因**：
+
+| 违规原因 | 触发条件 | 文案修改方向 |
+|----------|---------|-------------|
+| `引导至风险不可控渠道` | 描述/口播中出现「开放申请」「去XX体验」「下载XX」「申请试用」等引导性表述 | 去掉「去」「申请」「体验」等引导动词，改为「上线」「推出」「发布」等中性陈述 |
+| `画面` / `不适宜公开` | 视频帧中包含安全事件视觉（入侵/撬锁/隔离舱破裂）、政策/立法场景（法槌/两党剪影） | 重画场景图，改为产品化视觉（仪表盘/UI界面/机房）；修改口播避免攻击性动词 |
+| `竖封面缺失` / `双封面缺失` | 未上传竖封面（3:4）或横封面（4:3） | 补传对应封面，验收确认无缺失提示 |
+| `违规推广内容` | 简介中数字连续出现（疑似QQ号/微信号） | 数字中文化，版本号简化，去掉 hash tag 行 |
+
+**违规处理流程**：
+
+1. **查看违规详情**：打开抖音创作者中心 → 内容管理 → 找到违规作品 → 点击「违规详情」
+2. **定位违规源**：
+   - 先看违规原因描述（如「引导至风险不可控渠道」→ 检查描述/口播中的引导性动词）
+   - 再检查描述文案中是否有「开放申请」「去XX体验」「下载」「申请试用」等关键词
+   - 最后检查视频帧画面（安全事件场景需重画）
+3. **修改方案**：
+   - **文案违规**：修改 publish.json 中抖音的 title/description，去掉所有引导性表述
+   - **画面违规**：重画对应场景图（prompt 改为产品化视觉），重写口播文本
+   - **双封面缺失**：补传竖封面/横封面
+4. **重传流程**：
+   - 修改 publish.json 中抖音标题/描述
+   - 如涉及画面违规：修改 voiceover-texts.json 中的口播文本 → 重新生成 TTS（scene 级别）→ 重算 captions.json → 重渲染视频
+   - 打开 `https://creator.douyin.com/creator-micro/content/upload` → 上传新视频 → 填写标题/描述 → 上传双封面 → 暂存离开
+
+**违规文案修改示例**：
+
+| 原文 | 问题 | 修改后 |
+|------|------|--------|
+| 「符合条件的科研人可以**申请试用**」 | 引导至外部渠道 | 「学术科研领域的 AI 应用正在加速落地」 |
+| 「想玩 AI 音乐的可以直接去 **Flow Music 体验**」 | 引导至第三方平台 | 「AI 音乐创作的门槛正在降低」 |
+| 「OpenAI 学术科研版**开放申请**」 | 引导申请 | 「OpenAI 推出学术科研版」 |
+
+**自检清单新增项**（Phase 2 审核检查清单中增加）：
+
+```
+☐ 抖音描述：检查「申请」「体验」「下载」「去」「试用」等引导性动词
+☐ 抖音描述：去掉任何指向外部平台/产品的引导语句
+☐ 口播文本：Scene 5/6 类场景（产品/服务介绍）禁止尾部引导行动
+```
+
 #### 抖音上传组件操作总结（v3.6.0 实测）
 
 | 组件 | 类型 | 操作方式 | 可靠性 |
@@ -4403,7 +4489,29 @@ await inputs[1].setInputFiles('cover.png');
 
 ## 更新日志
 
-### v3.14.0（2026-07-26/27）
+### v3.15.0（2026-07-31）
+基于 **2026-07-31 日报视频全流程**（daily 428 → 抖音「引导至风险不可控渠道」违规 → 修改脚本 + edge-tts 重渲 → 公众号封面）实战：
+
+**TTS 故障转移（核心）**
+- Phase 6 新增 6.3 兜底方案：mimo-tts 全部端点不可用时 → 切换到 edge-tts（Microsoft Azure Neural TTS）
+- edge-tts 无需 API Key，`pip install edge-tts` 即可使用
+- 推荐音色 `zh-CN-YunyangNeural`（男声，专业可靠，新闻风）
+- 切换条件：`Gateway Error: 没有可用的内网节点` / 连续 3 次 503/502 / 所有 fallback 端点失败
+- 输出 MP3 后须 ffmpeg 转为 WAV（24kHz PCM16LE）与字幕流程兼容
+
+**抖音违规审核**
+- 新增 `🔴 抖音违规审核与处理` 章节（Phase 14 后）：常见违规原因表（引导至风险不可控渠道/画面/双封面缺失/违规推广）
+- 新增违规处理流程：定位违规源 → 修改方案 → 重传流程
+- 新增违规文案修改示例表（"申请试用"→"正在落地"、"去XX体验"→"门槛降低"）
+- 审核清单新增项：抖音描述检查引导性动词
+
+**实测数据**
+- 违规原因：`引导至风险不可控渠道`（Scene 5「去 Flow Music 体验」+ Scene 6「申请试用」）
+- 修改：voiceover-texts.json 去掉引导性表述 → edge-tts 重生成 scene5/6 → 重算 captions → 重渲染 → 文案修改后重传
+- 视频约 140.14s / 9 场景 / 16.2MB
+- 公众号：appmsgid=100000542 草稿已保存，封面上传至正文库
+
+**版本**：3.14.0 → 3.15.0
 基于 **2026-W29 周报全流程**（聚合 → 视频 → 抖音/视频号连拒 → 过审重渲 → 公众号文案同步）实战：
 
 **平台机审（核心）**
