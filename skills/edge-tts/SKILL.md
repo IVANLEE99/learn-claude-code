@@ -108,6 +108,16 @@ python3 ~/.claude/skills/edge-tts/scripts/edge-tts-synth.py \
   --write-subtitles output.srt
 ```
 
+**WAV output (requires ffmpeg):**
+```bash
+python3 ~/.claude/skills/edge-tts/scripts/edge-tts-synth.py \
+  --text "你好，这是 WAV 格式测试。" \
+  --output output.wav \
+  --format wav
+```
+
+> WAV output is 44.1kHz 16-bit PCM — suitable for video editing, DAW import, and further audio processing.
+
 **Direct edge-tts CLI (alternative):**
 ```bash
 edge-tts --voice zh-CN-XiaoxiaoNeural --text "你好" --write-media output.mp3

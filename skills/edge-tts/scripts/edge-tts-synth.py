@@ -9,8 +9,11 @@ Usage:
   # List voices for a specific locale
   python3 edge-tts-synth.py --list-voices --locale zh-CN
 
-  # Synthesize speech (text string)
+  # Synthesize speech (text string) — MP3 (default)
   python3 edge-tts-synth.py --text "你好世界" --output output.mp3
+
+  # Synthesize to WAV (requires ffmpeg)
+  python3 edge-tts-synth.py --text "你好世界" --output output.wav --format wav
 
   # Synthesize from file
   python3 edge-tts-synth.py --file input.txt --output output.mp3
@@ -26,6 +29,8 @@ Default voice: zh-CN-YunyangNeural (Azure Neural TTS, 男声, 新闻风格, 专�
 
 import argparse
 import asyncio
+import os
+import subprocess
 import sys
 
 try:
@@ -150,6 +155,7 @@ async def synthesize(
     volume: str | None,
     output: str,
     write_subtitles: str | None,
+    format: str = "mp3",
 ):
     if not text and not file_path:
         print("ERROR: provide --text or --file", file=sys.stderr)
@@ -171,9 +177,12 @@ async def synthesize(
         volume=volume or "+0%",
     )
 
+    # Determine actual output path and whether we need post-conversion
+    is_wav = format.lower() == "wav"
+    # edge-tts always outputs MP3; for WAV we convert afterwards
+    mp3_output = output if not is_wav else output.rsplit(".", 1)[0] + ".mp3"
+
     if write_subtitles:
-        # edge-tts >= 7.2 uses SentenceBoundary by default
-        # Capture audio + boundary events in a single stream pass
         audio_data = bytearray()
         subs = []
         async for chunk in communicate.stream():
@@ -182,7 +191,7 @@ async def synthesize(
                 audio_data.extend(chunk["data"])
             elif ctype in ("WordBoundary", "SentenceBoundary"):
                 subs.append(chunk)
-        with open(output, "wb") as f:
+        with open(mp3_output, "wb") as f:
             f.write(audio_data)
         with open(write_subtitles, "w", encoding="utf-8") as f:
             for i, sub in enumerate(subs, 1):
@@ -193,7 +202,24 @@ async def synthesize(
                 f.write(f"{i}\n{start:.3f} --> {end:.3f}\n{text_seg}\n\n")
         print(f"Subtitles: {write_subtitles}")
     else:
-        await communicate.save(output)
+        await communicate.save(mp3_output)
+
+    # Convert to WAV if requested
+    if is_wav:
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", mp3_output, "-acodec", "pcm_s16le", "-ar", "44100", output],
+                check=True,
+                capture_output=True,
+            )
+            os.remove(mp3_output)  # clean up intermediate MP3
+            print(f"Converted: {mp3_output} -> {output} (WAV 44.1kHz 16-bit)")
+        except FileNotFoundError:
+            print("WARNING: ffmpeg not found. Keeping MP3 output. Install ffmpeg for WAV support.", file=sys.stderr)
+            output = mp3_output
+        except subprocess.CalledProcessError as e:
+            print(f"WARNING: ffmpeg conversion failed: {e.stderr.decode()}. Keeping MP3 output.", file=sys.stderr)
+            output = mp3_output
 
     print(f"Output:    {output}")
     print(f"Voice:     {voice}")
@@ -219,6 +245,7 @@ def main():
     parser.add_argument("--volume", type=str, help="Volume, e.g. +0%, -10%")
     parser.add_argument("--output", "-o", type=str, help="Output MP3 file path", required="--list-voices" not in sys.argv)
     parser.add_argument("--write-subtitles", type=str, help="Also write SRT subtitles to this path")
+    parser.add_argument("--format", type=str, default="mp3", choices=["mp3", "wav"], help="Output format: mp3 (default) or wav (requires ffmpeg)")
 
     args = parser.parse_args()
 
@@ -234,6 +261,7 @@ def main():
             volume=args.volume,
             output=args.output,
             write_subtitles=args.write_subtitles,
+            format=args.format,
         ))
 
 
