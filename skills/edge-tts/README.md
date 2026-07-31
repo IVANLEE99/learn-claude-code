@@ -1,6 +1,6 @@
 # edge-tts — Microsoft Edge / Azure Neural TTS Skill
 
-> **版本**: 1.0.0 · **依赖**: `edge-tts` ≥ 7.2.8 · **默认音色**: `zh-CN-YunyangNeural` (男声, 专业可靠, 新闻风)
+> **版本**: 1.1.0 · **依赖**: `edge-tts` ≥ 7.2.8, `ffmpeg` (WAV 可选) · **默认音色**: `zh-CN-YunyangNeural` (男声, 专业可靠, 新闻风)
 
 ## 项目结构
 
@@ -34,6 +34,19 @@ skills/edge-tts/
 pip install edge-tts>=7.2.8
 ```
 
+WAV 输出需要额外安装 ffmpeg：
+
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu / Debian
+sudo apt install ffmpeg
+
+# Windows (via scoop)
+scoop install ffmpeg
+```
+
 ### 列出所有音色
 
 ```bash
@@ -47,10 +60,18 @@ python3 scripts/edge-tts-synth.py --list-voices --locale zh-CN
 python3 scripts/edge-tts-synth.py --list-voices --locale en-US
 ```
 
-### 生成语音
+### 生成语音 (MP3)
 
 ```bash
 python3 scripts/edge-tts-synth.py --text "你好世界" --output output.mp3
+```
+
+### 生成语音 (WAV)
+
+> WAV 格式适用于视频剪辑、DAW 导入和后续音频处理。输出为 44.1kHz 16-bit PCM 单声道。
+
+```bash
+python3 scripts/edge-tts-synth.py --text "你好世界" --output output.wav --format wav
 ```
 
 ### 从文件读取文本
@@ -85,6 +106,15 @@ edge-tts --voice zh-CN-YunyangNeural --text "你好" --write-media output.mp3
 ```
 
 > ⚠️ 负值必须用 `=` 语法：`--rate=-50%`，不能写 `--rate -50%`（会被解析为命令选项）。
+
+## 输出格式对比
+
+| 格式 | 编码 | 采样率 | 码率 | 用途 |
+|------|------|--------|------|------|
+| **MP3** (默认) | MP3 | 48kHz | ~320kbps | 通用分享、网页嵌入 |
+| **WAV** | PCM S16 LE | 44.1kHz | 705kbps | 视频剪辑、DAW 导入、后期处理 |
+
+WAV 通过 ffmpeg 自动从 MP3 转码，转码后中间 MP3 自动删除。若未安装 ffmpeg，回退到 MP3 输出并打印警告。
 
 ## 可选音色
 
@@ -144,6 +174,7 @@ edge-tts --voice zh-CN-YunyangNeural --text "你好" --write-media output.mp3
 | `--rate` | 百分比 | `+0%` | `+10%`（快）, `-20%`（慢） |
 | `--pitch` | Hz 偏移 | `+0Hz` | `+5Hz`（高）, `-10Hz`（低） |
 | `--volume` | 百分比 | `+0%` | `-50%`（小声）, `+10%`（大声） |
+| `--format` | `mp3` 或 `wav` | `mp3` | `wav`（需 ffmpeg） |
 
 ## Python API 用法
 
@@ -188,9 +219,13 @@ pip install --upgrade edge-tts
 
 **A:** 不完全支持。Microsoft 只允许 Edge 本身能生成的 SSML，即 `<voice>` 内嵌 `<prosody>` 的简单结构。更复杂的 SSML 被拒绝。
 
-### Q: 输出格式是什么
+### Q: 输出格式有哪些
 
-**A:** MP3（48kHz / 320kbps 单声道）。
+**A:** MP3（48kHz / 320kbps 单声道）和 WAV（44.1kHz / 16-bit PCM 单声道）。WAV 需要 ffmpeg，通过 MP3 自动转码生成。
+
+### Q: WAV 输出提示 ffmpeg not found
+
+**A:** 安装 ffmpeg 后再试。未安装 ffmpeg 时自动回退到 MP3 输出。
 
 ### Q: 长文本怎么办
 
@@ -199,6 +234,16 @@ pip install --upgrade edge-tts
 ### Q: 在中国大陆如何使用
 
 **A:** 需要能访问 `speech.platform.bing.com`（ping 延迟 ~160ms，正常）。如遇连接问题可配置 HTTP 代理。
+
+## 更新日志
+
+### v1.1.0 (2026-07-31)
+- 新增 `--format wav` 支持 WAV 输出（44.1kHz 16-bit PCM）
+- WAV 通过 ffmpeg 自动从 MP3 转码，无需手动转换
+- 未安装 ffmpeg 时自动回退到 MP3 并打印警告
+
+### v1.0.0 (2026-07-31)
+- 初始版本：MP3 合成、音色列表、SRT 字幕、试听样本
 
 ## License
 
