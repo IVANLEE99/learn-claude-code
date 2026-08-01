@@ -177,7 +177,7 @@ version: 3.15.0
 ### 周报封面提示词模板
 
 ```
-A professional Chinese AI news studio weekly cover image. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens showing: {本周核心事件相关视觉元素，产品/抽象图形}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI周刊" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date range "{YYYY-MM-DD} ~ {YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, 16:9 aspect ratio. No people, no faces.
+A professional Chinese AI news studio weekly cover image. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens showing: {本周核心事件相关视觉元素，产品/抽象图形}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI周刊" in large white Chinese characters. In the center of the image, display the date range "{YYYY-MM-DD} ~ {YYYY-MM-DD}" in very large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, 16:9 aspect ratio. No people, no faces.
 ```
 
 ### 周报过滤规则
@@ -229,7 +229,7 @@ A professional Chinese AI news studio weekly cover image. Empty modern curved ne
 ### 月报封面提示词模板
 
 ```
-A professional Chinese AI news studio monthly cover image. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本月4条趋势相关视觉元素，如 OpenAI/Codex logo、智谱 GLM 标识、Anthropic Claude 图标、AI编程工具拼贴，勿放可识别真人}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI月报" on the first line and "AI 月度盘点" on the second line in large white Chinese characters. In the bottom center, display the month "{YYYY-MM}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces.
+A professional Chinese AI news studio monthly cover image. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本月4条趋势相关视觉元素}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI月报" in large white Chinese characters. In the center of the image, display the month "{YYYY-MM}" in very large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces.
 ```
 
 ### 月报选材规则（最关键，区别于周报）
@@ -998,7 +998,7 @@ API_URL = "用户提供的 API URL"  # 优先使用 eo.ioll.pp.ua
 API_KEY = "用户提供的 API Key"
 MODEL = "gpt-image-2"
 
-COVER_PROMPT = """A professional Chinese AI news studio cover image. Empty modern curved news desk in a high-tech studio, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，产品/抽象图形，勿放可识别真人}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces."""
+COVER_PROMPT = """A professional Chinese AI news studio cover image. Empty modern curved news desk in a high-tech studio, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，产品/抽象图形，勿放可识别真人}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the center of the image, display the date "{YYYY-MM-DD}" in very large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces."""
 
 # 封面配置
 COVERS = [
@@ -1480,7 +1480,7 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 - 完整策略见 `templates/platform-compliance.md` §3.2
 
 ```
-A professional Chinese AI news studio cover image. Empty modern curved news desk in a high-tech studio, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，产品/抽象图形，勿放可识别真人}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the bottom center, display the date "{YYYY-MM-DD}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces.
+A professional Chinese AI news studio cover image. Empty modern curved news desk in a high-tech studio, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，产品/抽象图形，勿放可识别真人}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the center of the image, display the date "{YYYY-MM-DD}" in very large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces.
 ```
 
 输出到 `{REPORT_MODE 对应的输出目录}`（daily `news-pipeline/YYYY-MM-DD/`；weekly `news-pipeline/weekly/...`；monthly `news-pipeline/monthly/YYYY-MM/`）
