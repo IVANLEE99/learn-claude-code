@@ -124,6 +124,8 @@ version: 3.15.0
 | 视频总时长 | 60-120s（≤150s） | 90-120s | **180-240s（≤300s）** |
 | 每段字数 | ≤80 字 | ≤80 字 | **≤100 字** |
 | 标题前缀 B站 | `【今日羊报AI】` | `【羊报AI周刊】` | `【羊报AI月报】` |
+| 抖音标题 | `今日羊报AI YYYY-MM-DD`（≤30字） | `羊报AI周刊 MM-DD~MM-DD`（≤30字） | `羊报AI月报 YYYY-MM`（≤30字） |
+| 视频号标题 | `今日羊报AI YYYY年M月D日`（≤16字） | `羊报AI周刊 M月D日~M月D日`（≤16字） | `羊报AI月报 YYYY年M月`（≤16字） |
 | 日期字段 | `YYYY-MM-DD` | `MM-DD~MM-DD` | `YYYY-MM` |
 | tags 首 tag | `今日羊报AI` | `羊报AI周刊` | `羊报AI月报` |
 | tags 主题 tag | `AI日报` | `AI周报` | `AI月报` / `AI月度盘点` |
@@ -1499,12 +1501,12 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
       "description": "B站简介，含 hashtag\n\n🔴 注意：简介中数字不能太多（会被检测为违规推广），版本号简化，数字用中文替代"
     },
     "douyin": {
-      "title": "{核心标题}｜今日羊报AI YYYY-MM-DD",
+      "title": "今日羊报AI YYYY-MM-DD",
       "tags": ["AI日报", "..."],
       "description": "抖音简介，含 hashtag"
     },
     "channels": {
-      "title": "{核心标题}｜今日羊报AI YYYY-MM-DD",
+      "title": "今日羊报AI YYYY年M月D日",
       "tags": ["AI日报", "..."],
       "description": "视频号简介，含 hashtag"
     },
@@ -1521,20 +1523,43 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
 - `title`：`【羊报AI月报】{核心标题} | YYYY-MM`
 - `tags`：`["羊报AI月报", "AI月报", "AI月度盘点", "..."]`
 - `bilibili.title`：`【羊报AI月报】{核心标题}｜本月{N}大AI趋势月度盘点 | YYYY-MM`
-- `douyin/channels/wechat.title`：`{核心标题}｜羊报AI月报 YYYY-MM`
+- `douyin.title`：`羊报AI月报 YYYY-MM`
+- `channels.title`：`羊报AI月报 YYYY年M月`
+- `wechat.title`：`{核心标题}｜羊报AI月报 YYYY-MM`
 - `bilibili.description`：**强制全数字中文化**（见 B站简介数字中文化章节）
 - `wechat.article`：`wechat-article-YYYY-MM.md`
 
 **标题规则**:
 - 日报 B站：`【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD`
-- 日报 抖音/视频号：`{核心标题}｜今日羊报AI YYYY-MM-DD`（较短）
+- 日报 抖音：`今日羊报AI YYYY-MM-DD`（≤30字，纯报刊名+日期，无特殊符号）
+- 日报 视频号：`今日羊报AI YYYY年M月D日`（≤16字，仅支持中文、数字、空格、书名号、引号、冒号、加号、问号、百分号、摄氏度）
 - 日报 公众号：`{核心标题}｜今日羊报AI YYYY-MM-DD`
 - **周报 B站**：`【羊报AI周刊】{核心标题}｜本周{N}大AI新闻一次看完 | MM-DD~MM-DD`
-- **周报 抖音/视频号**：`{核心标题}｜羊报AI周刊 MM-DD~MM-DD`
+- **周报 抖音**：`羊报AI周刊 MM-DD~MM-DD`（≤30字）
+- **周报 视频号**：`羊报AI周刊 M月D日~M月D日`（≤16字）
 - **周报 公众号**：`{核心标题}｜羊报AI周刊 MM-DD~MM-DD`
 - **月报 B站**：`【羊报AI月报】{核心标题}｜本月{N}大AI趋势月度盘点 | YYYY-MM`
-- **月报 抖音/视频号**：`{核心标题}｜羊报AI月报 YYYY-MM`
+- **月报 抖音**：`羊报AI月报 YYYY-MM`（≤30字）
+- **月报 视频号**：`羊报AI月报 YYYY年M月`（≤16字）
 - **月报 公众号**：`{核心标题}｜羊报AI月报 YYYY-MM`
+
+**抖音标题规则（全部模式）**：
+- 格式：`{报刊名} {日期字段}`，纯报刊名+日期，不加任何核心标题/副标题/特殊符号
+- 日报：`今日羊报AI 2026-08-01`
+- 周报：`羊报AI周刊 07-28~08-01`
+- 月报：`羊报AI月报 2026-08`
+- 总字符数 ≤30（含空格）
+- 禁止加 `|`、`｜`、`：` 等分隔符，纯报刊名+空格+日期
+
+**视频号标题规则（全部模式）**：
+- 格式：`{报刊名} {日期字段}`，纯报刊名+日期
+- 日报：`今日羊报AI 2026年8月1日`
+- 周报：`羊报AI周刊 7月28日~8月1日`
+- 月报：`羊报AI月报 2026年8月`
+- 总字符数 ≤16（含空格）
+- 标题不能包含特殊字符，符号仅支持书名号、引号、冒号、加号、问号、百分号、摄氏度
+- 逗号可用空格代替
+- 视频号短标题 = 视频号标题，两者使用同一格式
 
 #### 10.3 生成公众号图文
 
@@ -2510,7 +2535,7 @@ browser_click(target={确认按钮ref})
 5. 封面 3:4 / 4:3：等 **「预览图生成中，请等待完成后再编辑」消失** 后再点对应「编辑」；DOM 可见 `input[accept*=image]` 在 `.single-cover-uploader-wrap`，但跨 frame 时 `setInputFiles` 易 detached——**已验证可用 CDP**：
    `DOM.performSearch` → `getSearchResults` → `describeNode` 过滤 image accept → `DOM.setFileInputFiles({ backendNodeId, files })`。
 6. 竖封面文件必须**带日期**（如 `douyin-vertical-3-4.png` 含 `2026-07-18`）；生成失败勿用 scene 截图顶替。
-7. 短标题 ≤16 中文字符。
+7. 短标题 ≤16 中文字符。格式：`{报刊名} {日期字段}`，纯报刊名+日期（如 `今日羊报AI 2026年8月1日`），不加核心标题。
 
 #### 13.0 检测 iframe 结构（关键步骤）
 
@@ -2624,7 +2649,13 @@ browser_run_code_unsafe("""async (page) => {
 }""")
 ```
 
-**短标题限制**：最多 16 个中文字符，超过会报错「标题超过16字限制」。
+**短标题限制**：最多 16 个中文字符（含空格），超过会报错「标题超过16字限制」。  
+**短标题格式**：`{报刊名} {日期字段}`，纯报刊名+日期，不加核心标题/副标题。  
+- 日报：`今日羊报AI 2026年8月1日`  
+- 周报：`羊报AI周刊 7月28日~8月1日`  
+- 月报：`羊报AI月报 2026年8月`  
+
+**字符限制**：标题不能包含特殊字符，符号仅支持书名号、引号、冒号、加号、问号、百分号、摄氏度。逗号可用空格代替。
 
 #### 13.5 选择合集
 
@@ -2706,7 +2737,7 @@ browser_run_code_unsafe("""async (page) => {
 
 ##### 13.6.3 填写短标题（在 iframe 中操作）
 
-**🔴 短标题是 contenteditable div（`.edit-shorttitle-content`），不是标准 input：**
+**🔴 短标题是 contenteditable div（`.edit-shorttitle-content`），不是标准 input。格式：`{报刊名} {日期字段}`，≤16字，纯报刊名+日期，不使用核心标题：**
 
 ```javascript
 // 方法1：在 iframe 内用 JS 直接修改（推荐）
@@ -2717,7 +2748,7 @@ browser_run_code_unsafe("""async (page) => {
   const result = await frame.evaluate(() => {
     const div = document.querySelector('.edit-shorttitle-content');
     if (div) {
-      div.textContent = '短标题内容（最多16字）';
+      div.textContent = '今日羊报AI 2026年8月1日';
       div.dispatchEvent(new Event('input', { bubbles: true }));
       return 'updated: ' + div.textContent;
     }
@@ -3319,24 +3350,16 @@ browser_run_code_unsafe("""async (page) => {
 
 #### 14.4 填写作品描述（30字）
 
-**🔴 抖音作品描述是标准 input，但 placeholder 为「填写作品标题，为作品获得更多流量」：**
+**🔴 抖音作品描述是标准 input，但 placeholder 为「填写作品标题，为作品获得更多流量」。格式：`{报刊名} {日期字段}`，≤30字，纯报刊名+日期，不加核心标题/副标题：**
 
 ```
 browser_run_code_unsafe("""async (page) => {
-  const result = await page.evaluate(() => {
-    const elements = document.querySelectorAll('textarea, input[type="text"], [contenteditable]');
-    for (const el of elements) {
-      const placeholder = el.placeholder || '';
-      if (placeholder.includes('填写作品标题')) {
-        el.focus();
-        el.value = '标题内容';
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        return 'filled';
-      }
-    }
-    return 'not found';
-  });
-  return result;
+  // 日报：今日羊报AI 2026-08-01
+  // 周报：羊报AI周刊 07-28~08-01
+  // 月报：羊报AI月报 2026-08
+  const titleInput = page.getByRole('textbox', { name: '填写作品标题，为作品获得更多流量' });
+  await titleInput.fill('今日羊报AI 2026-08-01');
+  return 'title filled';
 }""")
 ```
 
