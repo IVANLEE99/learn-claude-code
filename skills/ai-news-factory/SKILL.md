@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.15.0
+version: 3.17.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.14.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.17.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -123,7 +123,8 @@ version: 3.15.0
 | 事件数档位 | 4-6（精简 3-5） | 5-6 | **4 趋势主线**（精简 3 趋势） |
 | 视频总时长 | 60-120s（≤150s） | 90-120s | **180-240s（≤300s）** |
 | 每段字数 | ≤80 字 | ≤80 字 | **≤100 字** |
-| 标题前缀 B站 | `【今日羊报AI】` | `【羊报AI周刊】` | `【羊报AI月报】` |
+| 标题前缀 B站 | `【{YYYY-MM-DD}】`（日期在前） | `【{MM-DD~MM-DD}】`（日期在前） | `【{YYYY-MM}】`（日期在前） |
+| 标题后缀 B站 | `… \| 今日羊报AI`（报刊名在后） | `… \| 羊报AI周刊`（报刊名在后） | `… \| 羊报AI月报`（报刊名在后） |
 | 抖音标题 | `今日羊报AI YYYY-MM-DD`（≤30字） | `羊报AI周刊 MM-DD~MM-DD`（≤30字） | `羊报AI月报 YYYY-MM`（≤30字） |
 | 视频号标题 | `今日羊报AI YYYY年M月D日`（≤16字） | `羊报AI周刊 M月D日~M月D日`（≤16字） | `羊报AI月报 YYYY年M月`（≤16字） |
 | 日期字段 | `YYYY-MM-DD` | `MM-DD~MM-DD` | `YYYY-MM` |
@@ -131,7 +132,7 @@ version: 3.15.0
 | tags 主题 tag | `AI日报` | `AI周报` | `AI月报` / `AI月度盘点` |
 | 封面品牌名 | `今日羊报 AI` | `羊报AI周刊` | `羊报AI月报` |
 | 封面日期字段 | `{YYYY-MM-DD}` | `{YYYY-MM-DD} ~ {YYYY-MM-DD}` | `{YYYY-MM}` |
-| 视频渲染文件名 | `【今日羊报AI】{核心标题} \| YYYY-MM-DD.mp4` | `【羊报AI周刊】{核心标题} \| MM-DD~MM-DD.mp4` | `【羊报AI月报】{核心标题} \| YYYY-MM.mp4` |
+| 视频渲染文件名 | `【{YYYY-MM-DD}】{核心标题}… \| 今日羊报AI.mp4` | `【{MM-DD~MM-DD}】{核心标题}… \| 羊报AI周刊.mp4` | `【{YYYY-MM}】{核心标题}… \| 羊报AI月报.mp4` |
 | B站合集名 | `「今日羊报 AI」` | `「羊报AI周刊」` | `「羊报AI月报」` |
 | 公众号合集名 | 同 B站 | 同 B站 | 同 B站 |
 | 公众号署名 | `今日羊报 AI · YYYY-MM-DD` | `羊报AI周刊 · MM-DD~MM-DD` | `羊报AI月报 · YYYY-MM` |
@@ -163,7 +164,7 @@ version: 3.15.0
 | 封面提示词 | 单日事件 | 本周多事件拼贴 |
 | 视频脚本 | 3-5个当日事件 | 5-6个本周核心事件 |
 | 过滤规则 | 无 | **过滤公益站/中转站/倒卖相关内容** |
-| 标题格式 | `【今日羊报AI】...` | `【羊报AI周刊】...` |
+| 标题格式 | `【{日期}】...| 今日羊报AI` | `【{日期}】...| 羊报AI周刊` |
 
 ### 周报生成流程
 
@@ -213,7 +214,7 @@ A professional Chinese AI news studio weekly cover image. Empty modern curved ne
 | 总时长 | 60-150s | 90-120s | 180-240s（≤300s） |
 | 每段字数 | ≤80 字 | ≤80 字 | ≤100 字 |
 | 封面品牌 | 今日羊报 AI | 羊报AI周刊 | 羊报AI月报 |
-| 标题前缀 | 【今日羊报AI】 | 【羊报AI周刊】 | 【羊报AI月报】 |
+| 标题前缀 | 【{日期}】…（报刊名在后） | 【{日期}】…（报刊名在后） | 【{日期}】…（报刊名在后） |
 | 日期字段 | YYYY-MM-DD | MM-DD~MM-DD | YYYY-MM |
 | 简介数字规则 | 版本号简化 | 同日报 | **强制全数字中文化**（见 B站简介数字中文化章节） |
 
@@ -507,6 +508,7 @@ ls data/reports/*.md | sort -r | head -4  # 获取最近4天的文件
 - **🔴 默认 3W + 可信度**（全模式；精简仅更短更少条）
 - **🔴 灰色渠道 ≤1 条**，改写为风控/资产风险
 - **🔴 每期 1 个专业锚点**（除非 `ANCHOR_SKIP`）：仅 **eligible** 台词，见 `templates/professional-anchor.md`
+- **🔴 画面/口播不展示数据来源**（v3.17.0）：视频正文、Hook、结尾 CTA **禁止**出现「数据来自 linux.do 社区精选」「来源于 linux.do」「新闻来自社区」等字样；来源仅供内部报告参考，不写进口播与字幕
 
 **输出结构（默认 3W）**:
 ```
@@ -1002,11 +1004,8 @@ COVER_PROMPT = """A professional Chinese AI news studio cover image. Empty moder
 
 # 封面配置
 COVERS = [
-    {"name": "cover.png", "size": "1536x1024", "ratio": "16:9"},           # 通用封面
-    {"name": "bilibili-4-3.png", "size": "1536x1152", "ratio": "4:3"},     # B站
-    {"name": "wechat-21-9.png", "size": "1536x659", "ratio": "21:9"},     # 公众号
-    {"name": "douyin-horizontal-4-3.png", "size": "1536x1152", "ratio": "4:3"},  # 抖音横版
-    {"name": "douyin-vertical-3-4.png", "size": "1152x1536", "ratio": "3:4"},    # 抖音竖版
+    {"name": "horizontal-4-3.png", "size": "1536x1152", "ratio": "4:3"},    # B站/通用（4:3 横版）
+    {"name": "vertical-3-4.png", "size": "1152x1536", "ratio": "3:4"},   # 抖音/竖版（3:4）
 ]
 
 def generate_cover(prompt, output_path, size):
@@ -1074,11 +1073,11 @@ import json, subprocess, base64, tempfile, os, time
 ```bash
 # 生成完成后验证所有封面文件
 ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
-# 应该输出 5（cover.png, bilibili-4-3.png, wechat-21-9.png, douyin-horizontal-4-3.png, douyin-vertical-3-4.png）
+# 应该输出 2（horizontal-4-3.png【4:3 横版，B站/通用】, vertical-3-4.png【3:4 竖版，抖音/视频号/公众号】）
 ```
 
 **优势**：
-- 封面生成（5个，约 3-5 分钟）与 TTS 配音（9个，约 2-3 分钟）并行
+- 封面生成（2个，约 1-2 分钟）与 TTS 配音（9个，约 2-3 分钟）并行
 - 总时间从串行的 6-8 分钟缩短到并行的 3-5 分钟
 - 每张封面自动重试一次，提高成功率
 
@@ -1420,9 +1419,9 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
 ```
 
 **文件名按模式参数映射表读取**：
-- daily：`out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4`
-- weekly：`out/【羊报AI周刊】{核心标题} | MM-DD~MM-DD.mp4`
-- **monthly**：`out/【羊报AI月报】{核心标题} | YYYY-MM.mp4`
+- daily：`out/【YYYY-MM-DD】{核心标题}… | 今日羊报AI.mp4`
+- weekly：`out/【MM-DD~MM-DD】{核心标题}… | 羊报AI周刊.mp4`
+- **monthly**：`out/【YYYY-MM】{核心标题}… | 羊报AI月报.mp4`
 
 **关键参数说明**：
 - `node_modules/.bin/remotion`：使用 video-project 下的本地 remotion
@@ -1439,11 +1438,11 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
 
 ```bash
 # 复制视频到报告目录（以 daily 为例；weekly 用 weekly/... ，monthly 用 monthly/YYYY-MM/）
-cp "/Users/youngsdream/Documents/learn-claude-code/out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" \
+cp "/Users/youngsdream/Documents/learn-claude-code/out/【YYYY-MM-DD】{核心标题}… | 今日羊报AI.mp4" \
    "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/YYYY-MM-DD/video/"
 
 # monthly 模式：
-# cp "/Users/youngsdream/Documents/learn-claude-code/out/【羊报AI月报】{核心标题} | YYYY-MM.mp4" \
+# cp "/Users/youngsdream/Documents/learn-claude-code/out/【YYYY-MM】{核心标题}… | 羊报AI月报.mp4" \
 #    "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/monthly/YYYY-MM/video/"
 
 # 验证复制成功
@@ -1466,11 +1465,8 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 
 | 平台 | 比例 | 尺寸 | 输出文件 | 用途 |
 |------|------|------|----------|------|
-| 通用/视频封面 | 16:9 | 1536x1024 | `cover.png` | 视频封面、B站默认 |
-| B站 | 4:3 | 1536x1152 | `bilibili-4-3.png` | B站投稿封面 |
-| 公众号 | 21:9 | 1536x659 | `wechat-21-9.png` | 公众号文章封面 |
-| 抖音横版 | 4:3 | 1536x1152 | `douyin-horizontal-4-3.png` | 抖音视频封面 |
-| 抖音竖版 | 3:4 | 1152x1536 | `douyin-vertical-3-4.png` | 抖音个人主页卡片 |
+| B站/通用 | 4:3 | 1536x1152 | `horizontal-4-3.png` | B站投稿封面、公众号/视频号横版 |
+| 抖音/竖版 | 3:4 | 1152x1536 | `vertical-3-4.png` | 抖音封面、抖音个人主页卡片、公众号/视频号竖版 |
 
 **封面模板 Prompt**（按 `REPORT_MODE` 读取品牌名与日期字段，**禁止硬编码**；周报用"羊报AI周刊"+日期范围，月报用"羊报AI月报"+`{YYYY-MM}` 见月报模式章节）：
 
@@ -1491,12 +1487,12 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
 
 ```json
 {
-  "title": "【今日羊报AI】{核心标题} | YYYY-MM-DD",
+  "title": "【YYYY-MM-DD】{核心标题}… | 今日羊报AI",
   "description": "视频简介，2-3句话概括本期内容",
   "tags": ["今日羊报AI", "AI日报", "..."],
   "platform": {
     "bilibili": {
-      "title": "【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD",
+      "title": "【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI",
       "tags": ["今日羊报AI", "AI日报", "..."],
       "description": "B站简介，含 hashtag\n\n🔴 注意：简介中数字不能太多（会被检测为违规推广），版本号简化，数字用中文替代"
     },
@@ -1511,7 +1507,7 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
       "description": "视频号简介，含 hashtag"
     },
     "wechat": {
-      "title": "{核心标题}｜今日羊报AI YYYY-MM-DD",
+      "title": "【YYYY-MM-DD】{核心标题}… | 今日羊报AI",
       "article": "wechat-article-YYYY-MM-DD.md",
       "images": "wechat-images/"
     }
@@ -1520,28 +1516,28 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
 ```
 
 **月报模式 publish.json 变体**（`REPORT_MODE=monthly` 时使用）：
-- `title`：`【羊报AI月报】{核心标题} | YYYY-MM`
+- `title`：`【YYYY-MM】{核心标题}… | 羊报AI月报`
 - `tags`：`["羊报AI月报", "AI月报", "AI月度盘点", "..."]`
-- `bilibili.title`：`【羊报AI月报】{核心标题}｜本月{N}大AI趋势月度盘点 | YYYY-MM`
+- `bilibili.title`：`【YYYY-MM】{核心标题}｜本月{N}大AI趋势月度盘点 | 羊报AI月报`
 - `douyin.title`：`羊报AI月报 YYYY-MM`
 - `channels.title`：`羊报AI月报 YYYY年M月`
-- `wechat.title`：`{核心标题}｜羊报AI月报 YYYY-MM`
+- `wechat.title`：`【YYYY-MM】{核心标题}… | 羊报AI月报`
 - `bilibili.description`：**强制全数字中文化**（见 B站简介数字中文化章节）
 - `wechat.article`：`wechat-article-YYYY-MM.md`
 
-**标题规则**:
-- 日报 B站：`【今日羊报AI】{核心标题}｜{N}条重磅AI新闻一次看完 | YYYY-MM-DD`
+**标题规则（v3.17：日期在前、报刊名在后）**:
+- 日报 B站：`【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI`
 - 日报 抖音：`今日羊报AI YYYY-MM-DD`（≤30字，纯报刊名+日期，无特殊符号）
 - 日报 视频号：`今日羊报AI YYYY年M月D日`（≤16字，仅支持中文、数字、空格、书名号、引号、冒号、加号、问号、百分号、摄氏度）
-- 日报 公众号：`{核心标题}｜今日羊报AI YYYY-MM-DD`
-- **周报 B站**：`【羊报AI周刊】{核心标题}｜本周{N}大AI新闻一次看完 | MM-DD~MM-DD`
+- 日报 公众号：`【YYYY-MM-DD】{核心标题}… | 今日羊报AI`
+- **周报 B站**：`【MM-DD~MM-DD】{核心标题}｜本周{N}大AI新闻一次看完 | 羊报AI周刊`
 - **周报 抖音**：`羊报AI周刊 MM-DD~MM-DD`（≤30字）
 - **周报 视频号**：`羊报AI周刊 M月D日~M月D日`（≤16字）
-- **周报 公众号**：`{核心标题}｜羊报AI周刊 MM-DD~MM-DD`
-- **月报 B站**：`【羊报AI月报】{核心标题}｜本月{N}大AI趋势月度盘点 | YYYY-MM`
+- **周报 公众号**：`【MM-DD~MM-DD】{核心标题}… | 羊报AI周刊`
+- **月报 B站**：`【YYYY-MM】{核心标题}｜本月{N}大AI趋势月度盘点 | 羊报AI月报`
 - **月报 抖音**：`羊报AI月报 YYYY-MM`（≤30字）
 - **月报 视频号**：`羊报AI月报 YYYY年M月`（≤16字）
-- **月报 公众号**：`{核心标题}｜羊报AI月报 YYYY-MM`
+- **月报 公众号**：`【YYYY-MM】{核心标题}… | 羊报AI月报`
 
 **抖音标题规则（全部模式）**：
 - 格式：`{报刊名} {日期字段}`，纯报刊名+日期，不加任何核心标题/副标题/特殊符号
@@ -1649,7 +1645,7 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
 ```bash
 # 输出目录与视频文件名前缀按 REPORT_MODE 读取（此处为 daily；monthly 用 news-pipeline/monthly/YYYY-MM/ 与 【羊报AI月报】*.mp4）
 mkdir -p news-pipeline/YYYY-MM-DD/{scripts,storyboards,prompts,images,voiceover,captions,video,wechat-images}
-cp news-pipeline/video-project/out/【今日羊报AI】*.mp4 news-pipeline/YYYY-MM-DD/video/
+cp news-pipeline/video-project/out/【YYYY-MM-DD】*.mp4 news-pipeline/YYYY-MM-DD/video/
 ```
 
 ### Phase 11: B站自动上传（Playwright MCP）
@@ -1681,9 +1677,9 @@ browser_navigate("https://member.bilibili.com/platform/upload/video/frame")
 
 ```
 browser_click(target=e231)  # 点击上传区域，触发 file chooser
-# 视频路径按 REPORT_MODE：daily news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4
+# 视频路径按 REPORT_MODE：daily news-pipeline/YYYY-MM-DD/video/【YYYY-MM-DD】*.mp4
 #                       monthly news-pipeline/monthly/YYYY-MM/video/【羊报AI月报】*.mp4
-browser_file_upload("news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4")
+browser_file_upload("news-pipeline/YYYY-MM-DD/video/【YYYY-MM-DD】*.mp4")
 ```
 
 **🔴 重要**：`browser_click` 使用 `target` 参数（ref 编号）比 `element` 文本描述更可靠。
@@ -1693,7 +1689,7 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4")
 ```
 browser_click(target=e328)  # 点击「封面设置」→ 打开封面编辑弹窗
 browser_click(target=e656)  # 点击「上传封面」→ 触发 file chooser
-browser_file_upload("news-pipeline/YYYY-MM-DD/cover.png")
+browser_file_upload("news-pipeline/YYYY-MM-DD/horizontal-4-3.png")
 browser_click(target=e715)  # 点击「完成」→ 确认封面
 ```
 
@@ -1702,12 +1698,43 @@ browser_click(target=e715)  # 点击「完成」→ 确认封面
 const inputs = await page.$$('input[type="file"]');
 // inputs[0]: 视频 (.mp4)
 // inputs[1]: 封面 (通过封面设置弹窗触发)
-await inputs[1].setInputFiles('cover.png');
+await inputs[1].setInputFiles('horizontal-4-3.png');
 ```
 
 **⚠️ 实测经验（v3.3.0 / 被 v3.12.0 覆盖）**：旧文档建议「封面不稳就跳过」。**2026-07-25 实测可自动补封面**，见下方 v3.12 草稿编辑页流程；首次投稿若封面失败，可**打开草稿再补**，不要默认放弃。
 
-#### 11.4 设置创作声明（自定义下拉框）
+#### 11.4 选择分区「人工智能」（v3.17 新增）
+
+**🔴 分区选择器是自定义下拉框，必须用 JS evaluate。视频投稿必须选择「人工智能」分区。**
+
+```javascript
+// 1. 点击打开分区下拉框（textbox 或 当前分区占位）
+browser_click(target=eXXX)  // 分区下拉框，通常显示「请选择分区」或当前分区
+
+// 2. 用 JS 找到并点击「人工智能」选项（必须！）
+browser_evaluate("""() => {
+  const options = document.querySelectorAll('li, div, span, p');
+  for (const opt of options) {
+    const t = (opt.textContent || '').trim();
+    if (t === '人工智能' && opt.offsetParent) {
+      opt.click();
+      return 'clicked 人工智能';
+    }
+  }
+  return 'not found';
+}""")
+
+// 3. 校验分区已选中（确认输入框/占位文本变为「人工智能」）
+browser_evaluate("""() => {
+  const txt = document.body.innerText;
+  const el = document.querySelector('[class*="select"], [class*="partition"], [class*="region"]');
+  return txt.includes('人工智能') ? 'partition=人工智能' : 'partition NOT set';
+}""")
+```
+
+**兜底**：若自定义下拉框无法展开，可尝试 `browser_run_code_unsafe` 触发点击分区元素后等待 500ms 再执行 JS 选选项。**分区未选对会导致投稿分类错误，必须验收。**
+
+#### 11.5 设置创作声明（自定义下拉框）
 
 **🔴 B站的创作声明是自定义下拉框组件，不是标准 `<select>`。`browser_click(listitem=...)` 不可靠，必须用 JS evaluate：**
 
@@ -1728,7 +1755,7 @@ browser_evaluate("""() => {
 }""")
 ```
 
-#### 11.5 填写简介（Quill 编辑器）
+#### 11.6 填写简介（Quill 编辑器）
 
 **🔴 B站简介使用 Quill 富文本编辑器，直接 `browser_type` 可能不生效。必须用 JS 注入：**
 
@@ -1744,7 +1771,7 @@ browser_evaluate("""() => {
 }""")
 ```
 
-#### 11.6 填写标签
+#### 11.7 填写标签
 
 ```
 # 标签输入框: textbox "按回车键Enter创建标签"
@@ -1755,11 +1782,11 @@ for tag in tags:
     browser_press_key("Enter")
 ```
 
-#### 11.7 加入合集（自定义下拉框）
+#### 11.8 加入合集（自定义下拉框）
 
 **🔴 合集选择器也是自定义下拉框，必须用 JS evaluate。合集名按 `REPORT_MODE` 从模式参数映射表读取：daily `「今日羊报 AI」` / weekly `「羊报AI周刊」` / monthly `「羊报AI月报」`。**
 
-**🔴 风险点**：合集必须由用户预先在 B站创作中心手动创建。若 monthly 模式合集「羊报AI月报」未创建，下方 JS 找不到选项会返回 `not found`，Phase 11.7 卡住——此时需提示用户去后台创建后再继续。
+**🔴 风险点**：合集必须由用户预先在 B站创作中心手动创建。若 monthly 模式合集「羊报AI月报」未创建，下方 JS 找不到选项会返回 `not found`，Phase 11.8 卡住——此时需提示用户去后台创建后再继续。
 
 ```javascript
 // 1. 点击打开下拉框
@@ -1780,7 +1807,7 @@ browser_evaluate("""() => {
 }""")
 ```
 
-#### 11.8 存草稿（不直接投稿）
+#### 11.9 存草稿（不直接投稿）
 
 **🔴 重要：所有平台上传一律存草稿，不直接发布！用户确认后再手动发布。**
 
@@ -1796,8 +1823,8 @@ browser_wait_for(time=3)
 |------|------|----------|--------|
 | 视频上传 | file chooser | `browser_click(ref)` → `file_upload` | ✅ 高 |
 | 封面设置 | 弹窗 | 点击封面设置 → 上传封面 → file_upload → 完成 | ✅ 高 |
+| 分区「人工智能」 | **自定义下拉框** | 点击展开 → **JS evaluate 点击「人工智能」**（v3.17 新增，见 11.4） | ⚠️ 必须用 JS |
 | 创作声明 | **自定义下拉框** | 点击 textbox → **JS evaluate 点击选项** | ⚠️ 必须用 JS |
-| 分区 | 自定义下拉框 | 已有默认值，一般不需要改 | ✅ 高 |
 | 标签 | 输入框 | `type` + `Enter`，最多 10 个 | ✅ 高 |
 | 简介 | **Quill 编辑器** | **JS 注入 `.ql-editor`** | ⚠️ 必须用 JS |
 | 合集 | **自定义下拉框** | 点击展开 → **JS evaluate 点击选项** | ⚠️ 必须用 JS |
@@ -1805,7 +1832,7 @@ browser_wait_for(time=3)
 
 **关键经验**：
 1. **`browser_click(target=ref编号)` 比 `browser_click(element=文本描述)` 更可靠**
-2. **所有自定义下拉框（创作声明、合集）必须用 `browser_evaluate` + JS 点击**
+2. **所有自定义下拉框（分区、创作声明、合集）必须用 `browser_evaluate` + JS 点击**
 3. **Quill 编辑器必须用 JS 注入 `innerHTML` + dispatch `input` 事件**
 4. **`browser_file_upload` 必须在 file chooser 对话框打开后才能调用**
 5. **封面上传是两步流程：先点「封面设置」打开弹窗，再点「上传封面」触发 file chooser**
@@ -1813,6 +1840,15 @@ browser_wait_for(time=3)
 ### Phase 12: 微信公众号自动上传（Playwright MCP）
 
 **权限已在预授权阶段获得，直接执行。**
+
+**🔴 2026-08-13 日报视频实测流程优化（v3.17.0）**——公众号上传建议按以下**已验证顺序**执行，避免踩坑：
+
+1. **标题/作者/正文先行**：先确保标题、作者、正文、视频号内容就位，再处理封面——封面不稳定不得阻塞草稿（v3.5.0 降级原则）
+2. **正文图片用「本地上传」**：正文配图一律用工具栏「图片」→「本地上传」→ `setInputFiles(sceneN.png)`，不要用纯 innerHTML 注入（注入不落素材库，封面无法「从正文选择」）
+3. **封面选图路径**：先用 `horizontal-4-3.png` 插入正文 → 再「从正文选择」设封面（v3.8.0 铁律：裁剪弹窗标题「编辑封面」、确认键是 enabled「确认」非灰「确定」、禁止弹窗内 Escape、轮询 `.js_cover_preview_new{display:block; bg 含 mmbiz}`）
+4. **合集选择 try-catch 兜底**：合集失败时 `try-catch`（timeout 5000）跳过，不阻塞保存草稿（v3.3.0）
+5. **最后保存草稿**：所有项目填完后点「保存为草稿」，以 URL `appmsgid=` 为准；弹窗阻挡时 Escape 关闭上传中挡层再保存
+6. **验收**：`appmsgid=` 出现在 URL / 保存成功回执为准，勿只看「已保存」文案（常不出现）
 
 **🔴 重要经验：公众号编辑器使用 ProseMirror + 自定义 Vue 组件，自动化难度较高。封面选择、合集选择等需要特殊处理。**
 
@@ -1999,7 +2035,7 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png")
 
 #### 12.7 上传封面（已验证流程 v3.8.0 / 2026-07-19 周报实测）
 
-**🔴 完整推荐流程：先把 `wechat-21-9.png` 插入正文，再「从正文选择」设封面。**  
+**🔴 完整推荐流程：先把封面图（横版 `horizontal-4-3.png`）插入正文，再「从正文选择」设封面。**  
 **🔴 降级原则（v3.5.0）**：封面步骤不稳定时，**不得阻塞整篇草稿**——先保证标题/作者/正文/原创/「保存为草稿」成功；封面可留草稿箱手补。
 
 **🔴 v3.8.0 铁律（今日踩坑总结）**：
@@ -2014,7 +2050,7 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png")
 ```
 # 步骤1：上传封面图到正文（工具栏「图片」→「本地上传」）
 browser_run_code_unsafe("""async (page) => {
-  const cover = '/ABS/PATH/wechat-21-9.png'; // 周报用 weekly/.../wechat-21-9.png
+  const cover = '/ABS/PATH/horizontal-4-3.png'; // 周报用 weekly/.../horizontal-4-3.png
   const prose = document.querySelectorAll('.ProseMirror');
   if (prose[1]) { prose[1].click(); }
   // 工具栏「图片」→「本地上传」
@@ -2152,7 +2188,7 @@ browser_run_code_unsafe("""async (page) => {
 ```
 
 **🔴 关键经验（v1.9.1 + v3.5.0 + v3.8.0）：**
-1. **必须先「图片」→「本地上传」把 `wechat-21-9.png` 插入正文**，「从正文选择」才可用  
+1. **必须先「图片」→「本地上传」把封面图（横版 `horizontal-4-3.png`）插入正文**，「从正文选择」才可用  
 2. **file chooser 不弹时**：`input[type=file][accept*=image].setInputFiles(path)` 可兜底  
 3. **Hover 封面区**才出菜单；「从正文选择」用 **`.js_selectCoverFromContent` + 强制显示**  
 4. **「图片上传中」弹窗会挡住保存**：等上传完 + Escape（仅此阶段）  
@@ -2534,7 +2570,7 @@ browser_click(target={确认按钮ref})
 4. 草稿验收：侧栏「草稿箱」条数 +1，标题含当日描述摘要与日期。
 5. 封面 3:4 / 4:3：等 **「预览图生成中，请等待完成后再编辑」消失** 后再点对应「编辑」；DOM 可见 `input[accept*=image]` 在 `.single-cover-uploader-wrap`，但跨 frame 时 `setInputFiles` 易 detached——**已验证可用 CDP**：
    `DOM.performSearch` → `getSearchResults` → `describeNode` 过滤 image accept → `DOM.setFileInputFiles({ backendNodeId, files })`。
-6. 竖封面文件必须**带日期**（如 `douyin-vertical-3-4.png` 含 `2026-07-18`）；生成失败勿用 scene 截图顶替。
+6. 竖封面文件必须**带日期**（如 `vertical-3-4.png` 含 `2026-07-18`）；生成失败勿用 scene 截图顶替。
 7. 短标题 ≤16 中文字符。格式：`{报刊名} {日期字段}`，纯报刊名+日期（如 `今日羊报AI 2026年8月1日`），不加核心标题。
 
 #### 13.0 检测 iframe 结构（关键步骤）
@@ -2593,7 +2629,7 @@ browser_run_code_unsafe("""async (page) => {
     page.waitForEvent('filechooser', { timeout: 5000 }),
     page.locator('.finder-upload__add-btn, [class*="upload-btn"]').first().click({ force: true })
   ]);
-  await fileChooser.setFiles('news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4');
+  await fileChooser.setFiles('news-pipeline/YYYY-MM-DD/video/【YYYY-MM-DD】*.mp4');
   return 'uploaded';
 }""")
 
@@ -2707,7 +2743,7 @@ browser_run_code_unsafe("""async (page) => {
   ]);
   
   // 2. 上传 3:4 封面文件
-  await fileChooser.setFiles('news-pipeline/YYYY-MM-DD/douyin-vertical-3-4.png');
+  await fileChooser.setFiles('news-pipeline/YYYY-MM-DD/vertical-3-4.png');
   await page.waitForTimeout(2000);
   return 'cover uploaded';
 }""")
@@ -2732,8 +2768,8 @@ browser_run_code_unsafe("""async (page) => {
 ```
 
 **封面尺寸**：
-- 个人主页卡片：3:4（1024×1536）→ `douyin-vertical-3-4.png`
-- 分享卡片：4:3（1536×1024）→ `douyin-horizontal-4-3.png`
+- 个人主页卡片：3:4（1152×1536）→ `vertical-3-4.png`
+- 分享卡片：4:3（1536×1152）→ `horizontal-4-3.png`
 
 ##### 13.6.3 填写短标题（在 iframe 中操作）
 
@@ -2829,14 +2865,15 @@ news-pipeline/
 │   ├── voiceover/              # TTS 音频 (scene1.wav ~ sceneN.wav)
 │   ├── captions/               # 字幕 JSON
 │   ├── video/                  # 最终视频
-│   │   └── 【今日羊报AI】*.mp4
-│   ├── cover.png               # 视频封面
+│   │   └── 【YYYY-MM-DD】*.mp4
+│   ├── horizontal-4-3.png        # 4:3 横版封面（B站/通用）
+│   ├── vertical-3-4.png # 3:4 竖版封面（抖音/视频号/公众号）
 │   ├── publish.json            # 多平台发布信息
 │   ├── wechat-article-*.md     # 公众号图文
 │   └── wechat-images/          # 公众号配图
 ├── weekly/                     # 周报产出目录（weekly，按日期范围隔离）
 │   └── YYYY-MM-DD~YYYY-MM-DD/
-│       └── （同 daily 子结构，视频 【羊报AI周刊】*.mp4，封面 weekly-cover.png）
+│       └── （同 daily 子结构，视频 【羊报AI周刊】*.mp4，封面 horizontal-4-3.png）
 ├── monthly/                    # 月报产出目录（monthly，按月隔离）
 │   └── YYYY-MM/
 │       ├── scripts/            # 月报视频脚本（8-9段：Hook+4趋势+总结+展望+CTA）
@@ -2847,7 +2884,8 @@ news-pipeline/
 │       ├── captions/           # 字幕 JSON
 │       ├── video/
 │       │   └── 【羊报AI月报】*.mp4
-│       ├── cover.png           # 视频封面
+│       ├── horizontal-4-3.png    # 4:3 横版封面（B站/通用）
+│       ├── vertical-3-4.png # 3:4 竖版封面（抖音/视频号/公众号）
 │       ├── publish.json        # 多平台发布信息（月报变体：tags 含 AI月报）
 │       ├── wechat-article-YYYY-MM.md   # 公众号图文（月报变体）
 │       └── wechat-images/      # 公众号配图
@@ -2947,7 +2985,7 @@ def weighted_len(s):
 
 ### 🔴 B站上传文件路径中文字符问题（v3.2.0 新增，2026-07-04）
 
-**问题**：视频文件名包含中文字符（如 `【今日羊报AI】阿里禁用Claude...mp4`）时，B站上传接口返回 400 Bad Request 错误。
+**问题**：视频文件名包含中文字符（如 `【2026-08-13】阿里禁用Claude...| 今日羊报AI.mp4`）时，B站上传接口返回 400 Bad Request 错误。
 
 **原因**：B站上传接口对文件名中的中文字符处理有问题，可能导致 URL 编码错误。
 
@@ -2957,7 +2995,7 @@ def weighted_len(s):
 
 ```bash
 # 复制视频到简单路径
-cp "news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4" \
+cp "news-pipeline/YYYY-MM-DD/video/【YYYY-MM-DD】*.mp4" \
    "news-pipeline/YYYY-MM-DD/video/upload-YYYY-MM-DD.mp4"
 ```
 
@@ -3117,7 +3155,7 @@ await titleInput.fill('代码偷吃SSD+豆包对标Opus｜今日羊报AI');
 
 **已验证的正确流程（优先「从正文选择」）**：
 1. Focus 正文：`.ProseMirror` 第二个
-2. 工具栏「图片」→「本地上传」→ `setInputFiles(wechat-21-9.png)` → 等 8s → Escape 关上传挡层
+2. 工具栏「图片」→「本地上传」→ `setInputFiles(horizontal-4-3.png)`（横版封面）→ 等 8s → Escape 关上传挡层
 3. `#js_cover_area` scrollIntoView → **hover** `.js_cover_btn_area`
 4. **强制显示**后点 **`.js_selectCoverFromContent`**
 5. 点带 `mmbiz` 背景的 **`.appmsg_content_img_item`** → **「下一步」**
@@ -3255,7 +3293,7 @@ const inputs = await page.$$('input[type="file"]');
 // inputs[1]: 封面 (image/png, image/jpeg)
 // inputs[2]: 字幕 (.txt)
 // inputs[3]: 素材 (.zip)
-await inputs[1].setInputFiles('cover.png');  // 设置封面
+await inputs[1].setInputFiles('horizontal-4-3.png');  // 设置封面
 ```
 
 ### 周报多平台上传流程（v1.9.2 新增）
@@ -3266,7 +3304,7 @@ await inputs[1].setInputFiles('cover.png');  // 设置封面
 1. 导航到 `https://member.bilibili.com/platform/upload/video/frame`
 2. 上传周报视频：`news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/video/【羊报AI周刊】*.mp4`
 3. 标题自动填充：`【羊报AI周刊】... | YYYY-MM-DD~YYYY-MM-DD`
-4. 上传封面：`news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/bilibili-4-3.png`
+4. 上传封面：`news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/horizontal-4-3.png`
 5. 设置创作声明：个人观点，仅供参考
 6. 添加标签：羊报AI周刊, AI周报, OpenAI, Anthropic, DeepSeek
 7. 填写简介：本期热点...
@@ -3283,7 +3321,7 @@ await inputs[1].setInputFiles('cover.png');  // 设置封面
    - 点击正文区域获取 focus
    - 按回车创建新行
    - 点击工具栏「图片」→「本地上传」
-   - 用 `input.setInputFiles()` 上传 `wechat-21-9.png`
+   - 用 `input.setInputFiles()` 上传封面图（`horizontal-4-3.png` 横版）
 7. 设置封面：
    - Hover「拖拽或选择封面」显示选项菜单
    - 用 `.js_selectCoverFromContent` class 选择器点击「从正文选择」
@@ -3299,11 +3337,8 @@ await inputs[1].setInputFiles('cover.png');  // 设置封面
 
 | 平台 | 文件 | 尺寸 |
 |------|------|------|
-| 通用/视频封面 | `weekly-cover.png` | 1536x1024 (16:9) |
-| B站 | `bilibili-4-3.png` | 1536x1152 (4:3) |
-| 公众号 | `wechat-21-9.png` | 1536x659 (21:9) |
-| 抖音横版 | `douyin-horizontal-4-3.png` | 1536x1152 (4:3) |
-| 抖音竖版 | `douyin-vertical-3-4.png` | 1152x1536 (3:4) |
+| B站/通用（横版） | `horizontal-4-3.png` | 1536x1152 (4:3) |
+| 抖音/竖版 | `vertical-3-4.png` | 1152x1536 (3:4) |
 
 ### Phase 14: 抖音自动上传（Playwright MCP）
 
@@ -3329,7 +3364,7 @@ browser_run_code_unsafe("""async (page) => {
 }""")
 
 # 上传视频文件
-browser_file_upload("news-pipeline/YYYY-MM-DD/video/【今日羊报AI】*.mp4")
+browser_file_upload("news-pipeline/YYYY-MM-DD/video/【YYYY-MM-DD】*.mp4")
 
 # 等待上传完成
 browser_wait_for(time=10)
@@ -3379,8 +3414,8 @@ browser_run_code_unsafe("""async (page) => {
 
 #### 14.6 上传封面（横封面4:3 + 竖封面3:4）（v3.6.0 更新）
 
-**🔴 必须双封面**：横 `douyin-horizontal-4-3.png`（4:3）+ 竖 `douyin-vertical-3-4.png`（3:4）。  
-**文件名铁律**：用 Phase 5.5 产出的 `douyin-horizontal-4-3.png` / `douyin-vertical-3-4.png`，**不要**写成 `cover-horizontal.png` / `cover-vertical.png`。
+**🔴 封面复用**：横封面用 `horizontal-4-3.png`（4:3）+ 竖封面用 `vertical-3-4.png`（3:4）。  
+**文件名铁律**：用 Phase 5.5 产出的 `horizontal-4-3.png` / `vertical-3-4.png`，**不要**写成 `cover-horizontal.png` / `cover-vertical.png`。
 
 **入口差异**：
 - **首次投稿页**：横封面点「完成」后，常自动弹出「设置竖封面获更多流量」→ 点「设置竖封面」
@@ -3443,7 +3478,7 @@ browser_run_code_unsafe("""async (page) => {
 
 # 步骤2：横封面 filechooser（推荐）或 setInputFiles 兜底
 browser_run_code_unsafe("""async (page) => {
-  const path = 'news-pipeline/YYYY-MM-DD/douyin-horizontal-4-3.png';
+  const path = 'news-pipeline/YYYY-MM-DD/horizontal-4-3.png';
   try {
     const [chooser] = await Promise.all([
       page.waitForEvent('filechooser', { timeout: 6000 }),
@@ -3503,7 +3538,7 @@ browser_run_code_unsafe("""async (page) => {
 
 # 步骤5：竖封面上传（必须确认打开了「设置竖封面」或出现「上传封面」）
 browser_run_code_unsafe("""async (page) => {
-  const path = 'news-pipeline/YYYY-MM-DD/douyin-vertical-3-4.png';
+  const path = 'news-pipeline/YYYY-MM-DD/vertical-3-4.png';
   const open = await page.evaluate(() =>
     document.body.innerText.includes('设置竖封面')
     || document.body.innerText.includes('上传封面'));
@@ -3735,7 +3770,7 @@ browser_run_code_unsafe("""async (page) => {
 - 上传页无「继续编辑」
 - `enter_from=draft` 打开是空表单（标题 0/30）
 
-**竖封面文件**：只使用本期 `news-pipeline/{date}/douyin-vertical-3-4.png`（含日期+品牌）。用户指定该文件时**禁止**用 scene 图或其它日期文件替代。
+**竖封面文件**：只使用本期 `news-pipeline/{date}/vertical-3-4.png`（含日期+品牌）。用户指定该文件时**禁止**用 scene 图或其它日期文件替代。
 
 #### 🔴 抖音违规审核与处理（v3.15.0 新增，2026-07-31 实测）
 
@@ -3831,7 +3866,7 @@ browser_run_code_unsafe("""async (page) => {
 **解决**：使用 `input.setInputFiles()` 直接设置文件：
 ```javascript
 const input = await page.$('input[type="file"][accept*="image"]');
-await input.setInputFiles('news-pipeline/weekly/.../wechat-21-9.png');
+await input.setInputFiles('news-pipeline/weekly/.../horizontal-4-3.png');
 ```
 
 ### 🟡 周报B站合集自动选择（v1.9.2 新增）
@@ -3860,14 +3895,14 @@ await input.setInputFiles('news-pipeline/weekly/.../wechat-21-9.png');
 
 **解决**：Phase 9 视频合成完成后，立即执行归档：
 ```bash
-cp "news-pipeline/video-project/out/【今日羊报AI】{核心标题} | YYYY-MM-DD.mp4" \
+cp "news-pipeline/video-project/out/【YYYY-MM-DD】{核心标题}… | 今日羊报AI.mp4" \
    "news-pipeline/YYYY-MM-DD/video/"
 ```
 
 **归档时机**：视频合成完成后立即执行，不要等到上传阶段再复制。
 
 ### 🔴 封面生成不完整（v2.2.0 新增，2026-06-13）
-**问题**：异步生成封面时，只生成了部分封面（2/5），其余封面因 API 超时或错误未生成。
+**问题**：异步生成封面时，只生成了部分封面（如 1/2），另一张封面因 API 超时或错误未生成。
 
 **解决**：
 1. 每张封面生成后自动重试一次
@@ -3877,7 +3912,7 @@ cp "news-pipeline/video-project/out/【今日羊报AI】{核心标题} | YYYY-MM
 **验证方法**：
 ```bash
 ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
-# 应该输出 5（cover.png, bilibili-4-3.png, wechat-21-9.png, douyin-horizontal-4-3.png, douyin-vertical-3-4.png）
+# 应该输出 2（horizontal-4-3.png【4:3 横版】, vertical-3-4.png【3:4 竖版】）
 ```
 
 ### 🔴 公益站内容过滤（v2.2.0 新增，2026-06-13）
@@ -3913,9 +3948,9 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 **问题**：从草稿箱打开投稿页（`enter_from=draft`）时，横封面点「完成」后**不一定**弹出「设置竖封面」；旧文档写的「弹窗必现」在草稿流失效，导致竖封面一直缺失。
 
 **解决**：
-1. 横封面：语义找「横封面4:3」→ 同卡「选择封面」→ `force` 点「上传封面」→ `douyin-horizontal-4-3.png` →「完成」
+1. 横封面：语义找「横封面4:3」→ 同卡「选择封面」→ `force` 点「上传封面」→ `horizontal-4-3.png` →「完成」
 2. 竖封面：若无弹窗，用「竖封面3:4」标签的 `getBoundingClientRect`，点击 **标签上方约 50–80px** 的封面框打开编辑器
-3. 再 `force` 点「上传封面」→ `douyin-vertical-3-4.png` →「完成」
+3. 再 `force` 点「上传封面」→ `vertical-3-4.png` →「完成」
 4. 验收文案无「竖封面缺失」/「横/竖双封面缺失」后「暂存离开」
 
 **Why:** 首次投稿页与草稿编辑页 UI 分支不同；硬编码坐标在不同窗口尺寸下也易失效  
@@ -3952,7 +3987,7 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 **问题**：「从正文选择」链路偶发失败（file chooser 不弹、上传中弹窗挡保存、class 选择器找不到），若强依赖封面会导致整篇无法存草稿。
 
 **解决**：
-1. 完整链路仍优先：工具栏图片→本地上传 `wechat-21-9.png` → hover 封面区 → `.js_selectCoverFromContent` → 下一步 → 确认
+1. 完整链路仍优先：工具栏图片→本地上传封面图（`horizontal-4-3.png` 横版 / `vertical-3-4.png` 竖版，均按公众号头条封面 900×383 自动裁剪）→ hover 封面区 → `.js_selectCoverFromContent` → 下一步 → 确认
 2. chooser 不弹：`input[type=file][accept*=image].setInputFiles(...)` 兜底
 3. 上传中弹窗：等待 8–15s + Escape 再点「保存为草稿」
 4. **封面失败也要保存草稿**；成功信号优先看 URL 是否含 `appmsgid=`
@@ -3971,8 +4006,8 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 4. 如果弹窗点击「暂不设置」，可后续在编辑页面补充
 
 **封面文件**：
-- 横封面：`douyin-horizontal-4-3.png`（1536x1152，4:3）
-- 竖封面：`douyin-vertical-3-4.png`（1152x1536，3:4）
+- 横封面：`horizontal-4-3.png`（1536x1152，4:3）
+- 竖封面：`vertical-3-4.png`（1152x1536，3:4）
 
 **Why:** 抖音个人主页显示竖封面，搜索结果展示横封面，两者都需要
 **How to apply:** 抖音上传时必须上传双封面，竖封面可在横封面完成后通过弹窗上传
@@ -4115,9 +4150,9 @@ await page.evaluate(() => {
   if (editors[1]) editors[1].click();
 });
 // 2. 点击工具栏「图片」→「本地上传」
-// 3. 用 hidden file input 上传
+// 3. 用 hidden file input 上传（封面图：horizontal-4-3.png 横版 / vertical-3-4.png 竖版）
 const input = await page.$('input[type="file"][accept*="image"]');
-await input.setInputFiles('/path/to/cover.png');
+await input.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 ```
 
 **路径 B：封面区域直接上传**
@@ -4128,7 +4163,7 @@ const inputs = await page.$$('input[type="file"]');
 for (const input of inputs) {
   const accept = await input.getAttribute('accept');
   if (accept && accept.includes('image')) {
-    await input.setInputFiles('/path/to/cover.png');
+    await input.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
     break;
   }
 }
@@ -4141,7 +4176,7 @@ B站上传页面的封面选择器是隐藏的 file input：
 // 1. 先点击「更改封面」按钮
 // 2. 找到 hidden file input 并上传
 const input = await page.$('input[type="file"][accept*="image"]');
-await input.setInputFiles('/path/to/bilibili-cover.png');
+await input.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 // 3. 等待上传完成，点击确认
 ```
 
@@ -4257,7 +4292,7 @@ try {
 const inputs = await page.$$('input[type="file"]');
 // inputs[0]: 视频 (.mp4)
 // inputs[1]: 封面 (通过封面设置弹窗触发)
-await inputs[1].setInputFiles('cover.png');
+await inputs[1].setInputFiles('horizontal-4-3.png');
 ```
 
 或者跳过自动封面上传，提示用户手动上传。
@@ -4357,9 +4392,9 @@ await inputs[1].setInputFiles('cover.png');
 **解决**：以「继续编辑」/ 内容管理标题 / draft 页非空表单验收；失败整段重传。
 **How to apply:** Phase 14.10 验收三信号。
 
-### 🔴 竖封面必须用当期 douyin-vertical-3-4.png（v3.9.0）
+### 🔴 竖封面必须用当期 vertical-3-4.png（v3.9.0）
 **问题**：补封面时用错图或比例不对，用户明确「竖封面3:4 不对」。
-**解决**：只认 `news-pipeline/{date}/douyin-vertical-3-4.png`；上传后仍要 `missingV=false`。
+**解决**：只认 `news-pipeline/{date}/vertical-3-4.png`；上传后仍要 `missingV=false`。
 **How to apply:** Phase 5.5 生成 + 14.6/14.10 补传。
 
 ### 🟡 TTS 503 网关无节点（v3.9.0）
@@ -4379,7 +4414,7 @@ await inputs[1].setInputFiles('cover.png');
 
 ### 🟡 抖音竖封面必须带日期（v3.7.0 / 2026-07-18）
 **问题**：竖封面生成失败时用 scene 图回退，用户反馈「上面没日期」。
-**解决**：`douyin-vertical-3-4.png` 失败必须重试 GEN_IMG，prompt 强制底部 `YYYY-MM-DD` 与右上「今日羊报 AI」；禁止无品牌 scene 回退当封面。
+**解决**：`vertical-3-4.png` 失败必须重试 GEN_IMG，prompt 强制底部 `YYYY-MM-DD` 与右上「今日羊报 AI」；禁止无品牌 scene 回退当封面。
 **How to apply:** Phase 5.5 / 14.6。
 
 
@@ -4389,7 +4424,7 @@ await inputs[1].setInputFiles('cover.png');
 1. 从 settings.env 组装 endpoint 列表 `['', '_001', '_002']`，逐张生成、已有文件跳过
 2. 单张 max-time 90–180s；整批超时按张数放大或拆成多条 Bash
 3. 日志只打印 `set/empty/len`，禁止打印 key 前缀（安全策略会拦）
-4. CTA scene 可兜底；`douyin-vertical-3-4.png` 必须当期生成成功
+4. CTA scene 可兜底；`vertical-3-4.png` 必须当期生成成功
 **How to apply:** Phase 5 / 5.5
 
 ### 🔴 usage-log 与 concepts 根结构（v3.10.0 / 2026-07-21）
@@ -4399,7 +4434,7 @@ await inputs[1].setInputFiles('cover.png');
 
 ### 🟡 公众号草稿成功但封面未闭环（v3.10.0 / 2026-07-21）
 **问题**：`appmsgid=` 已出现，`.js_cover_preview_new` 仍 `display:none`。
-**解决**：草稿优先；封面失败写 upload-status「可手补 wechat-21-9.png」；不因封面阻塞汇报成功。
+**解决**：草稿优先；封面失败写 upload-status「可手补封面图（horizontal-4-3.png / vertical-3-4.png）」；不因封面阻塞汇报成功。
 **How to apply:** Phase 12 + upload-status.md
 
 ### 🟡 B站存草稿后 URL 已是 group=draft（v3.10 再确认）
@@ -4409,7 +4444,7 @@ await inputs[1].setInputFiles('cover.png');
 
 
 ### 🔴 GEN_IMG 整批 10 分钟超时后必须续跑缺失文件（v3.11.0 / 2026-07-22）
-**问题**：scene1–7 已生成，`cover.png` 也生成了，但后续 4 张平台封面还没跑完时 Bash 10min kill（exit 143）。若当成「封面全失败」会重跑 scene 浪费时间。
+**问题**：scene1–7 已生成，`horizontal-4-3.png` 也生成了，但 `vertical-3-4.png` 还没跑完时 Bash 10min kill（exit 143）。若当成「封面全失败」会重跑 scene 浪费时间。
 **解决**：
 1. 超时后立刻 `ls` 校验每张 `sceneN.png` / 平台封面的 size（>5KB 视为成功）
 2. **只补缺失文件**，禁止无条件重跑已有 scene
@@ -4465,7 +4500,7 @@ await inputs[1].setInputFiles('cover.png');
 ### 🟡 公众号草稿「只补封面」（v3.14 / 2026-07-27）
 **问题**：用户只要更新 `appmsgid=…` 封面，正文自理；自动化链路可能 `preview display:none` 仍点了确认/保存。
 **解决**：
-1. 直达 `appmsg?…&appmsgid=` → 正文插 `wechat-21-9.png` → 从正文选择 → 编辑封面 → **确认** → 保存草稿
+1. 直达 `appmsg?…&appmsgid=` → 正文插封面图（`horizontal-4-3.png` / `vertical-3-4.png`）→ 从正文选择 → 编辑封面 → **确认** → 保存草稿
 2. 验收优先：`.js_cover_preview_new` 的 `display:block` + `mmbiz/qpic`；失败时**明确告知用户需手补**，不假装成功
 3. 勿在用户未要求时改标题/正文
 **How to apply:** Phase 12 封面-only 任务
@@ -4485,7 +4520,7 @@ await inputs[1].setInputFiles('cover.png');
 **解决（草稿编辑页）**：
 1. 打开 `upload-manager/article?group=draft` → 找当日标题 → `frame?type=draft&draftId=...`
 2. 点 **「封面设置」**（`.cover-empty` / 坐标点封面框）→ 弹窗 **「封面制作」**
-3. 弹窗内出现 `input[accept="image/png, image/jpeg"]`（可有多个：4:3 / 16:9）→ **`setInputFiles(bilibili-4-3.png)`**（16:9 可用 `cover.png`）
+3. 弹窗内出现 `input[accept="image/png, image/jpeg"]`（可有多个：4:3 / 16:9）→ **`setInputFiles(horizontal-4-3.png)`**
 4. 点底部 **「完成」**（y 较大的主按钮）
 5. 验收：`.cover-empty` / `.cover-empty.failed` **消失**；`.cover-img` 的 `background-image` 含 `archive.biliimg.com` 或 `bfs/archive`
 6. 再点 **「存草稿」**；成功信号仍是 URL `group=draft`
@@ -4511,6 +4546,31 @@ await inputs[1].setInputFiles('cover.png');
 - 封面可手补，不阻塞草稿成功
 
 ## 更新日志
+
+### v3.17.0（2026-08-13）
+基于 **2026-08-13 日报视频全流程**（DeepSeek V4 Pro / Grok 4.6 同期上线 → 多平台草稿）实战：
+
+**B站标题规则（核心）**
+- 标题改为「日期在前、报刊名在后」：`【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI`
+- 同步更新模式映射表 / publish.json 模板 / 渲染文件名 / 归档路径（周报、月报同规则）
+- 渲染文件名改为 `【{YYYY-MM-DD}】{核心标题}… | 今日羊报AI.mp4`
+
+**封面精简**
+- 封面由 5 张精简为 **2 张**：`horizontal-4-3.png`（1536x1152，4:3，B站/通用/横版）+ `vertical-3-4.png`（1152x1536，3:4，抖音/竖版）
+- 全量替换旧封面名（wechat-21-9 / douyin-horizontal-4-3 / cover.png / weekly-cover.png）
+
+**B站分区自动选择**
+- 新增 Phase 11.4：上传 B 站时自动选择分区「**人工智能**」（Translate.creator 自定义下拉需 JS evaluate 点击）
+
+**数据来源去展示化**
+- 视频脚本默认模板不出现「数据来自 linux.do 社区精选」等来源字样，正文/CTA 不展示平台来源
+
+**版本**：3.16.0 → 3.17.0
+
+### v3.16.0（2026-08-08）
+基于 **2026-08-08 抖音/视频号标题规则优化** 实战：
+- 抖音/视频号标题改为纯报刊名 + 日期，≤30/≤16 字
+- 版本号由 3.15.0 → 3.16.0（本轮 git 历史已记录，见 commit c00286b）
 
 ### v3.15.0（2026-07-31）
 基于 **2026-07-31 日报视频全流程**（daily 428 → 抖音「引导至风险不可控渠道」违规 → 修改脚本 + edge-tts 重渲 → 公众号封面）实战：
@@ -4625,7 +4685,7 @@ await inputs[1].setInputFiles('cover.png');
 **图片生成稳定性（核心）**
 - GEN_IMG 多端点 `URL/KEY` + `_001/_002` fallback；禁止日志打印 key
 - 按 scene 跳过已生成文件；避免整批 10 分钟 Bash 超时（exit 143）
-- CTA 图可临时兜底；竖封面必须当期 `douyin-vertical-3-4.png`
+- CTA 图可临时兜底；竖封面必须当期 `vertical-3-4.png`
 
 **概念锚点 / usage-log**
 - `concepts.json` 根 dict + `concepts[]`；usage-log 兼容 list / `{entries}`
@@ -4648,7 +4708,7 @@ await inputs[1].setInputFiles('cover.png');
 **抖音草稿闭环（核心）**
 - 「暂存离开」后必须验收：继续编辑 / 内容管理可见 / draft 表单非空
 - 验收失败 → 视频+元数据+双封面整段重传，不可只报「已点暂存」
-- 竖封面只使用当期 `douyin-vertical-3-4.png`（用户可点名文件）
+- 竖封面只使用当期 `vertical-3-4.png`（用户可点名文件）
 
 **视频号登录判定**
 - 用户口头「已登录」无效；以 MCP `login.html` 为准
@@ -4668,7 +4728,7 @@ await inputs[1].setInputFiles('cover.png');
 - 裁剪弹窗标题「编辑封面」；主按钮 **「确认」**（避开 disabled「确定」）
 - 裁剪中禁止 Escape；点确认后 **轮询 preview `display:block` + mmbiz 背景**
 - 从正文选择：hover + 强制显示 `.js_selectCoverFromContent`；缩略图优先 mmbiz 背景 item
-- 直达草稿：`appmsgid=` 编辑 URL；`wechat-21-9.png` 必须先入正文
+- 直达草稿：`appmsgid=` 编辑 URL；封面图（`horizontal-4-3.png` / `vertical-3-4.png`）必须先入正文
 
 **上传与联跑**
 - B站：中文文件名 → 简单路径；成功看 `group=draft`
@@ -4697,7 +4757,7 @@ await inputs[1].setInputFiles('cover.png');
 - **版本**：3.5.0 → 3.6.0
 
 ### v3.5.0（2026-07-15）
-- **抖音封面（Phase 14.6，2026-07-16 实测）**：草稿编辑页「设置竖封面」弹窗常不出现 → 用「竖封面3:4」标签 getBoundingClientRect 点标签上方封面框；语义点「选择封面」优先于硬编码坐标；文件名强制 douyin-horizontal-4-3.png / douyin-vertical-3-4.png；验收无「竖封面缺失」再暂存
+- **抖音封面（Phase 14.6，2026-07-16 实测）**：草稿编辑页「设置竖封面」弹窗常不出现 → 用「竖封面3:4」标签 getBoundingClientRect 点标签上方封面框；语义点「选择封面」优先于硬编码坐标；文件名强制 horizontal-4-3.png（横）/ vertical-3-4.png（竖）；验收无「竖封面缺失」再暂存
 - **公众号封面（Phase 12.7，2026-07-16 实测）**：file chooser 不弹时用 setInputFiles 兜底；封面失败不阻塞「保存为草稿」；成功以 URL appmsgid= 为准；保留「从正文选择」+ .js_selectCoverFromContent + 上传中弹窗 Escape
 - **字幕算法根治**：Phase 7 默认方案从 v2.1.0 纯字符比例升级为 v2.2.0 混合算法（加权字符估算 + silencedetect 真实停顿点吸附）
 - **加权字符**：中文 1.0 / 数字 0.6 / 英文 0.35，避免版本号密集句（`GPT-5.6`、`85.5GiB`）被高估时长
