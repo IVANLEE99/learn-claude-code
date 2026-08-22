@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.17.0
+version: 3.19.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.17.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.19.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -1081,6 +1081,111 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 - 总时间从串行的 6-8 分钟缩短到并行的 3-5 分钟
 - 每张封面自动重试一次，提高成功率
 
+### Phase 5.6: 本地生图兜底（v3.19.0 新增，API 全挂 / 文字渲染不达标时）
+
+**与 edge-tts 兜底 mimo-tts 同构**：当 GEN_IMG 多端点全部失败、或 API 出图但中文文字糊掉时，用 Pillow 本地生成 scene 图和封面，保证流水线不中断。
+
+#### 触发条件（满足任一即切本地）
+
+**Scene 图本地化（`gen_images_local.py`）**：
+1. API 所有端点 401 / 余额耗尽 / SSL 握手超时 / `net::ERR_*` 全挂
+2. 上一期遗留的 scene 图与本期脚本内容不匹配（新闻变了，图没变，需重画）
+
+**封面本地化（`gen_covers_local.py`）**：
+1. API 余额耗尽，无法生成封面
+2. **或** API 有余额但 gpt-image-2 渲染的中文日期/品牌名糊掉、错字、变形——封面文字必须像素级准确，API 不可靠时直接本地叠加
+
+#### 本地生图原理
+
+**Scene 图**：用 Pillow 画 8 张主题化抽象背景（1920×1080），深色演播室 + 场景专属配色 + 几何 motif（数据流、发光球、上下文进度条、GPU 卡堆叠、领奖台等）。每张 `draw_sceneN()` 对应一期脚本的一个场景。
+
+**封面**：拿已生成的 `scene1.png` 作底图，裁剪到目标比例，叠加：
+- 底部 + 右上角深色渐变蒙版（保证文字可读性）
+- 中央大字日期（`Arial Unicode.ttf`，带阴影）
+- 右上角品牌块（`今日羊报 AI` / `AI 新闻`，`STHeiti Medium.ttc`）
+
+#### 脚本模板
+
+**封面本地生成 `gen_covers_local.py`**（关键变量）：
+
+```python
+#!/usr/bin/env python3
+"""Generate covers from scene1.png with text overlay (API balance exhausted)."""
+from PIL import Image, ImageDraw, ImageFont
+import os
+
+BASE = "news-pipeline/YYYY-MM-DD"          # 当期输出目录
+SRC = os.path.join(BASE, "images/scene1.png")  # 底图（优先用 API 出的 scene1）
+FONT_BOLD = "/System/Library/Fonts/STHeiti Medium.ttc"   # 品牌名中文字体
+FONT_ARIAL = "/Library/Fonts/Arial Unicode.ttf"          # 日期数字字体
+DATE = "YYYY-MM-DD"   # 🔴 按模式参数映射表读取，勿硬编码
+BRAND = "今日羊报 AI"  # 按模式读取（日报/周报/月报不同）
+SUB = "AI 新闻"
+
+def draw_cover(out_name, target_w, target_h):
+    src = Image.open(SRC).convert("RGB")
+    # 裁剪到目标比例
+    # 叠加深色渐变蒙版（底部 + 右上角品牌块）
+    # 中央大字日期（带阴影）
+    # 右上角品牌 + 副标
+    canvas.save(os.path.join(BASE, out_name), "PNG", quality=95)
+
+draw_cover("horizontal-4-3.png", 1536, 1152)  # B站/通用 4:3
+draw_cover("vertical-3-4.png", 1152, 1536)    # 抖音/视频号 3:4
+```
+
+**Scene 图本地生成 `gen_images_local.py`** 结构：
+
+```python
+#!/usr/bin/env python3
+"""Local scene-image generator (Pillow, no API). Replaces mismatched old images."""
+import math, random
+from PIL import Image, ImageDraw, ImageFilter
+
+W, H = 1920, 1080
+random.seed(20260821)   # 固定种子保证可复现
+
+def base_gradient(top, bottom): ...      # 垂直渐变底
+def radial_glow(img, cx, cy, radius, color, intensity): ...  # 径向发光
+def draw_scene1(): ...   # Hook — 演播室全景 + 青色数据流
+def draw_scene2(): ...   # 按当期新闻主题画（神秘模型→发光球+问号）
+# ... 每个场景对应当期脚本内容
+def draw_scene8(): ...   # CTA — 暖色演播室 + 订阅铃铛发光
+
+SCENES = [draw_scene1, ..., draw_scene8]
+# 输出到 news-pipeline/video-project/public/images/sceneN.png
+```
+
+#### 执行方式
+
+```bash
+# 1. Scene 图本地生成（仅当 API 全挂时）
+cd /Users/youngsdream/Documents/learn-claude-code
+python3 news-pipeline/YYYY-MM-DD/scripts/gen_images_local.py
+
+# 2. 封面本地生成（API 余额耗尽或文字糊掉时）
+python3 news-pipeline/YYYY-MM-DD/scripts/gen_covers_local.py
+```
+
+**🔴 注意**：
+- 封面本地化优先用 **API 出的 `scene1.png` 作底图**（视觉质量更高）；若 scene 也本地化了，则用本地 scene1
+- 日期/品牌名变量**必须按模式参数映射表读取**，禁止硬编码 `2026-08-21`——改日期时只改 `DATE` 一处
+- 本地 scene 图是抽象几何风格，视觉质量低于 API 出图；**仅作兜底**，API 恢复后应切回 API
+- 脚本依赖系统字体：`/System/Library/Fonts/STHeiti Medium.ttc`（品牌名）、`/Library/Fonts/Arial Unicode.ttf`（日期）；缺字体时换 `PingFang.ttc` / `Helvetica.ttc`
+- 生成后**必须视觉校验**：`Read` 打开 PNG 确认日期/品牌文字清晰无糊无错字
+
+#### 决策流程
+
+```
+Phase 5 scene 图生成
+├─ API 任一端点出图成功 → 用 API 图（默认）
+└─ 全端点失败 / 旧图不匹配 → gen_images_local.py 本地生成
+
+Phase 5.5 封面生成
+├─ API 出图且中文文字清晰 → 用 API 封面（默认）
+└─ API 余额耗尽 / 文字糊掉 → gen_covers_local.py 本地叠加（优先用 API scene1 作底图）
+```
+
 ### Phase 6: TTS 配音
 
 根据视频脚本逐场景生成配音：
@@ -1190,6 +1295,22 @@ ffmpeg -y -i /tmp/sceneN_edge.mp3 -acodec pcm_s16le -ar 24000 -ac 1 \
 - edge-tts 输出为 MP3，必须用 ffmpeg 转为 WAV（24kHz）才能与 Phase 7 字幕流程兼容
 - 转换后音频时长不变，无需调整 Composition.tsx 的 duration
 - 重新生成 TTS 后必须同步更新：Composition.tsx sceneConfig → Root.tsx TOTAL_DURATION_SEC → 重算 captions.json → 重渲染
+
+#### 6.3b atempo=1.4 加速（v3.18.0 / 2026-08-18 实测）
+
+音色 `zh-CN-YunxiNeural`（云希）+ ffmpeg `atempo=1.4` 加速，可显著缩短总时长（8 场景实测 112.13s）。
+
+```bash
+# edge-tts 生成 → ffmpeg atempo=1.4 加速 → 24kHz PCM16LE 单声道 WAV
+ffmpeg -y -i /tmp/sceneN_edge.mp3 -filter:a atempo=1.4 \
+  -acodec pcm_s16le -ar 24000 -ac 1 sceneN.wav
+```
+
+**加速后必须重算**：
+- `Composition.tsx` sceneConfig 各场景时长
+- `Root.tsx` `TOTAL_DURATION_SEC`
+- `captions.json` 字幕时间轴
+- 然后重新渲染视频
 
 ### Phase 7: 字幕生成（原始脚本文本 + 加权字符估算 + silencedetect 吸附）
 
@@ -2586,6 +2707,20 @@ browser_run_code_unsafe("""async (page) => {
 }""")
 ```
 
+#### 13.0b 自主登录失败协议（v3.18.0 / 2026-08-18 实测）
+
+`channels.weixin.qq.com` 会重定向到 `login.html`，QR iframe 来自 `open.weixin.qq.com`（**跨域**）。
+
+**失败表现**：
+- iframe 显示 **「加载失败，点击重试」**；点击重试 + 等 5s 仍不加载。
+- 跨域 iframe **无法用 JS 访问**（`contentDocument` 为 null）。
+- `page.reload` 1–2 次仍失败。
+
+**处理协议**：
+1. `page.reload` 1–2 次后仍失败 → 标记 `channels: login_required`。
+2. 写 `upload-status.md` 为 `⏭`（跳过本平台），停止空转。
+3. **明确**：自主流程无法完成视频号扫码登录，需用户手动扫码。Phase 13 结束并在 `upload-status.md` 注明「等待用户手动扫码后重跑」。
+
 **常见 iframe 结构**：
 - 主页面：`https://channels.weixin.qq.com/platform/post/...`
 - 内容 iframe：`name="content"`, URL 包含 `/micro/content/post/...`
@@ -3346,6 +3481,28 @@ await inputs[1].setInputFiles('horizontal-4-3.png');  // 设置封面
 
 **🔴 重要经验：抖音创作者中心使用自定义组件，封面上传需要用 force click，发布需要短信验证码。**
 
+#### 14.0 草稿恢复弹窗处理（v3.18.0 / 2026-08-18 实测）
+
+打开上传页（`creator.douyin.com/creator-micro/content/upload`）时，若上次有未发布草稿，会弹出 **「你还有上次未发布的视频，是否继续编辑？」**。
+
+**❌ 错误做法**：点击合并文本「继续编辑放弃」——无法精确丢弃旧草稿，会落到 `enter_from=draft` 编辑页，混入旧素材。
+
+**✅ 正确流程**：
+1. 从草稿编辑页点「**重新上传**」→ 导航回 upload 页 → 重新触发 file chooser。
+2. 离开草稿编辑页时会弹 **「将此次编辑保留？」**（beforeunload）→ `browser_handle_dialog(accept=true)`，否则触发 `net::ERR_ABORTED` 导致导航失败。
+
+```
+# 草稿编辑页 → 点「重新上传」回到 upload 页
+browser_run_code_unsafe("""async (page) => {
+  const btn = page.getByRole('button', { name: '重新上传' });
+  if (await btn.count()) await btn.first().click();
+  return 'clicked';
+}""")
+
+# 若弹出 beforeunload「将此次编辑保留？」
+browser_handle_dialog(accept=true)
+```
+
 #### 14.1 打开抖音创作者中心
 
 ```
@@ -3709,6 +3866,33 @@ browser_run_code_unsafe("""async (page) => {
 }""")
 ```
 
+#### 14.8b Semi Design 组件拦截修复（v3.18.0 / 2026-08-18 实测）
+
+抖音创作者中心部分控件基于 **Semi Design**（ByteDance），原生 `locator.click()` 常被外层包裹元素拦截而 30s 超时。
+
+**自主声明 radio**：
+- **原因**：`<label class="semi-radio">…</label>` 拦截 pointer events，`locator.click()` 超时 30s。
+- **修复**：直接点击 `label.semi-radio` 元素。
+
+```
+const label = page.locator('label.semi-radio').filter({ hasText: '内容为个人观点或见解' });
+await label.click();
+```
+
+**「暂存离开」按钮**：
+- **原因**：`<div role="modal" class="semi-modal-wrap">` 拦截，按钮不可点。
+- **修复**：关闭 modal `.semi-modal-close` → `Escape` → force click。
+
+```
+await page.keyboard.press('Escape');
+await page.waitForTimeout(1000);
+await page.locator('button:has-text("暂存离开")').click({ force: true });
+```
+
+**file chooser modal state**：
+- `browser_run_code_unsafe` 触发 file chooser 后，工具层会停在 **"Modal state: File chooser"** 导致后续 tool call 阻塞。
+- **修复**：用 `browser_file_upload(paths=[...])` 处理文件选择，**不要**在同一长脚本里串 `filechooser` 事件。
+
 #### 14.9 添加标签
 
 ```
@@ -3771,6 +3955,27 @@ browser_run_code_unsafe("""async (page) => {
 - `enter_from=draft` 打开是空表单（标题 0/30）
 
 **竖封面文件**：只使用本期 `news-pipeline/{date}/vertical-3-4.png`（含日期+品牌）。用户指定该文件时**禁止**用 scene 图或其它日期文件替代。
+
+#### 14.10b 暂存离开 + 草稿落库验收（v3.18.0 / 2026-08-18 实测）
+
+抖音 Semi Design modal（`semi-modal-wrap`）会拦截「暂存离开」按钮，需先 `Escape` 关闭残留弹窗再 force click（见 14.8b）。
+
+```
+# 1. 关闭可能残留的 modal
+await page.keyboard.press('Escape');
+await page.waitForTimeout(1000);
+
+# 2. force click「暂存离开」
+await page.locator('button:has-text("暂存离开")').click({ force: true });
+
+# 3. 离开编辑页时若弹 beforeunload「将此次编辑保留？」
+browser_handle_dialog(accept=true)
+```
+
+**草稿落库验收信号**（满足其一即 ✅）：
+1. 回到上传页出现 **「继续编辑」** / 「上次未发布」恢复入口
+2. 内容管理 / 草稿列表可见当日标题关键词
+3. `post/video?enter_from=draft` 表单非空（标题长度 > 0，有视频预览）
 
 #### 🔴 抖音违规审核与处理（v3.15.0 新增，2026-07-31 实测）
 
@@ -4451,6 +4656,15 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 3. 封面可单独一条 Bash；scene 与 cover 可拆开执行
 **How to apply:** Phase 5 / 5.5 超时后先盘点再补齐
 
+### 🔴 GEN_IMG 全挂 / 封面文字糊掉时本地 Pillow 兜底（v3.19.0 / 2026-08-21）
+**问题**：GEN_IMG 所有端点 401/余额耗尽（0821 实测 prism+luka77 全 401，仅 xmiaom 出图）；或 API 出封面但中文日期/品牌名糊掉错字——封面文字必须像素级准确。
+**解决**：
+1. Scene 图全挂 → `gen_images_local.py`（Pillow 画 8 张抽象背景，深色演播室 + 场景配色 + 几何 motif）
+2. 封面 API 余额耗尽 / 文字糊掉 → `gen_covers_local.py`（拿 `scene1.png` 作底图 + 渐变蒙版 + 本地字体叠加日期/品牌）
+3. 见 Phase 5.6 完整脚本模板与决策流程
+**Why:** 0821 scene 图走 API 成功，但封面 API 余额耗尽，用本地 Pillow 叠加保证日期文字 100% 清晰。
+**How to apply:** Phase 5.6；API 恢复后应切回 API（本地图为兜底非默认）
+
 ### 🔴 抖音 filechooser 链式打断后的恢复（v3.11.0 / 2026-07-22）
 **问题**：横/竖封面 `waitForEvent('filechooser')` 与后续步骤叠在一次长 `run_code` 里时，工具层会停在「Modal state: File chooser」，后续逻辑不返回；取消 chooser 后可能落到 `upload?enter_from=publish` 空页。
 **解决**：
@@ -4541,11 +4755,72 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 - 视频 / 横竖封面：`waitForEvent` 触发后工具层停在 **File chooser** → 下一步必须 `browser_file_upload(paths=[...])`
 - 暂存后回上传页：出现 **「你还有上次未发布的视频…继续编辑」** 即草稿 ✅
 
+### 🔴 抖音 Semi Design 组件拦截（v3.18.0 / 2026-08-18）
+**问题**：抖音创作者中心基于 Semi Design，`label.semi-radio` 拦截自主声明 radio 的 pointer events（`locator.click()` 超时 30s）；`div.semi-modal-wrap` 拦截「暂存离开」按钮；`browser_run_code_unsafe` 触发 file chooser 后工具层停在 "Modal state: File chooser" 阻塞后续调用。
+**解决**：
+1. 自主声明 radio：`page.locator('label.semi-radio').filter({ hasText: '内容为个人观点或见解' }).click()`
+2. 「暂存离开」：`page.keyboard.press('Escape')` → `waitForTimeout(1000)` → `locator('button:has-text("暂存离开")').click({ force: true })`
+3. file chooser：用 `browser_file_upload(paths=[...])` 处理，不要在同一长脚本里串 `filechooser` 事件
+**Why:** 0818 自主声明超时 30s、暂存离开被 modal 拦截、file chooser 卡 Modal state。
+**How to apply:** Phase 14.8 自主声明 / 14.10b 暂存离开 / 14.2/14.6 文件上传
+
+### 🔴 视频号 QR 跨域 iframe 无法自主扫码（v3.18.0 / 2026-08-18）
+**问题**：`channels.weixin.qq.com` 重定向 `login.html`，QR iframe 来自 `open.weixin.qq.com`（跨域），iframe 显示「加载失败，点击重试」，点击重试 + 等 5s 仍不加载；跨域 iframe `contentDocument` 为 null，JS 无法访问；`page.reload` 1–2 次仍失败。
+**解决**：reload 1–2 次仍失败 → 标记 `channels: login_required`，写 `upload-status.md` 为 `⏭`，停止空转；**明确**自主流程无法完成视频号扫码登录，需用户手动扫码后重跑。
+**Why:** 0818 视频号 QR 跨域加载失败，自主流程空转无果。
+**How to apply:** Phase 13.0b
+
+### 🔴 抖音草稿恢复弹窗「继续编辑放弃」文本合并（v3.18.0 / 2026-08-18）
+**问题**：上传页弹「你还有上次未发布的视频，是否继续编辑？」，点击合并文本「继续编辑放弃」无法精确丢弃旧草稿，会落到 `enter_from=draft` 编辑页混入旧素材；离开草稿编辑页时弹 beforeunload「将此次编辑保留？」，不处理会触发 `net::ERR_ABORTED`。
+**解决**：从草稿编辑页点「重新上传」→ 导航回 upload 页 → 重新触发 file chooser；离开草稿页弹 beforeunload 时 `browser_handle_dialog(accept=true)`。
+**Why:** 0818 旧草稿混入新上传，beforeunload 未处理导致导航失败。
+**How to apply:** Phase 14.0
+
 ### 🟡 公众号 appmsgid 验收（v3.12 再确认 / 0725）
 - `.new-creation__menu-item[0]` 开文章；标题/作者/正文 ProseMirror 注入；**保存为草稿** 后 URL 含 `appmsgid=`（0725：`100000512`）
 - 封面可手补，不阻塞草稿成功
 
 ## 更新日志
+
+### v3.19.0（2026-08-21）
+基于 **2026-08-21 日报视频全流程**（GEN_IMG 端点大面积 401 + 封面 API 余额耗尽 → 本地 Pillow 兜底）实战：
+
+**Phase 5.6 本地生图兜底（核心，与 edge-tts 兜底 mimo-tts 同构）**
+- 新增 Phase 5.6：当 GEN_IMG 多端点全挂 / 封面 API 余额耗尽 / gpt-image-2 中文文字糊掉时，用 Pillow 本地生成 scene 图和封面
+- Scene 图本地化（`gen_images_local.py`）：API 全挂或旧图与本期脚本不匹配时触发；画 8 张主题化抽象背景（1920×1080，深色演播室 + 场景配色 + 几何 motif）
+- 封面本地化（`gen_covers_local.py`）：API 余额耗尽或文字糊掉时触发；拿 `scene1.png` 作底图 + 渐变蒙版 + 本地字体叠加日期/品牌，保证文字 100% 清晰
+- 决策流程：API 优先，全挂才切本地；API 恢复后切回 API（本地仅兜底非默认）
+- 日期/品牌名变量按模式参数映射表读取，禁止硬编码；改日期只改 `DATE` 一处
+
+**已知坑新增**
+- 🔴 GEN_IMG 全挂 / 封面文字糊掉 → 本地 Pillow 兜底（`gen_images_local.py` / `gen_covers_local.py`）
+
+**实测数据**
+- 0821：scene 图走 API 成功（prism+luka77 全 401，xmiaom http=200 出 8/8）；封面 API 余额耗尽 → `gen_covers_local.py` 本地 Pillow 生成 horizontal-4-3.png + vertical-3-4.png
+- 后续改封面日期（2026-08-21 → 2026-08-22）：只需改 `gen_covers_local.py` 的 `DATE` 变量重跑，无需重调 API
+
+**版本**：3.18.0 → 3.19.0
+
+### v3.18.0（2026-08-18）
+基于 **2026-08-18 日报视频全流程**（抖音草稿恢复 + Semi Design 拦截 + 视频号 QR 跨域 + edge-tts atempo 加速）实战：
+
+**Phase 14（抖音）新增**
+- 14.0 草稿恢复弹窗处理：不点合并文本「继续编辑放弃」，走「重新上传」回 upload 页；离开草稿页弹 beforeunload「将此次编辑保留？」→ `browser_handle_dialog(accept=true)`，否则 `net::ERR_ABORTED`
+- 14.8b Semi Design 组件拦截修复：`label.semi-radio` 拦截自主声明 radio → 直接点 label；`semi-modal-wrap` 拦截「暂存离开」→ `Escape` + force click；file chooser 停在 "Modal state" → 用 `browser_file_upload(paths=[...])` 处理
+- 14.10b 暂存离开 + 草稿落库验收：`Escape` 关残留 modal → force click「暂存离开」→ beforeunload accept → 验收三信号
+
+**Phase 13（视频号）新增**
+- 13.0b 自主登录失败协议：QR iframe 跨域（`open.weixin.qq.com`）无法 JS 访问，「加载失败点击重试」+ reload 1–2 次仍失败 → 标记 `channels: login_required`，写 `upload-status.md` 为 `⏭`，停止空转，等待用户手动扫码
+
+**Phase 6（edge-tts）新增**
+- 6.3b atempo=1.4 加速：音色 `zh-CN-YunxiNeural` + ffmpeg `atempo=1.4`，8 场景总时长 112.13s；加速后必须重算 Composition.tsx sceneConfig / Root.tsx TOTAL_DURATION_SEC / captions.json → 重渲染
+
+**已知坑新增**
+- 🔴 抖音 Semi Design 组件拦截（`semi-radio` label / `semi-modal-wrap`）
+- 🔴 视频号 QR 跨域 iframe 无法自主扫码
+- 🔴 抖音草稿恢复弹窗「继续编辑放弃」文本合并
+
+**版本**：3.17.0 → 3.18.0
 
 ### v3.17.0（2026-08-13）
 基于 **2026-08-13 日报视频全流程**（DeepSeek V4 Pro / Grok 4.6 同期上线 → 多平台草稿）实战：
