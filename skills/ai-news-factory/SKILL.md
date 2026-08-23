@@ -1,14 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.19.0
+version: 3.20.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.19.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.20.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
-**核心原则：原始脚本文本 + 加权字符估算 + silencedetect 真实停顿点吸附，确保字幕 100% 准确且与音频精确同步。**
+**核心原则：以真实音频为锚——faster-whisper 词级时间戳 + 脚本字符序列强制对齐（difflib.SequenceMatcher），字幕内容 100% 来自原始脚本、时间 100% 来自音频真实发音时刻，与音频严格同步。**
 
 ### 🔴 全局规则：所有平台上传一律存草稿
 
@@ -1312,138 +1312,212 @@ ffmpeg -y -i /tmp/sceneN_edge.mp3 -filter:a atempo=1.4 \
 - `captions.json` 字幕时间轴
 - 然后重新渲染视频
 
-### Phase 7: 字幕生成（原始脚本文本 + 加权字符估算 + silencedetect 吸附）
+### Phase 7: 字幕生成（faster-whisper 词级时间戳 + 脚本字符强制对齐）
 
-**v2.2.0 混合方案：原始脚本文本 + 加权字符时长估算 + silencedetect 真实停顿点吸附（默认方案）。**
+**v2.3.0 当前默认方案（2026-08-23 W33 周报实测）**：以真实音频为锚——用 faster-whisper 跑 `word_timestamps=True`，再把已知脚本句子按字符序列对齐到 whisper 词时间戳（`difflib.SequenceMatcher` 模糊匹配，容忍 ASR 个别错字）。每句字幕的 `start/end` 都来自音频里该句真实被说出的时刻，与音频严格同步。
 
-> **🔴 经验教训（2026-06-12）**：FunASR 对专业术语识别极差（GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末），修正字典永远追不上新术语。**直接使用原始 TTS 脚本文本，绝不用 ASR 识别。**
+> **🔴 经验教训（2026-06-12）**：FunASR 对专业术语识别极差（GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末），修正字典永远追不上新术语。**字幕内容必须用原始 TTS 脚本文本，绝不依赖 ASR 识别文字。**
 >
-> **🔴 经验教训（2026-07-15）**：纯等字符比例分配（v2.1.0）会漂移——TTS 读中文、数字、英文的语速差异极大，一句 `GPT-5.6` 或 `85.5GiB` 的实际耗时远低于同字符数的纯中文。纯比例把英文/数字段落的时长高估，字幕越到后面越提前。**v2.2.0 用加权字符估算贴近真实语速，再用 silencedetect 把句子边界吸附到音频里的真实停顿点，消除累积漂移。**
+> **🔴 经验教训（2026-07-15）**：纯等字符比例分配（v2.1.0）/ 加权字符估算 + silencedetect 吸附（v2.2.0）仍会漂移——TTS 读中文、数字、英文的语速差异极大，且句间停顿不计入字符数；加权系数只是平均拟合，单句偏差累积后中后段字幕仍与音频错位。**v2.3.0 彻底放弃「估算每句时长」的思路，改用音频真实发音时刻作锚。**
 
-#### 7.1 默认方案：加权字符估算 + 真实停顿吸附
+#### 7.1 默认方案：whisper 词级时间戳 + 脚本字符强制对齐（gen_captions_v2.py）
 
 ```python
-import json, subprocess, re, os
+#!/usr/bin/env python3
+"""字幕生成 v2 — Whisper 词级时间戳 + 脚本字符强制对齐
 
-def get_audio_duration(wav_path):
-    """获取音频实际时长（毫秒）"""
-    result = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", wav_path],
-        capture_output=True, text=True
-    )
-    return float(result.stdout.strip()) * 1000
+v1/v2.2（加权字符估算 + silencedetect 吸附）在音频与脚本语速不均时仍会整体错位。
+v2.3：以真实音频为锚——用 faster-whisper 跑 word_timestamps，再把已知脚本句子按字符
+序列对齐到 whisper 词时间戳上（difflib.SequenceMatcher 模糊匹配，容忍 ASR 个别错字）。
+结果：每句字幕的 start/end 都来自音频里该句真实被说出的时刻，与音频严格同步。
 
-def detect_silences(wav_path, noise="-30dB", min_dur=0.18):
-    """用 ffmpeg silencedetect 找出音频里的真实停顿点（返回停顿中点的毫秒列表）"""
-    result = subprocess.run(
-        ["ffmpeg", "-i", wav_path, "-af",
-         f"silencedetect=noise={noise}:d={min_dur}", "-f", "null", "-"],
-        capture_output=True, text=True
-    )
-    starts = [float(m) for m in re.findall(r"silence_start: ([\d.]+)", result.stderr)]
-    ends = [float(m) for m in re.findall(r"silence_end: ([\d.]+)", result.stderr)]
-    # 取每段静音的中点作为候选断句点
-    return sorted((s + e) / 2 * 1000 for s, e in zip(starts, ends))
+输入：
+  public/voiceover/sceneN.wav   （atempo 后，视频实际音轨）
+  scripts/voiceover-texts.json  （每场景原始脚本文本）
+输出：
+  captions/captions.json       （全局 startMs/endMs，含场景累加偏移）
+  video-project/public/captions.json（同上，供 Remotion 读取）
+"""
+import json, re, os, sys
+from pathlib import Path
+from difflib import SequenceMatcher
+from faster_whisper import WhisperModel
 
-# 加权字符权重：中文最慢，数字次之，英文字母最快
-def weighted_len(s):
-    w = 0.0
+BASE = Path('/Users/youngsdream/Documents/learn-claude-code')
+# 周报示例路径，daily/monthly 按当期 REPORT_DIR 替换
+WEEKLY = BASE / 'news-pipeline/weekly/2026-08-17~2026-08-23'
+VT_JSON = WEEKLY / 'scripts/voiceover-texts.json'
+VO_DIR = BASE / 'news-pipeline/video-project/public/voiceover'
+N_SCENES = 8
+
+VT = json.load(open(VT_JSON))
+SCENES = VT['scenes']
+
+PUNCT_SPLIT = re.compile(r'([，。；！？、：])')
+
+def split_sentences(text):
+    parts = re.split(PUNCT_SPLIT, text)
+    sents, cur = [], ''
+    for p in parts:
+        cur += p
+        if p and p in '，。；！？：、':
+            sents.append(cur.strip()); cur = ''
+    if cur.strip():
+        sents.append(cur.strip())
+    return [s for s in sents if s]
+
+def norm_chars(s):
+    """归一化字符序列：仅保留 CJK / 数字 / 拉丁，便于模糊对齐"""
+    out = []
     for ch in s:
-        if '一' <= ch <= '鿿':
-            w += 1.0          # 中文汉字
-        elif ch.isdigit():
-            w += 0.6          # 数字
-        elif ch.isascii() and ch.isalpha():
-            w += 0.35         # 英文字母
-        # 标点/空格不计
-    return w
+        if '一' <= ch <= '鿿' or ch.isdigit() or ch.isalpha():
+            out.append(ch.lower())
+    return out
 
-# 原始脚本文本（从 Phase 2 视频脚本中提取每个场景的 TTS 文本，100% 准确）
-SCENE_TEXTS = {
-    1: "场景1的TTS文本...",
-    2: "场景2的TTS文本...",
-    # ... 每个场景的完整 TTS 文本
-}
+# ---- 加载 whisper 模型（缓存内 small, int8 CPU）----
+print("loading whisper-small ...", file=sys.stderr)
+MODEL = WhisperModel("small", device="cpu", compute_type="int8")
 
-def split_by_punctuation(text):
-    """按中文标点分割文本，标点保留在前一句"""
-    parts = re.split(r'(?<=[。！？，；：])', text)
-    return [p.strip() for p in parts if p.strip()]
+def whisper_word_chars(wav):
+    """返回该音频每个归一化字符的 (char, start, end) 时间戳"""
+    segs, info = MODEL.transcribe(wav, language="zh", word_timestamps=True, vad_filter=False)
+    wchars = []
+    for s in segs:
+        for w in s.words:
+            word = w.word.strip()
+            if not word:
+                continue
+            chars = norm_chars(word)
+            if not chars:
+                continue
+            # 词内字符均分 [w.start, w.end]
+            span = max(w.end - w.start, 0.001)
+            for i, c in enumerate(chars):
+                t0 = w.start + span * (i / len(chars))
+                t1 = w.start + span * ((i + 1) / len(chars))
+                wchars.append((c, float(t0), float(t1)))
+    return wchars, info.duration
 
-def snap_to_silence(t_ms, silences, tolerance=350):
-    """把估算的断句点吸附到最近的真实停顿点（容差内才吸附，避免乱跳）"""
-    if not silences:
-        return t_ms
-    nearest = min(silences, key=lambda s: abs(s - t_ms))
-    return nearest if abs(nearest - t_ms) <= tolerance else t_ms
+def align_script_to_audio(script_text, wchars):
+    """把脚本文本的句子对齐到音频字符时间戳，返回每句 (sentence, start_s, end_s)"""
+    sents = split_sentences(script_text)
+    if not sents or not wchars:
+        return []
+    script_chars, char2sent = [], []
+    for si, sent in enumerate(sents):
+        for c in norm_chars(sent):
+            script_chars.append(c)
+            char2sent.append(si)
+    whisper_chars = [c for c, _, _ in wchars]
+    whisper_ts = [(t0, t1) for _, t0, t1 in wchars]
+    # 序列模糊对齐：脚本 → 音频
+    sm = SequenceMatcher(None, script_chars, whisper_chars, autojunk=False)
+    char_ts = [None] * len(script_chars)
+    for m in sm.get_matching_blocks():
+        for k in range(m.size):
+            char_ts[m.a + k] = whisper_ts[m.b + k]
+    # 先前向填充（用上一个匹配的 end）
+    last = None
+    for i in range(len(char_ts)):
+        if char_ts[i] is not None:
+            last = char_ts[i][1]
+        elif last is not None:
+            char_ts[i] = (last, last)
+    # 再后向填充剩余（开头未匹配）
+    nxt = None
+    for i in range(len(char_ts) - 1, -1, -1):
+        if char_ts[i] is not None:
+            nxt = char_ts[i][0]
+        elif nxt is not None:
+            char_ts[i] = (nxt, nxt)
+    # 兜底：全 None
+    if all(t is None for t in char_ts):
+        dur = wchars[-1][2] if wchars else 1.0
+        for i in range(len(char_ts)):
+            char_ts[i] = (dur * i / max(len(char_ts), 1), dur * (i + 1) / max(len(char_ts), 1))
+    # 按句聚合
+    sent_start = [None] * len(sents)
+    sent_end = [None] * len(sents)
+    for ci, si in enumerate(char2sent):
+        t0, t1 = char_ts[ci]
+        if sent_start[si] is None:
+            sent_start[si] = t0
+        sent_end[si] = t1
+    for si in range(len(sents)):
+        if sent_start[si] is None:
+            if si == 0:
+                sent_start[si] = sent_end[si] = 0.0
+            else:
+                sent_start[si] = sent_end[si] = sent_end[si - 1] if sent_end[si - 1] is not None else 0.0
+    return [(sents[si], sent_start[si], sent_end[si]) for si in range(len(sents))]
 
-def generate_captions_from_script(base_dir, scene_count=8):
-    """加权字符估算 + silencedetect 吸附生成字幕"""
-    all_captions = []
-    global_offset_ms = 0
-
-    for scene_num in range(1, scene_count + 1):
-        wav_path = os.path.join(base_dir, "voiceover", f"scene{scene_num}.wav")
-        if not os.path.exists(wav_path):
-            continue
-
-        audio_duration_ms = get_audio_duration(wav_path)
-        silences = detect_silences(wav_path)  # 场景内真实停顿点（相对场景起点）
-
-        text = SCENE_TEXTS.get(scene_num, "")
-        if not text:
-            global_offset_ms += audio_duration_ms
-            continue
-
-        sentences = split_by_punctuation(text)
-        if not sentences:
-            global_offset_ms += audio_duration_ms
-            continue
-
-        # 1) 加权字符估算：按语速权重分配，贴近 TTS 真实读速
-        weights = [weighted_len(s) or 0.5 for s in sentences]
-        total_w = sum(weights)
-
-        # 2) 先算出每句的累积边界（相对场景起点）
-        boundaries, acc = [], 0.0
-        for w in weights:
-            acc += w / total_w * audio_duration_ms
-            boundaries.append(acc)
-        boundaries[-1] = audio_duration_ms  # 末句强制对齐场景结尾
-
-        # 3) 把中间边界吸附到真实停顿点，消除累积漂移
-        for i in range(len(boundaries) - 1):
-            boundaries[i] = snap_to_silence(boundaries[i], silences)
-
-        # 4) 生成字幕条目
-        start = 0.0
-        for sent, end in zip(sentences, boundaries):
-            all_captions.append({
-                "text": sent,
-                "startMs": round(global_offset_ms + start),
-                "endMs": round(global_offset_ms + end)
+def main():
+    all_caps = []
+    offset_ms = 0
+    for i in range(1, N_SCENES + 1):
+        wav = VO_DIR / f'scene{i}.wav'
+        if not wav.exists():
+            print(f"WARN missing scene{i}.wav", file=sys.stderr); continue
+        wchars, dur = whisper_word_chars(str(wav))
+        text = SCENES[str(i)]
+        aligned = align_script_to_audio(text, wchars)
+        # 保证单调 & 不重叠
+        for k in range(len(aligned)):
+            s, st, en = aligned[k]
+            if en < st:
+                en = st + 0.05
+            aligned[k] = (s, st, en)
+        for k in range(len(aligned) - 1):
+            if aligned[k][2] > aligned[k + 1][1]:
+                mid = (aligned[k][2] + aligned[k + 1][1]) / 2
+                aligned[k] = (aligned[k][0], aligned[k][1], mid)
+                aligned[k + 1] = (aligned[k + 1][0], mid, aligned[k + 1][2])
+        # 首句从 0 起，末句对齐到场景总时长
+        if aligned:
+            if aligned[0][1] > 0.2:
+                aligned[0] = (aligned[0][0], 0.0, aligned[0][2])
+            aligned[-1] = (aligned[-1][0], aligned[-1][1], dur)
+        for s, st, en in aligned:
+            all_caps.append({
+                'text': s,
+                'startMs': int(offset_ms + st * 1000),
+                'endMs': int(offset_ms + en * 1000),
             })
-            start = end
+        offset_ms += int(dur * 1000)
+    out = WEEKLY / 'captions/captions.json'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    json.dump(all_caps, open(out, 'w'), ensure_ascii=False, indent=2)
+    vp = BASE / 'news-pipeline/video-project/public/captions.json'
+    json.dump(all_caps, open(vp, 'w'), ensure_ascii=False, indent=2)
+    print(f"\nTotal {len(all_caps)} captions, {offset_ms/1000:.2f}s", file=sys.stderr)
 
-        global_offset_ms += audio_duration_ms
-
-    return all_captions
+main()
 ```
+
+> **脚本落盘**：完整可运行版本固化在当期 `news-pipeline/{date}/gen_captions_v2.py`（周报示例见 `weekly/2026-08-17~2026-08-23/gen_captions_v2.py`）。跑前按当期改 `WEEKLY` / `N_SCENES`。
 
 #### 7.2 完整流程
 
 ```
-视频脚本(Phase 2) → 提取每个场景TTS文本 → ffprobe获取每个音频实际时长
-    → silencedetect 找真实停顿点 → 按标点分割文本
-    → 加权字符估算每句时长 → 吸附到最近停顿点 → 输出 captions.json
+视频脚本(Phase 2) → 提取每场景 TTS 文本存 scripts/voiceover-texts.json
+    → faster-whisper(word_timestamps=True) 跑 public/voiceover/sceneN.wav
+    → 归一化脚本字符 + 归一化 whisper 词字符
+    → difflib.SequenceMatcher 模糊对齐 → 每个脚本字符分到音频真实时间戳
+    → 按句聚合（首句 start=0，末句 end=场景 ffprobe 时长）
+    → 场景间累加偏移 → 输出 captions.json（同时写 video-project/public/captions.json）
 ```
 
 **关键点**：
-- **直接使用原始脚本文本**，不需要 ASR 识别，字幕内容 100% 准确
-- **必须用 ffprobe 获取音频实际时长**，末句强制对齐场景结尾，确保总时长对齐
-- **加权字符估算**（中文 1.0 / 数字 0.6 / 英文 0.35）贴近 TTS 真实读速，避免英文/数字段落时长高估
-- **silencedetect 吸附**把句子边界拉到音频里的真实停顿点，消除纯比例的累积漂移；容差内（默认 350ms）才吸附，避免乱跳
+- **内容用原始脚本文本**，不依赖 ASR 识别文字，字幕文字 100% 准确
+- **时间用音频真实发音时刻**：whisper 词级时间戳是唯一锚点，不再做任何「估算每句时长」
+- **SequenceMatcher 容忍 ASR 错字**：脚本与 whisper 字符序列做模糊匹配，个别字识别错也能对上正确时间区间，未匹配字符用前后邻居插值
+- **首句从 0、末句对齐 ffprobe 场景时长**，场景间累加偏移，总时长严格 = 各场景 ffprobe 之和
+- **必须与 Phase 8 的 Composition/Root 时长同源**（同一批 atempo 后的 wav）
+
+**为什么放弃 v2.2.0 加权字符 + silencedetect**：
+- 加权系数（中文 1.0 / 数字 0.6 / 英文 0.35）是平均拟合，单句（尤其含大量版本号、英文术语）偏差大，仍逐句累积漂移
+- silencedetect 只能在「正好有停顿」时吸附边界，无停顿的句子仍纯靠估算，后半段依旧偏
+- v2.3.0 让每个字符的时间戳都直接取自音频，从根本上消除漂移；whisper small 模型 int8 CPU 单场景约 5–15s，8 场景总耗时可接受
 
 **字体使用规范**：
 - 使用系统字体：`"PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif`
@@ -2308,7 +2382,7 @@ browser_run_code_unsafe("""async (page) => {
 }""")
 ```
 
-**🔴 关键经验（v1.9.1 + v3.5.0 + v3.8.0）：**
+**🔴 关键经验（v1.9.1 + v3.5.0 + v3.8.0 + v3.20.0）：**
 1. **必须先「图片」→「本地上传」把封面图（横版 `horizontal-4-3.png`）插入正文**，「从正文选择」才可用  
 2. **file chooser 不弹时**：`input[type=file][accept*=image].setInputFiles(path)` 可兜底  
 3. **Hover 封面区**才出菜单；「从正文选择」用 **`.js_selectCoverFromContent` + 强制显示**  
@@ -2317,6 +2391,74 @@ browser_run_code_unsafe("""async (page) => {
 6. **保存成功判定**：`appmsgid=` 比「已保存」文案更稳  
 7. **裁剪确认 =「确认」**；禁用点 disabled「确定」  
 8. **验收 = preview `display:block` + `mmbiz` 背景**，勿被残留「拖拽或选择封面」文案误导
+
+#### 12.7b 从图片库选封面（v3.20.0 / 2026-08-23 W33 周报实测）
+
+**适用场景**：封面图已提前上传到公众号素材库（如周报裁好的 `wechat-cover-2.35.png` 2.35:1 横图），想直接从图片库选，不再插正文。
+
+**🔴 图片库选择器 DOM（踩坑要点）**：
+1. 图片库弹窗是 `.weui-desktop-dialog`；图片**不是**直接渲染在 `.weui-desktop-img-picker__item` 上，**也不是 `<img>` 标签**——而是渲染在子元素 **`<i>`** 上，通过 **computed `backgroundImage: url("https://mmbiz.qpic.cn/...")`** 显示。
+2. 旧探测（查 picker item 的 background 或找 `<img>`）会全部返回 `bg:"none"` / `hasImg:false`，误判「图库没图」。
+3. **正确探测**：在 picker item 内 `querySelectorAll('i')`，找 `offsetParent!==null` 的 `i`，读 `getComputedStyle(iEl).backgroundImage`。
+4. 缩略图统一渲染为 **110×110**，**无法从缩略图尺寸判断宽高比**——不能靠 thumbnail 尺寸挑封面；改用 URL 的 `mmbiz_png` / `mmbiz_jpg` 后缀或 `wx_fmt` 参数辅助区分（PNG 多为生成的封面图）。
+
+**🔴 选图流程（无「确定」按钮，主按钮是「下一步」）**：
+```
+封面区 hover → 点「从图片库选择」开图库弹窗
+  → 点左侧栏「上传 (N)」分组（.weui-desktop-menu__item），过滤到已上传图
+  → 点目标缩略图选中（picker item 加 selected 态）
+  → 点「下一步」（weui-desktop-btn_primary）—— 注意：此视图【没有】「确定」按钮
+  → 进入裁剪/确认步骤 → 点「确认」（enabled，非 disabled「确定」）
+  → 轮询 .js_cover_preview_new{display:block; bg 含 mmbiz} 验收
+```
+
+```js
+// 探测图库当前分组的图（返回 url 列表 + 选中态）
+async (page) => {
+  return await page.evaluate(() => {
+    const items = Array.from(document.querySelectorAll('.weui-desktop-img-picker__item'));
+    return items.map((el, idx) => {
+      const iEl = Array.from(el.querySelectorAll('i')).find(i => i.offsetParent !== null);
+      const bg = iEl ? getComputedStyle(iEl).backgroundImage : 'none';
+      const m = bg.match(/url\(["']?(https:\/\/mmbiz[^"')]+)/);
+      return { idx, url: m ? m[1] : '', selected: el.className.includes('selected') || el.getAttribute('aria-checked') === 'true' };
+    }).filter(x => x.url);
+  });
+}
+
+// 点「上传 (N)」分组过滤 → 选中目标图 → 点「下一步」
+async (page) => {
+  await page.evaluate(() => {
+    for (const it of document.querySelectorAll('.weui-desktop-menu__item')) {
+      if (/上传\s*\(/.test((it.textContent || '').trim())) { it.click(); return; }
+    }
+  });
+  await page.waitForTimeout(800);
+  // 选中第一个 PNG（生成封面通常为 PNG；按需改 idx）
+  await page.evaluate(() => {
+    const items = Array.from(document.querySelectorAll('.weui-desktop-img-picker__item'));
+    for (const el of items) {
+      const iEl = Array.from(el.querySelectorAll('i')).find(i => i.offsetParent !== null);
+      const bg = iEl ? getComputedStyle(iEl).backgroundImage : '';
+      if (/mmbiz_png|wx_fmt=png/.test(bg)) { el.click(); return; }
+    }
+    if (items[0]) items[0].click();
+  });
+  await page.waitForTimeout(500);
+  // 点「下一步」（此视图无「确定」按钮）
+  await page.evaluate(() => {
+    for (const btn of document.querySelectorAll('button')) {
+      if ((btn.textContent || '').trim() === '下一步' && btn.className.includes('primary') && !btn.disabled) { btn.click(); return; }
+    }
+  });
+  // 后续进入裁剪弹窗，按 12.7 的「确认 + 轮询 preview」流程收尾
+}
+```
+
+**关键经验**：
+- 图库缩略图 URL 形如 `https://mmbiz.qpic.cn/mmbiz_png/{prefix}/...?wx_fmt=png`；按 `mmbiz_png`/`mmbiz_jpg` 或 `wx_fmt` 区分格式，辅助定位生成的 PNG 封面。
+- 「上传 (N)」分组的 N = 已上传图数量，点它过滤掉系统图，只剩自己上传的。
+- 从图片库选完点「下一步」后，裁剪确认流程与 12.7「从正文选择」完全一致（「确认」非「确定」、轮询 preview）。
 
 #### 12.8 设置原创声明（已验证 v1.9.1）
 
@@ -2538,7 +2680,7 @@ browser_run_code_unsafe("""async (page) => {
 | 正文 | **ProseMirror** | JS 注入 `innerHTML` | ✅ 高 |
 | 视频号 | 弹窗选择 | 工具栏「视频号」→ 选账号 → 选视频 → 插入 | ✅ 高 |
 | 图片上传 | 工具栏菜单 | 「图片」→「本地上传」→ file_upload | ✅ 高 |
-| 封面 | 拖拽区域 | 「从图片库选择」/ 「从正文选择」 | ⚠️ 需坐标点击 |
+| 封面 | 拖拽区域 | 「从图片库选择」/ 「从正文选择」 | ⚠️ 需坐标点击（图库缩略图在子 `<i>` 的 backgroundImage，非 `<img>`）|
 | 原创声明 | 弹窗 | 点击「原创」→ 确定 | ✅ 高 |
 | 赞赏 | 弹窗 | 点击「赞赏」→ 不开启 → 勾选同意 → 确定 | ✅ 高 |
 | 合集 | **自定义 Vue 组件** | 坐标点击下拉框 → 选择 → 确认 | ⚠️ 坐标方式 |
@@ -3042,47 +3184,64 @@ news-pipeline/
 
 ## 已知坑与经验教训
 
-### 🔴 字幕与音频不同步（v2.0.0 → v2.1.0 → v2.2.0 演进）
+### 🔴 字幕与音频不同步（v2.0.0 → v2.1.0 → v2.2.0 → v2.3.0 演进）
 
-**问题**：使用纯字数比例估算字幕时间轴时，由于 TTS 语速不均匀（中文/数字/英文每字发音时长差异大，且句间停顿不计入字符数），越到后面字幕偏差越大。
+**问题**：字幕时间轴与音频不齐——越到后面偏差越大，或某场景整体错位、口播与字幕对不上。
 
 **v2.0.0 方案（已废弃）**：FunASR 语音识别 + ffprobe 比例调整
 - FunASR 对专业术语识别极差：GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末
 - 修正字典永远追不上新术语，每次都要手动添加大量修正规则
 - 识别错误导致字幕内容完全不可用
 
-**v2.1.0 方案（已被 v2.2.0 取代）**：原始脚本文本 + ffprobe 纯字符比例对齐
+**v2.1.0 方案（已废弃）**：原始脚本文本 + ffprobe 纯字符比例对齐
 - 解决了内容准确性问题（100% 用原始文本），但内部切分仍按纯字符数，长句/多数字场景仍会漂移
 
-**v2.2.0 方案（当前默认）**：原始脚本文本 + 加权字符估算 + silencedetect 真实停顿点吸附
+**v2.2.0 方案（已废弃）**：原始脚本文本 + 加权字符估算 + silencedetect 真实停顿点吸附
+- 加权系数（中文 1.0 / 数字 0.6 / 英文 0.35）是平均拟合，含大量版本号/英文术语的单句偏差大
+- silencedetect 只在「正好有停顿」时吸附边界，无停顿句仍纯估算，中后段仍逐句累积漂移
+
+**v2.3.0 方案（当前默认，2026-08-23 W33 周报实测）**：faster-whisper 词级时间戳 + 脚本字符强制对齐（gen_captions_v2.py）
 ```python
-# 1. 直接使用 Phase 2 视频脚本中的原始 TTS 文本（内容 100% 准确）
+# 1. 字幕文字：直接用 Phase 2 原始 TTS 脚本文本（内容 100% 准确，不依赖 ASR）
 
-# 2. 加权字符估算：不同字符类型发音时长不同
-#    中文 1.0 / 数字 0.6 / 英文字母 0.35（标点不计）
-def weighted_len(s):
-    w = 0.0
-    for ch in s:
-        if '一' <= ch <= '鿿': w += 1.0
-        elif ch.isdigit():            w += 0.6
-        elif ch.isascii() and ch.isalpha(): w += 0.35
-    return w
+# 2. 时间锚：faster-whisper(word_timestamps=True) 跑 public/voiceover/sceneN.wav
+#    得到每个真实发音词的 (start, end)，再归一化到字符级
 
-# 3. 用 ffmpeg silencedetect 探测每个场景音频的真实停顿点
-#    ffmpeg -i scene.wav -af silencedetect=noise=-30dB:d=0.25 -f null -
-#    将句子边界吸附到最近的真实停顿点，消除累积漂移
+# 3. 强制对齐：difflib.SequenceMatcher(脚本归一化字符, whisper 归一化字符)
+#    匹配块上的脚本字符直接继承音频时间戳；未匹配字符用前后邻居插值
+#    容忍 ASR 个别错字，单句偏差不再累积
 
-# 4. 无停顿点可吸附时，退回加权字符比例分配该区间时长
+# 4. 按句聚合：首句 start=0，末句 end=场景 ffprobe 时长；场景间累加偏移
 ```
 
 **关键点**：
-- **内容用原始脚本文本**，不需要 ASR 识别，字幕内容 100% 准确
-- **切分用加权字符估算**，数字/英文按更短发音权重计，避免版本号密集句被高估
-- **边界吸附 silencedetect 真实停顿点**，从根本上消除逐句累积漂移
+- **内容用原始脚本文本**，不需要 ASR 识别文字，字幕内容 100% 准确
+- **时间用音频真实发音时刻**：whisper 词级时间戳是唯一锚点，不再「估算每句时长」
+- **SequenceMatcher 容忍 ASR 错字**，未匹配字符用前后邻居插值，单句偏差不累积
 - **必须用 ffprobe 校验总时长对齐**（见 Step 8.3 校验）
 
-**Why:** 纯字符比例假设每字等长，但 TTS 中数字/英文更快、句间有停顿，长视频后半段必然漂移
-**How to apply:** Phase 7 生成字幕时一律用加权字符 + silencedetect 吸附，不再用纯字符比例
+**Why:** 任何「估算每句时长」的方案（纯比例/加权/silence 吸附）都无法消除单句偏差累积；只有让每个字符的时间戳直接取自音频真实发音，才能从根本上对齐。
+**How to apply:** Phase 7 一律用 gen_captions_v2.py（whisper + SequenceMatcher），不再用加权字符 + silencedetect。
+
+### 🔴 旧音频残留导致整体 desync（v3.20.0 / 2026-08-23 W33 周报实测）
+
+**问题**：重新渲染后字幕与音频仍整体对不上，且视频时长与脚本预期不符。
+
+**根因（三重叠加）**：
+1. **stale 音频**：`public/voiceover/sceneN.wav` 是上一期（日报）残留的旧音频，没被当期周报源音频覆盖；atempo 加速的是旧音频。
+2. **stale 时长**：`Composition.tsx` 的 `sceneConfig.duration` + `Root.tsx` 的 `TOTAL_DURATION_SEC` 还是旧音频的时长，没随新音频刷新。
+3. **v1 字幕估算器**：旧字幕用加权字符估算，本身就会漂移。
+
+**修复链（必须按序，缺一步仍 desync）**：
+1. **归档旧音频**：把 `public/voiceover/` 下的旧 wav 移到 `.stale_archive/` 子目录（用 Python `shutil.move`；**`rm` 会被自动权限模式判定为「不可逆本地删除」而拒绝**，改用归档挪移）。
+2. **重新 atempo**：用当期周报源音频重新 atempo（scene1-5,7 atempo=1.25；锚点 scene6 atempo=1.4）→ 覆盖写入 `public/voiceover/sceneN.wav`。
+3. **刷新时长**：ffprobe 实测每个新 wav → 同步刷新 `Composition.tsx` 的 `sceneConfig.duration` + `Root.tsx` 的 `TOTAL_DURATION_SEC`。
+4. **重算字幕**：跑 `gen_captions_v2.py`（whisper + SequenceMatcher）→ 覆盖 `captions/captions.json` + `video-project/public/captions.json`。
+5. **重新渲染**：`npx remotion render`。
+6. **whisper 验证**：在视频里抽 3–4 个边界点（场景切点 / 长句起止），用 whisper 听对应音频段，确认字幕 startMs/endMs 与真实发音时刻一致（误差 < 200ms）。
+
+**Why:** 旧音频 + 旧时长 + 旧字幕三者来自不同批次，三条时间轴互相错位；必须让音频/时长/字幕三者来自同一批新音频。
+**How to apply:** 每次重跑 TTS 或换期前，先确认 `public/voiceover/` 是当期音频（看 mtime / 听内容），再走「atempo → 刷新时长 → gen_captions_v2 → 渲染 → 验证」全链。`rm` 被拒时用 `shutil.move` 归档，不要硬删。
 
 ### 🔴 TTS 并发冲突
 **问题**：`mimo-tts.sh` 内部使用 `mktemp /tmp/mimo-tts-request-XXXXXX.json` 生成临时文件。并行调用时多个进程竞争同一文件名，导致 `mktemp: mkstemp failed: File exists` 错误，TTS 静默失败不生成音频。
