@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.22.0
+version: 3.23.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.22.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.23.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -2107,7 +2107,7 @@ browser_wait_for(time=3)
 2. 切换到新标签页
 3. 填写标题（ProseMirror）+ 作者（标准 input）
 4. 点击正文区域获取 focus → 插入视频号内容
-5. 填写正文内容（ProseMirror innerHTML）
+5. 填写正文内容（ProseMirror + execCommand insertHTML，🔴 v3.23.0：禁直接 innerHTML）
 6. 通过「图片」→「本地上传」插入封面图到正文
 7. 上传封面（从正文选择 / 从图片库选择）
 8. 设置原创声明
@@ -2237,24 +2237,60 @@ browser_run_code_unsafe("""async (page) => {
 
 #### 12.5 填写正文内容
 
-**🔴 正文使用 ProseMirror 编辑器，用 innerHTML 注入：**
+**🔴 v3.23.0 / 2026-08-29 实测修正：禁止对 ProseMirror 正文直接 `innerHTML = ...` 赋值！**
+0829 实测：赋值返回"ok"但编辑器立即回滚，验证 `pm.textContent.length === 1`——**内容被静默清空**（无任何报错）。唯一可靠方式是 `document.execCommand('insertHTML')`：
 
 ```javascript
 browser_run_code_unsafe("""async (page) => {
-  const result = await page.evaluate(() => {
+  const htmlContent = `<h2>1. 新闻标题</h2><p>正文内容...</p>`; // 由外部传入
+  const result = await page.evaluate((html) => {
     const editors = document.querySelectorAll('.ProseMirror');
     const bodyEditor = editors[1];  // 第二个 ProseMirror 是正文
     if (!bodyEditor) return 'body editor not found';
-    bodyEditor.innerHTML = `
-      <h2>1. 新闻标题</h2>
-      <p>正文内容...</p>
-      <h2>2. 新闻标题</h2>
-      <p>正文内容...</p>
-    `;
-    bodyEditor.dispatchEvent(new Event('input', { bubbles: true }));
-    return 'body content set';
-  });
+    bodyEditor.focus();
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(bodyEditor);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('insertHTML', false, html);
+    // 🔴 注入后必须回读验证，不达标视为失败
+    const len = bodyEditor.textContent.trim().length;
+    return `inserted, pmLen=${len}`;
+  }, htmlContent);
+  if (!result.includes('pmLen=') || parseInt(result.match(/pmLen=(\\d+)/)[1]) < 1000) {
+    return `FAILED: ${result}`;  // 日报正文应 >1000 字，短文按实际阈值调整
+  }
   return result;
+}""")
+```
+
+**🔴 v3.23.0 新增坑：正文注入操作可能把标题框灌入整篇文章**（实测标题计数器变 1776/64、标题区显示正文全文）。恢复流程见 12.5b；**预防规则：标题填写永远放到正文注入之后**（调整 12.0 顺序：正文 → 图片 → 封面 → **再填标题** → 原创 → 合集 → 保存）。
+
+#### 12.5b 标题被正文注入覆盖后的重置（v3.23.0 / 2026-08-29 实测）
+
+用 `data-placeholder` 含「标题」定位（勿依赖编辑器索引——注入操作后索引可能漂移）：
+
+```javascript
+browser_run_code_unsafe("""async (page) => {
+  const title = '【2026-08-29】... | 今日羊报AI'; // 由外部传入
+  const result = await page.evaluate((t) => {
+    let titleBox = null;
+    for (const el of document.querySelectorAll('[contenteditable="true"]')) {
+      if ((el.getAttribute('data-placeholder') || '').includes('标题')) { titleBox = el; break; }
+    }
+    if (!titleBox) return 'title box not found';
+    titleBox.focus();
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(titleBox);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('delete');
+    document.execCommand('insertText', false, t);
+    return `title set, len=${titleBox.textContent.length}`;
+  }, title);
+  return result; // 预期 len === 标题字符数
 }""")
 ```
 
@@ -2513,9 +2549,16 @@ async (page) => {
 - 「上传 (N)」分组的 N = 已上传图数量，点它过滤掉系统图，只剩自己上传的。
 - 从图片库选完点「下一步」后，裁剪确认流程与 12.7「从正文选择」完全一致（「确认」非「确定」、轮询 preview）。
 
-#### 12.8 设置原创声明（已验证 v1.9.1）
+#### 12.7c 封面流程补充坑（v3.23.0 / 2026-08-29 日报实测，4 子坑）
 
-**🔴 弹窗打开后「文字原创」和「我已阅读并同意」已默认选中，直接点确定即可。**
+1. **「从图片库选择」是 hover 弹出菜单**：封面区 hover 才出现，直接 `click()` 报 "element is not visible"。正确做法：`await page.mouse.move(coverBox.x, coverBox.y)`（evaluate 拿 `getBoundingClientRect()` 中心）触发 hover，再 evaluate 点可见链接。
+2. **上传文件按钮被 `webuploader-pick` 内 `<label>` 拦截 pointer**：用 `Promise.all([page.waitForEvent('filechooser'), page.locator('.single_upload_btn_container, .webuploader-pick').first().click({force:true})])` + `fileChooser.setFiles([path])`。⚠️ **选择器勿用含点的动态 id**（`#upload_0.7739298874336278` 会被当 class 解析报 CSS 错误），用上面的 class 选择器。
+3. **图库首击可能未选中**：点击后回读 `.weui-desktop-img-picker__item.selected` 类验证；无 selected 则 evaluate `items[0].click()` 再验（`className` 应变为 `weui-desktop-img-picker__item selected`）。
+4. **2.35:1（消息列表）裁剪 radio 在视口外**：`page.locator(...).click()` 报 "element is outside of the viewport"——改 evaluate 点含 "2.35" 文本的 `label`/`span`，再点「确认」收尾（同 12.7 轮询 preview 验收）。
+
+#### 12.8 设置原创声明（已验证 v1.9.1；🔴 v3.23.0 修正协议勾选行为）
+
+**🔴 v3.23.0 / 2026-08-29 实测修正：「文字原创」默认选中，但「我已阅读并同意」协议 checkbox 并不会自动勾选**（实测 `checked:false`）——直接点「确定」是 no-op（弹窗不关）。必须先点协议 checkbox 的 **`closest('label')` 容器**（点 input 本体或文字 span 均可能不切换），验证 `checked === true` 后再点「确定」。
 
 ```
 # 步骤1：点击「原创」区域打开弹窗
@@ -2538,7 +2581,34 @@ browser_run_code_unsafe("""async (page) => {
 # 步骤2：等待弹窗出现
 browser_wait_for(time=1)
 
-# 步骤3：直接点击「确定」（弹窗已默认选中文字原创+同意协议）
+# 步骤3：🔴 v3.23.0 实测——先勾选协议 checkbox（点 label 容器），验证 checked 后再点「确定」
+browser_run_code_unsafe("""async (page) => {
+  const r = await page.evaluate(() => {
+    // 点「我已阅读并同意」所在 label 容器
+    const inputs = document.querySelectorAll('input.weui-desktop-form__checkbox');
+    for (const input of inputs) {
+      const labelText = (input.closest('label')?.textContent || input.parentElement?.textContent || '');
+      if (labelText.includes('阅读') || labelText.includes('同意')) {
+        const target = input.closest('label') || input.parentElement;
+        target.click();
+        return `checkbox clicked, checked=${input.checked}`;
+      }
+    }
+    return 'checkbox not found';
+  });
+  if (!r.includes('checked=true')) return `agree failed: ${r}`;
+  await page.waitForTimeout(500);
+  const r2 = await page.evaluate(() => {
+    const btns = document.querySelectorAll('button');
+    for (const btn of btns) {
+      if (btn.textContent.trim() === '确定' && btn.offsetParent !== null) { btn.click(); return 'ok clicked'; }
+    }
+    return 'ok not found';
+  });
+  return `${r} | ${r2}`;
+}""")
+
+# 步骤4：验证成功标志 = 弹窗关闭 + 状态区出现「文字原创 · 已开启快捷转载」
 browser_evaluate("""() => {
   const buttons = document.querySelectorAll('button, a');
   for (const btn of buttons) {
@@ -2563,10 +2633,10 @@ browser_evaluate("""() => {
 }""")
 ```
 
-**关键经验（v1.9.1 验证）：**
+**关键经验（v1.9.1 验证；🔴 v3.23.0 / 2026-08-29 修正）：**
 - 弹窗打开后「文字原创」已默认选中
-- 「我已阅读并同意」checkbox 已默认勾选
-- 直接点击「确定」即可，无需手动操作其他选项
+- 🔴 「我已阅读并同意」checkbox **不会**自动勾选（实测 `checked:false`），必须点其 `closest('label')` 容器切换，验证 `checked === true` 后再点「确定」；直接点「确定」是 no-op
+- 成功标志 = 弹窗关闭 + 原创状态区显示「文字原创 · 作者：… · 已开启快捷转载」
 - 🔴 **v3.22.0 / 2026-08-28 实测**：「原创」标题实测在 `y=471`，旧条件 `rect.y < 400` 会**漏选**导致点不开弹窗；已去 y 上界改为 `rect.y > 150 && rect.x > 500`。优先用 `.setting-group__title` 文本 === '原创' 定位（`document.querySelectorAll('.setting-group__title')` 找文本「原创」的那个），比全 `*` 扫描 + y 范围更稳。
       }
     }
@@ -2734,7 +2804,7 @@ browser_run_code_unsafe("""async (page) => {
 |------|------|----------|--------|
 | 标题 | **ProseMirror** | JS 注入 `textContent` | ✅ 高 |
 | 作者 | 标准 input | `value` + dispatch `input` | ✅ 高 |
-| 正文 | **ProseMirror** | JS 注入 `innerHTML` | ✅ 高 |
+| 正文 | **ProseMirror** | 🔴 v3.23.0 修正：`execCommand('insertHTML')`（直接 innerHTML 被静默清空） | ✅ 高 |
 | 视频号 | 弹窗选择 | 工具栏「视频号」→ 选账号 → 选视频 → 插入 | ✅ 高 |
 | 图片上传 | 工具栏菜单 | 「图片」→「本地上传」→ file_upload | ✅ 高 |
 | 封面 | 拖拽区域 | 「从图片库选择」/ 「从正文选择」 | ⚠️ 需坐标点击（图库缩略图在子 `<i>` 的 backgroundImage，非 `<img>`）|
@@ -2751,7 +2821,7 @@ browser_run_code_unsafe("""async (page) => {
 5. **「从正文选择」封面**：必须先通过工具栏上传图片到正文，然后用 `.js_selectCoverFromContent` class 选择器点击
 6. **合集选择器是自定义 Vue 组件**，需要用坐标点击（约 x=730, y=355 点击「未添加」，x=690, y=375 打开下拉框）
 7. **赞赏弹窗中「我已阅读并同意」需要手动勾选**，checkbox 在 `label > input[type="checkbox"]` 结构中
-8. **原创声明弹窗会自动选中「文字原创」+ 勾选同意**，直接点确定即可
+8. **原创声明弹窗默认选中「文字原创」，但协议 checkbox 不自动勾选**（🔴 v3.23.0 / 2026-08-29 实测 `checked:false`）——须点 checkbox 的 `closest('label')` 容器验证 `checked===true` 后再点确定
 9. **保存草稿前不需要完成所有设置**，封面和合集可以后续手动添加
 10. **新标签页打开**：点击「文章」会打开新标签页，需要切换到最新标签页
 
@@ -2765,25 +2835,7 @@ browser_type(target={作者输入框ref}, text="Youngs羊示")
 
 #### 12.4 填写正文
 
-**🔴 公众号正文也是 ProseMirror 编辑器，必须用 JS 注入 innerHTML：**
-
-```javascript
-browser_evaluate("""() => {
-  const editors = document.querySelectorAll('.ProseMirror');
-  const bodyEditor = editors.length > 1 ? editors[1] : editors[0];  // 第二个是正文
-  if (bodyEditor) {
-    bodyEditor.innerHTML = `
-      <h2>1. 新闻标题</h2>
-      <p>正文内容...</p>
-      <h2>2. 新闻标题</h2>
-      <p>正文内容...</p>
-    `;
-    bodyEditor.dispatchEvent(new Event('input', { bubbles: true }));
-    return 'body content set';
-  }
-  return 'editor not found';
-}""")
-```
+**🔴 v3.23.0 / 2026-08-29 实测修正：此节旧方案（直接 innerHTML）已被证伪**——赋值返回"ok"但编辑器立即回滚清空（pmLen=1）。**必须用 12.5 的 `execCommand('insertHTML')` 流程**（selectNodeContents + insertHTML + 回读字数验证），勿再使用本节的 dispatch input 方案。
 
 #### 12.5 上传图片（复杂，建议手动）
 
@@ -2864,7 +2916,7 @@ browser_click(target={确认按钮ref})
 |------|------|----------|--------|
 | 标题 | **ProseMirror** | JS 注入 `textContent` | ✅ 高 |
 | 作者 | 标准 input | `browser_type` | ✅ 高 |
-| 正文 | **ProseMirror** | JS 注入 `innerHTML` | ✅ 高 |
+| 正文 | **ProseMirror** | 🔴 v3.23.0 修正：`execCommand('insertHTML')`（直接 innerHTML 被静默清空） | ✅ 高 |
 | 图片上传 | **隐藏 file input** | `setInputFiles`（但不插入文章） | ⚠️ 需手动插入 |
 | 封面 | 拖拽区域 | 需手动上传 | ❌ 建议手动 |
 | 合集 | **自定义 Vue 组件** | JS click（不稳定） | ❌ 建议手动 |
@@ -2915,7 +2967,13 @@ browser_run_code_unsafe("""async (page) => {
 - 跨域 iframe **无法用 JS 访问**（`contentDocument` 为 null）。
 - `page.reload` 1–2 次仍失败。
 
-**处理协议**：
+**🔴 v3.23.0 / 2026-08-29 升级为「复发模式」**：此失败已在 **2026-08-28 与 2026-08-29 连续两日**复现——「加载失败，点击重试」+ 重试无效，**非偶发**。标准止损流程（0829 已验证产出可用）：
+1. 重试 **1 次**即放弃（勿多轮空转），标记 `channels: login_required`。
+2. QR 截图落盘（如 `channels-login-{MMDD}.png`）供用户手动扫码。
+3. `upload-status.md` 写 `⏭` + 「视频号待办」小节：列出 QR 截图路径 + 补跑 6 步清单（上传视频/封面 → 描述+短标题 → 合集 → 保存草稿），附双 body 铁律提示（单次 browser_run_code_unsafe + page.goto baidu 离开）。
+4. Phase 13 结束，不阻塞其他平台。
+
+**处理协议**（原始 v3.18.0，与上述复发协议合并使用）：
 1. `page.reload` 1–2 次后仍失败 → 标记 `channels: login_required`。
 2. 写 `upload-status.md` 为 `⏭`（跳过本平台），停止空转。
 3. **明确**：自主流程无法完成视频号扫码登录，需用户手动扫码。Phase 13 结束并在 `upload-status.md` 注明「等待用户手动扫码后重跑」。
@@ -3475,7 +3533,7 @@ await titleInput.fill('代码偷吃SSD+豆包对标Opus｜今日羊报AI');
 
 **解决**：用 `browser_evaluate` 注入内容：
 - 标题：`editors[0].textContent = '标题'` + dispatch `input` 事件
-- 正文：`editors[1].innerHTML = '<h2>...</h2><p>...</p>'` + dispatch `input` 事件
+- 🔴 v3.23.0 修正：正文禁直接 `innerHTML`（被静默清空）→ `execCommand('insertHTML')`（见 Phase 12.5）
 
 ### 🔴 微信公众号图片插入
 **问题**：通过 `setInputFiles` 可以将图片上传到素材库，但图片不会自动插入到文章正文中。需要先在文章中定位光标，然后通过工具栏「图片」→「本地上传」手动插入。
@@ -3667,7 +3725,7 @@ await inputs[1].setInputFiles('horizontal-4-3.png');  // 设置封面
 2. 切换到新标签页
 3. 填写标题：`OpenAI二验风暴、Anthropic IPO、DeepSeek 500亿融资｜羊报AI周刊 YYYY-MM-DD~YYYY-MM-DD`
 4. 填写作者：Youngs羊示
-5. 填写正文（ProseMirror innerHTML）
+5. 填写正文（ProseMirror execCommand insertHTML，🔴 v3.23.0）
 6. 上传封面图到正文：
    - 点击正文区域获取 focus
    - 按回车创建新行
@@ -3811,6 +3869,22 @@ browser_run_code_unsafe("""async (page) => {
 }""")
 ```
 
+#### 14.5c 描述输入 editor-kit 编辑器（v3.23.0 / 2026-08-29 日报实测）
+
+0829 实测：描述编辑器实际是 **`.editor-kit-editor-container [contenteditable="true"]`**（editor-kit 组件），且直接 `fill()` 可能不触发组件状态同步——用 `page.keyboard.type(text, {delay: 5})` 逐字输入最稳：
+
+```js
+browser_run_code_unsafe("""async (page) => {
+  const desc = '...162字描述含7话题...'; // 由外部传入
+  await page.locator('.editor-kit-editor-container [contenteditable="true"]').first().click();
+  await page.waitForTimeout(300);
+  await page.keyboard.type(desc, { delay: 5 });
+  return 'desc typed';
+}""")
+```
+
+> 与 14.5b 的关系：14.5b 的 `div[contenteditable="true"]` 通用定位在 0829 版编辑页失效时，用本节的 `.editor-kit-editor-container` 选择器兜底；话题仍走「#添加话题」+ keyboard.type 流程不变。
+
 #### 14.6 上传封面（横封面4:3 + 竖封面3:4）（v3.6.0 更新）
 
 **🔴 封面复用**：横封面用 `horizontal-4-3.png`（4:3）+ 竖封面用 `vertical-3-4.png`（3:4）。  
@@ -3819,6 +3893,10 @@ browser_run_code_unsafe("""async (page) => {
 **入口差异**：
 - **首次投稿页**：横封面点「完成」后，常自动弹出「设置竖封面获更多流量」→ 点「设置竖封面」
 - **草稿编辑页**（`post/video?enter_from=draft`）：「设置竖封面」弹窗**经常不出现**，必须**再点竖封面 3:4 区域**单独打开编辑器
+
+**🔴 封面上传图标被 SVG 拦截（v3.23.0 / 2026-08-29 实测）**：点封面上传图标时 click 被 SVG 子元素截获（"element intercepts pointer events"）→ 改点上传容器本体 `.semi-upload.upload-BvM5FF`（+ waitForEvent('filechooser') + setFiles）。
+
+**🔴 封面文件落盘位置（v3.23.0 / 2026-08-29 实测）**：封面图实际生成在**日期目录根**（如 `news-pipeline/2026-08-29/horizontal-4-3.png`），**没有 `covers/` 子目录**——脚本传路径时勿假设子目录结构，先 `ls` 确认实际路径再 setFiles。
 
 **🔴 完成按钮坑（v3.6.0 / 2026-07-17 实测）**：
 - `getByRole('button', { name: '完成' })` **经常 count=0**（弹窗粉按钮不是标准 button role）
@@ -5085,7 +5163,66 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 **Why:** 0828 实测弹窗未开时 getByRole 直接超时。
 **How to apply:** Phase 12.10 步骤2
 
+### 🔴 公众号正文 ProseMirror 拒绝 innerHTML 直接赋值（v3.23.0 / 2026-08-29）
+**问题**：`bodyEditor.innerHTML = html` 返回"ok"但编辑器回滚，`pm.textContent.length === 1`——正文被静默清空，无报错。
+**解决**：`focus()` → `range.selectNodeContents(pm)` → `sel.addRange(range)` → `document.execCommand('insertHTML', false, html)`；注入后回读 `textContent.length > 1000` 验证。
+**Why:** ProseMirror 通过 selection/execCommand 管状态，直接 DOM 写入会被视图层丢弃。
+**How to apply:** Phase 12.5（已重写，替代旧 innerHTML 方案）
+
+### 🔴 公众号标题被正文注入操作灌入全文（v3.23.0 / 2026-08-29）
+**问题**：正文注入操作导致标题框变成整篇文章（计数器 1776/64）。
+**解决**：按 `data-placeholder` 含「标题」定位标题框 → `selectNodeContents` + `execCommand('delete')` + `execCommand('insertText', false, title)` 重置；**标题填写固定放到正文注入之后**。
+**Why:** 注入时的 selection 操作可能落到标题框；索引定位在操作后会漂移。
+**How to apply:** Phase 12.5b（新增）
+
+### 🔴 公众号原创声明协议 checkbox 不自动勾选（v3.23.0 / 2026-08-29）
+**问题**：旧文档称「自动勾选同意，直接点确定」；实测 `checked:false`，点「确定」no-op（弹窗不关）。
+**解决**：点 checkbox 的 `closest('label')` 容器（点 input/文字 span 可能不切换）→ 验证 `checked===true` → 点「确定」；成功标志 = 弹窗关 + 「文字原创 · 已开启快捷转载」。
+**Why:** weui-desktop checkbox 的 click handler 绑在 label 容器上。
+**How to apply:** Phase 12.8（已修正）
+
+### 🔴 公众号封面 4 子坑：hover 菜单/label 拦截/未选中/视口外 radio（v3.23.0 / 2026-08-29）
+**问题**：①「从图片库选择」直接 click 报 not visible ②上传按钮被 webuploader-pick 内 `<label>` 拦截 ③图库首击未出现 selected ④2.35:1 radio 在视口外报 outside of viewport。
+**解决**：① `page.mouse.move(coverBox.x, coverBox.y)` 先 hover 再 evaluate 点 ② `.single_upload_btn_container, .webuploader-pick` force click + waitForEvent('filechooser')（勿用含点动态 id 选择器）③ 回读 `.selected` 类验证，无则 evaluate 再点 ④ evaluate 点含 "2.35" 文本的 label/span。
+**Why:** hover 菜单、webuploader 结构、选择态回读、视口外元素四类典型 Playwright 拦截。
+**How to apply:** Phase 12.7c（新增）
+
+### 🔴 抖音描述 editor-kit 编辑器 + 封面 SVG 拦截 + 封面路径（v3.23.0 / 2026-08-29）
+**问题**：①描述编辑器实为 `.editor-kit-editor-container [contenteditable="true"]`，fill 可能不同步 ②封面上传图标 click 被 SVG 截获 ③封面文件在日期目录根，无 `covers/` 子目录。
+**解决**：① locator 点 focus + `keyboard.type(text, {delay:5})` ② 点 `.semi-upload.upload-BvM5FF` 容器 + filechooser ③ 传路径前先 `ls` 确认。
+**Why:** editor-kit 组件状态同步依赖真实键盘事件；SVG 覆盖层拦截指针；生成脚本输出目录与假设不符。
+**How to apply:** Phase 14.5c（新增）/ 14.6（已补）
+
+### 🔴 视频号 QR iframe 跨域失败连续两日复发（v3.23.0 / 2026-08-29）
+**问题**：0828 + 0829 连续两日 `qrconnect` iframe「加载失败，点击重试」且重试无效——非偶发，是复发模式。
+**解决**：重试 1 次即放弃 → QR 截图落盘 `channels-login-{MMDD}.png` → upload-status.md 写「视频号待办」6 步手动补跑清单（附双 body 铁律）。
+**Why:** 跨域 iframe 自主流程无法修复，止损输出比反复重试有价值。
+**How to apply:** Phase 13.0b（已升级为复发协议）
+
 ## 更新日志
+
+### v3.23.0（2026-08-29）
+基于 **2026-08-29 日报视频全流程**（319 帖 → 视频 → B站/抖音/公众号 3 平台草稿 + 视频号 QR 连续两日复发按复发协议跳过）实战，**修正 2 处既有记载与实测相矛盾**，固化 6 组新坑：
+
+**公众号（Phase 12）——核心矛盾修正**
+- 🔴 12.5 重写：ProseMirror 正文**禁止直接 innerHTML 赋值**（实测被静默清空 pmLen=1）→ 唯一可靠方式 `selectNodeContents` + `execCommand('insertHTML')`，注入后回读字数验证
+- 🔴 12.5b 新增：正文注入操作会把标题框灌入全文（计数器 1776/64）→ data-placeholder 定位 + delete + insertText 重置；标题填写固定放到正文注入之后
+- 🔴 12.8 修正：「我已阅读并同意」协议 checkbox **不会**自动勾选（实测 checked:false，直接点确定 no-op）→ 点 `closest('label')` 容器验证 checked 后再确定
+- 12.7c 新增：封面 4 子坑——hover 菜单 mouse.move、webuploader-pick label 拦截（force click + filechooser，勿用含点动态 id）、`.selected` 类回读验证、2.35:1 裁剪 radio 视口外 evaluate 点 label
+
+**抖音（Phase 14）**
+- 14.5c 新增：描述编辑器实为 `.editor-kit-editor-container [contenteditable="true"]`，用 `keyboard.type({delay:5})` 逐字输入
+- 14.6 补录：封面上传图标被 SVG 拦截 → 点 `.semi-upload.upload-BvM5FF` 容器；封面文件落日期目录根（无 covers/ 子目录），传路径前先 ls
+
+**视频号（Phase 13）**
+- 13.0b 升级为复发协议：QR iframe 跨域失败 0828+0829 **连续两日复发**（非偶发）→ 重试 1 次即放弃，QR 截图落盘 + upload-status.md 写 6 步手动补跑清单
+
+**已知坑新增**：上述 6 条入「已知坑与经验教训」
+
+**实测**
+- 公众号 appmsgid=100000820 ✅（正文 1536 字 execCommand 注入 + 原创「文字原创·已开启快捷转载」+ 2.35:1 封面 + 合集「今日羊报 AI」）
+- B站 draftId=3809839 ✅；抖音双封面 + 7 话题 ✅；视频号 login_required ⏭（复发协议）
+- **版本**：3.22.0 → 3.23.0
 
 ### v3.22.0（2026-08-28）
 基于 **2026-08-28 日报视频全流程**（511 帖 → 视频 150.29s → B站/抖音/公众号 3 平台草稿 + 视频号 login_required 按既有协议跳过）实战，固化上传阶段 6 个新坑：
