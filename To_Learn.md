@@ -504,3 +504,72 @@ agent harness  enginee
   给出结论
 
   手动添加概念到ai-concept-bank
+
+
+
+每60分钟执行一下任务,如果正在执行则跳过此次执行,每60分钟执行一下任务,如果任务中断则继续上次执行,直到任务成功.
+  执行 linuxdo 全量日报流水线（日期按当天：2026-08-14）。
+  要求与「过滤后全部抓取完」一致：
+  1) 用 linuxdo-daily：双源列表 → 合并去重/公益站过滤 → 32h 窗口 → 全量逐帖抓取正文（每批立即保存 batch_browser_N.json）→ 二次过滤 → 写 data/daily/YYYY-MM-DD.json、data/reports/YYYY-MM-DD.md、press、PDF。
+  2) 然后用 ai-news-factory 生成当日日报视频：事件按推荐自动选定，不用再向我确认；权限给足直接跑；上传各平台一律存草稿。
+  3) 遵守 skill  / ai-news-factory ：批抓阶段只保留一个 Playwright MCP；不要并行独立 Chrome 抢 profile；视频号注意双 body；日报 PDF 落盘后再开视频流水线。
+  4) 完成后简要汇报：daily 帖数、报告路径、视频路径、各平台草稿状态
+视频脚本记得进行审核列表检查
+视频脚本记得进行审核列表检查
+视频脚本记得进行审核列表检查
+
+
+
+执行 linuxdo 全量月报流水线。用 linuxdo-daily 然后用 ai-news-factory 生成当月报视频：事件按推荐自动选定，不用再向我确认；权限给足直接跑；上传各平台一律存草稿。\n3) 遵守 skill  / ai-news-factory ：批抓阶段只保留一个 Playwright MCP；不要并行独立 Chrome 抢 profile；视频号注意双 body；月报 PDF 落盘后再开视频流水线。\n\n完成后简要汇报：daily 帖数、报告路径、视频路径、各平台草稿状态
+视频脚本记得进行审核列表检查
+视频脚本记得进行审核列表检查
+视频脚本记得进行审核列表检查
+
+
+执行 linuxdo 周报流水线。用 linuxdo-daily 然后用 ai-news-factory 生成周报视频：事件按推荐自动选定，不用再向我确认；权限给足直接跑；上传各平台一律存草稿。\n3) 遵守 skill  / ai-news-factory ：批抓阶段只保留一个 Playwright MCP；不要并行独立 Chrome 抢 profile；视频号注意双 body；月报 PDF 落盘后再开视频流水线。\n\n完成后简要汇报：daily 帖数、报告路径、视频路径、各平台草稿状态
+视频脚本记得进行审核列表检查
+视频脚本记得进行审核列表检查
+视频脚本记得进行审核列表检查
+
+根据今天的生成过程优化skill
+mimo-tts 接口不行的时候,切换到edge-tts skill
+
+
+核查了历史日报
+
+
+
+如何实现Claude Code 和Codex 等Agent CLI 的自动重试
+
+
+竖屏模式
+
+1分钟
+生成图片
+时长60秒
+分析完播率
+
+/goal
+
+
+根据今天的生成过程更新优化skill 
+视频中不要出现 数据来自 linux.do 社区精选等
+视频中不要出现 数据来自 linux.do 社区精选等
+视频中不要出现 数据来自 linux.do 社区精选等
+
+视频的标题改为日期在前 报刊名在后 例如:
+【2026-08-13】DeepSeek V4 Pro、Grok 4.6 同日上线，微信自研大模型亮相｜5条重磅AI新闻一次看完 | 今日羊报AI
+
+视频封面 只需要3:4。和4:3 共两张的封面
+视频封面 只需要3:4。和4:3 共两张的封面
+视频封面 只需要3:4。和4:3 共两张的封面
+
+上传b站的分区选择 人工智能
+精简封面规格为只有 3:4 和 4:3 两张
+horizontal-4-3.png
+vertical-3-4.png
+
+根据今天的生成过程更新优化skill 
+生成的封面只需要生成两张 3:4 和 4:3 两张
+horizontal-4-3.png
+vertical-3-4.png

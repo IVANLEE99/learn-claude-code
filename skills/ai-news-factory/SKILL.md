@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.20.0
+version: 3.22.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.21.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.22.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -2525,7 +2525,7 @@ browser_run_code_unsafe("""async (page) => {
     for (const el of elements) {
       if (el.textContent.trim() === '原创' && el.offsetParent !== null) {
         const rect = el.getBoundingClientRect();
-        if (rect.y > 150 && rect.y < 400 && rect.x > 500) {
+        if (rect.y > 150 && rect.x > 500) {
           el.click();
           return;
         }
@@ -2567,6 +2567,7 @@ browser_evaluate("""() => {
 - 弹窗打开后「文字原创」已默认选中
 - 「我已阅读并同意」checkbox 已默认勾选
 - 直接点击「确定」即可，无需手动操作其他选项
+- 🔴 **v3.22.0 / 2026-08-28 实测**：「原创」标题实测在 `y=471`，旧条件 `rect.y < 400` 会**漏选**导致点不开弹窗；已去 y 上界改为 `rect.y > 150 && rect.x > 500`。优先用 `.setting-group__title` 文本 === '原创' 定位（`document.querySelectorAll('.setting-group__title')` 找文本「原创」的那个），比全 `*` 扫描 + y 范围更稳。
       }
     }
   });
@@ -2663,6 +2664,9 @@ browser_run_code_unsafe("""async (page) => {
   await page.waitForTimeout(1000);
   return 'typed';
 }""")
+# 🔴 兜底（v3.22.0 / 2026-08-28 实测）：弹窗未开时 getByRole('textbox', {name:'请选择合集'}) 30s 超时。
+# 须先 document.querySelector('.js_article_tags_content').scrollIntoView({block:'center'}) + click 开弹窗，
+# 再用 page.locator('input[placeholder="请选择合集"]') 兜底定位输入框。
 
 # 步骤3：hover 并点击选项（必须用 exact: true 精确匹配！合集名按 REPORT_MODE 从模式参数映射表读取）
 browser_run_code_unsafe("""async (page) => {
@@ -3702,6 +3706,7 @@ await inputs[1].setInputFiles('horizontal-4-3.png');  // 设置封面
 **✅ 正确流程**：
 1. 从草稿编辑页点「**重新上传**」→ 导航回 upload 页 → 重新触发 file chooser。
 2. 离开草稿编辑页时会弹 **「将此次编辑保留？」**（beforeunload）→ `browser_handle_dialog(accept=true)`，否则触发 `net::ERR_ABORTED` 导致导航失败。
+3. **弹窗若只显「放弃」按钮**（v3.22.0 / 2026-08-28 实测）：用 JS evaluate 精确点 `textContent.trim() === '放弃'` 的可见节点，**勿点合并文本「继续编辑放弃」**（会落到 `enter_from=draft` 编辑页混入旧素材）；点完弹窗消失即恢复 upload 页空白上传区。
 
 ```
 # 草稿编辑页 → 点「重新上传」回到 upload 页
@@ -3781,6 +3786,31 @@ browser_run_code_unsafe("""async (page) => {
 }""")
 ```
 
+#### 14.5b 描述与话题分离输入（v3.22.0 / 2026-08-28 实测）
+
+**🔴 误用 `contenteditable.nth(1)` 会 30s 超时**：抖音编辑页通常只有 **1 个 `div[contenteditable="true"]`**（即描述/简介编辑器）。若按「描述 + 话题都在 contenteditable」的假设用 `nth(1)` 定位话题框，会超时；话题（#标签）**另有入口**，不在 contenteditable 里。
+
+**✅ 分离输入**：
+1. **描述/简介** → 填第 1 个 contenteditable（`nth(0)` 或 `page.locator('div[contenteditable="true"]').first()`）
+2. **话题（#标签）** → 点 **「#添加话题」** 按钮 → `keyboard.type(tag)` + `keyboard.press('Enter')`，逐个加
+
+```
+# 话题逐个加（勿用 nth(1)）
+browser_run_code_unsafe("""async (page) => {
+  const tags = ['今日羊报AI', 'AI日报', '智谱GLM', 'Qwen', '英伟达', 'OpenAI'];
+  for (const tag of tags) {
+    // 点「#添加话题」入口
+    const addBtn = page.locator('text=#添加话题').first();
+    if (await addBtn.count()) await addBtn.click({ force: true });
+    await page.waitForTimeout(300);
+    await page.keyboard.type('#' + tag);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+  }
+  return 'tags added';
+}""")
+```
+
 #### 14.6 上传封面（横封面4:3 + 竖封面3:4）（v3.6.0 更新）
 
 **🔴 封面复用**：横封面用 `horizontal-4-3.png`（4:3）+ 竖封面用 `vertical-3-4.png`（3:4）。  
@@ -3844,6 +3874,31 @@ browser_run_code_unsafe("""async (page) => {
     return 'horizontal label not found';
   });
 }""")
+
+**🔴 @好友 mention 浮层拦截「选择封面」（v3.22.0 / 2026-08-28 实测）**
+- 现象：点「横封面4:3」同卡的「选择封面」无反应——点击被 `publish-mention-wrapper`（话题/`@好友` 自动补全浮层）拦截
+- 修复：先 `keyboard.press('Escape')` 关浮层 → JS evaluate 找「设置封面」header → `parentElement` 攀爬到封面容器 → 点容器内第一个 `textContent === '选择封面'` 的 div
+
+```
+# 封面选择被 @好友 浮层拦截时的兜底
+browser_run_code_unsafe("""async (page) => {
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll('*')) {
+      if ((el.textContent || '').trim() === '设置封面' && el.offsetParent) {
+        let p = el.parentElement;
+        for (let i = 0; i < 6 && p; i++, p = p.parentElement) {
+          const sel = Array.from(p.querySelectorAll('div, span, a'))
+            .find(n => (n.textContent || '').trim() === '选择封面' && n.offsetParent);
+          if (sel) { sel.click(); return; }
+        }
+      }
+    }
+  });
+  return 'opened cover via 设置封面';
+}""")
+```
 
 # 步骤2：横封面 filechooser（推荐）或 setInputFiles 兜底
 browser_run_code_unsafe("""async (page) => {
@@ -4028,7 +4083,9 @@ browser_run_code_unsafe("""async (page) => {
 
 # 用 snapshot 找到合集选项的 ref
 browser_snapshot(depth=5)
-# 找到 option "「今日羊报AI」 共1个作品" 的 ref（如 e1232）
+# 🔴 合集名大小写陷阱（v3.22.0 / 2026-08-28 实测）：抖音合集名可能与 B站/公众号不同
+# 实测「「今日羊报Al」」是小写 L（非大写 I）+ 「共80个作品」——勿硬编码精确合集名
+# 修复：探测下拉框可见文本，匹配「今日羊报」前缀（不分大小写）+ 「共N个作品」的选项点击；snapshot 验收按前缀模糊匹配
 browser_click(target={ref编号})
 ```
 
@@ -4992,7 +5049,66 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 - `.new-creation__menu-item[0]` 开文章；标题/作者/正文 ProseMirror 注入；**保存为草稿** 后 URL 含 `appmsgid=`（0725：`100000512`）
 - 封面可手补，不阻塞草稿成功
 
+### 🔴 抖音草稿恢复弹窗「放弃」精确点击（v3.22.0 / 2026-08-28）
+**问题**：上传页弹「你还有上次未发布的视频，是否继续编辑？」，点合并文本「继续编辑放弃」会落到 `enter_from=draft` 编辑页混入旧素材。
+**解决**：用 JS evaluate 精确点 `textContent.trim() === '放弃'` 的可见按钮节点（勿点合并文本）；点完弹窗消失即恢复 upload 页空白上传区。
+**Why:** 0828 实测点合并文本落到草稿编辑页，beforeunload 连环 + `net::ERR_ABORTED`。
+**How to apply:** Phase 14.0
+
+### 🔴 抖音封面选择被 @好友 mention 浮层拦截（v3.22.0 / 2026-08-28）
+**问题**：点「横封面4:3」同卡的「选择封面」无反应——点击被 `publish-mention-wrapper`（话题/`@好友` 自动补全浮层）拦截。
+**解决**：先 `keyboard.press('Escape')` 关浮层 → JS evaluate 找「设置封面」header → `parentElement` 攀爬到封面容器 → 点容器内第一个 `textContent === '选择封面'` 的 div。
+**Why:** 0828 实测封面点击静默失败，发文助手仍报「竖封面缺失」。
+**How to apply:** Phase 14.6 步骤1 之后兜底
+
+### 🔴 抖音描述/话题 contenteditable 误用 nth(1)（v3.22.0 / 2026-08-28）
+**问题**：`div[contenteditable="true"].nth(1)` 30s 超时——编辑页通常只有 1 个 contenteditable（描述/简介），话题另有入口。
+**解决**：描述填 `contenteditable.nth(0)`；话题（#标签）改点「#添加话题」按钮 → `keyboard.type(tag)` + `keyboard.press('Enter')` 逐个加。
+**Why:** 0828 实测 `nth(1)` 超时导致描述/话题卡住。
+**How to apply:** Phase 14.5b
+
+### 🔴 抖音合集名大小写陷阱（v3.22.0 / 2026-08-28）
+**问题**：硬搜「今日羊报AI」返回 not found——实测抖音合集名是「「今日羊报Al」」（小写 L，非大写 I）+ 「共80个作品」，与 B站/公众号不同。
+**解决**：探测下拉框可见文本，按「今日羊报」前缀（不分大小写）+ 「共N个作品」模糊匹配选项点击；勿硬编码精确合集名；snapshot 验收按前缀模糊匹配。
+**Why:** 0828 实测硬编码精确名 not found，合集选择卡住。
+**How to apply:** Phase 14.7
+
+### 🔴 公众号原创声明 y 范围失效（v3.22.0 / 2026-08-28）
+**问题**：「原创」标题实测在 `y=471`，旧代码 `rect.y < 400` 漏选，点不开原创声明弹窗。
+**解决**：去 y 上界改为 `rect.y > 150 && rect.x > 500`；优先用 `.setting-group__title` 文本 === '原创' 定位，比全 `*` 扫描 + y 范围更稳。
+**Why:** 0828 实测「原创」在 y=471，旧上界 400 漏选。
+**How to apply:** Phase 12.8 步骤1
+
+### 🔴 公众号合集输入框 getByRole 超时（v3.22.0 / 2026-08-28）
+**问题**：合集弹窗未开时 `page.getByRole('textbox', { name: '请选择合集' })` 30s 超时。
+**解决**：先 `document.querySelector('.js_article_tags_content').scrollIntoView({block:'center'})` + click 开弹窗，再用 `page.locator('input[placeholder="请选择合集"]')` 兜底定位输入框。
+**Why:** 0828 实测弹窗未开时 getByRole 直接超时。
+**How to apply:** Phase 12.10 步骤2
+
 ## 更新日志
+
+### v3.22.0（2026-08-28）
+基于 **2026-08-28 日报视频全流程**（511 帖 → 视频 150.29s → B站/抖音/公众号 3 平台草稿 + 视频号 login_required 按既有协议跳过）实战，固化上传阶段 6 个新坑：
+
+**抖音（Phase 14）**
+- 14.0 草稿恢复弹窗：点合并文本「继续编辑放弃」落草稿编辑页 → JS evaluate 精确点「放弃」
+- 14.5b 新增：描述/话题分离输入——描述填 contenteditable[0]，话题用「#添加话题」+ keyboard.type；勿用 nth(1)（页面仅 1 个 contenteditable）
+- 14.6 横封面选择被 publish-mention-wrapper（@好友浮层）拦截 → Escape + JS 攀爬「设置封面」header 到容器点「选择封面」
+- 14.7 合集名大小写陷阱：实测「「今日羊报Al」」小写 L ≠ 大写 I → 探测可见文本前缀匹配，勿硬编码
+
+**公众号（Phase 12）**
+- 12.8 原创声明 y 范围失效（实测 y=471，旧 y<400 漏选）→ 去 y 上界，优先 .setting-group__title 文本匹配
+- 12.10 合集输入框 getByRole 超时 → 先 scrollIntoView「未添加」开弹窗，再 input[placeholder] 兜底
+
+**版本一致性修复**：frontmatter version 3.20.0 → 3.22.0（原与 H1 v3.21.0 不一致）
+
+**已知坑新增**：上述 6 条入「已知坑与经验教训」
+
+**实测**
+- 视频：news-pipeline/2026-08-28/video/【2026-08-28】GLM新模型测评分化与英伟达收购HuggingFace｜5条重磅AI新闻一次看完 | 今日羊报AI.mp4（150.29s / 8 场景）
+- 锚点：killing_line_chart（tier3 首次使用，位置 67.45% 容差内通过）
+- B站 draftId=3805516 ✅；抖音 暂存离开 ✅；公众号 appmsgid=100000813 ✅；视频号 login_required ⏭（按 v3.18.0 13.0b 协议）
+- **版本**：3.21.0 → 3.22.0
 
 ### v3.19.0（2026-08-21）
 基于 **2026-08-21 日报视频全流程**（GEN_IMG 端点大面积 401 + 封面 API 余额耗尽 → 本地 Pillow 兜底）实战：
