@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.23.0
+version: 3.24.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.23.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.24.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -126,7 +126,7 @@ version: 3.23.0
 | 标题前缀 B站 | `【{YYYY-MM-DD}】`（日期在前） | `【{MM-DD~MM-DD}】`（日期在前） | `【{YYYY-MM}】`（日期在前） |
 | 标题后缀 B站 | `… \| 今日羊报AI`（报刊名在后） | `… \| 羊报AI周刊`（报刊名在后） | `… \| 羊报AI月报`（报刊名在后） |
 | 抖音标题 | `今日羊报AI YYYY-MM-DD`（≤30字） | `羊报AI周刊 MM-DD~MM-DD`（≤30字） | `羊报AI月报 YYYY-MM`（≤30字） |
-| 视频号标题 | `今日羊报AI YYYY年M月D日`（≤16字） | `羊报AI周刊 M月D日~M月D日`（≤16字） | `羊报AI月报 YYYY年M月`（≤16字） |
+| 视频号标题 | `今日羊报AI M月D日`（≤16字） | `羊报AI周刊 M月D日至D日`（≤16字） | `羊报AI月报 YYYY年M月`（≤16字） |
 | 日期字段 | `YYYY-MM-DD` | `MM-DD~MM-DD` | `YYYY-MM` |
 | tags 首 tag | `今日羊报AI` | `羊报AI周刊` | `羊报AI月报` |
 | tags 主题 tag | `AI日报` | `AI周报` | `AI月报` / `AI月度盘点` |
@@ -135,6 +135,7 @@ version: 3.23.0
 | 视频渲染文件名 | `【{YYYY-MM-DD}】{核心标题}… \| 今日羊报AI.mp4` | `【{MM-DD~MM-DD}】{核心标题}… \| 羊报AI周刊.mp4` | `【{YYYY-MM}】{核心标题}… \| 羊报AI月报.mp4` |
 | B站合集名 | `「今日羊报 AI」` | `「羊报AI周刊」` | `「羊报AI月报」` |
 | 公众号合集名 | 同 B站 | 同 B站 | 同 B站 |
+| 公众号作者 | `今日羊报AI`（≤8字） | `羊报AI周刊`（≤8字） | `羊报AI月报`（≤8字） |
 | 公众号署名 | `今日羊报 AI · YYYY-MM-DD` | `羊报AI周刊 · MM-DD~MM-DD` | `羊报AI月报 · YYYY-MM` |
 | 公众号结尾 CTA | `每天 9 点带你速览 AI 圈最热的 5 条新闻` | `每周带你盘点 AI 圈一周大事` | `每月带你回顾 AI 圈整月风向` |
 | 简介数字规则 | 版本号简化 + 数字中文 | 同日报 | **强制全数字中文化**（见 B站简介数字中文化章节） |
@@ -1342,6 +1343,17 @@ ffmpeg -y -i /tmp/sceneN_edge.mp3 -acodec pcm_s16le -ar 24000 -ac 1 \
 
 音色 `zh-CN-YunxiNeural`（云希）+ ffmpeg `atempo=1.4` 加速，可显著缩短总时长（8 场景实测 112.13s）。
 
+**🔴 换期硬性前置（v3.24.0 / 2026-08-30 W35）**：atempo 有 SKIP 启发式——`out duration < raw*0.95` 视为已加速。`public/voiceover/scene*.wav` 若是**上期残留**（时长本身短于 raw），启发式会误判「已加速」直接保留旧音频 → 成片 0:52 后音画/字幕错位（W35 用户报 3 次）。
+
+**换期 / 重跑 TTS 必须先清残留，再跑 atempo**：
+```bash
+# 优先：不可逆删除（可能被自动权限拒绝）
+rm public/voiceover/scene*.wav
+# 若 rm 被拒：shutil.move 到 .stale_archive/（见已知坑 138）
+# python3 -c "import glob,shutil,os; os.makedirs('public/voiceover/.stale_archive',exist_ok=True); [shutil.move(f,'public/voiceover/.stale_archive/') for f in glob.glob('public/voiceover/scene*.wav')]"
+```
+修后必须 `ffprobe` 全部场景时长 + whisper 抽段验证才重渲染。禁止只看启发式 SKIP 就当本期音频。
+
 ```bash
 # edge-tts 生成 → ffmpeg atempo=1.4 加速 → 24kHz PCM16LE 单声道 WAV
 ffmpeg -y -i /tmp/sceneN_edge.mp3 -filter:a atempo=1.4 \
@@ -1741,7 +1753,7 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
       "description": "抖音简介，含 hashtag"
     },
     "channels": {
-      "title": "今日羊报AI YYYY年M月D日",
+      "title": "今日羊报AI M月D日",
       "tags": ["AI日报", "..."],
       "description": "视频号简介，含 hashtag"
     },
@@ -1767,11 +1779,11 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
 **标题规则（v3.17：日期在前、报刊名在后）**:
 - 日报 B站：`【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI`
 - 日报 抖音：`今日羊报AI YYYY-MM-DD`（≤30字，纯报刊名+日期，无特殊符号）
-- 日报 视频号：`今日羊报AI YYYY年M月D日`（≤16字，仅支持中文、数字、空格、书名号、引号、冒号、加号、问号、百分号、摄氏度）
+- 日报 视频号：`今日羊报AI M月D日`（≤16字，仅支持中文、数字、空格、书名号、引号、冒号、加号、问号、百分号、摄氏度；`.` `~` 不在白名单）
 - 日报 公众号：`【YYYY-MM-DD】{核心标题}… | 今日羊报AI`
 - **周报 B站**：`【MM-DD~MM-DD】{核心标题}｜本周{N}大AI新闻一次看完 | 羊报AI周刊`
 - **周报 抖音**：`羊报AI周刊 MM-DD~MM-DD`（≤30字）
-- **周报 视频号**：`羊报AI周刊 M月D日~M月D日`（≤16字）
+- **周报 视频号**：`羊报AI周刊 M月D日至D日`（≤16字；用「至」连接，勿用 `~`/`.`）
 - **周报 公众号**：`【MM-DD~MM-DD】{核心标题}… | 羊报AI周刊`
 - **月报 B站**：`【YYYY-MM】{核心标题}｜本月{N}大AI趋势月度盘点 | 羊报AI月报`
 - **月报 抖音**：`羊报AI月报 YYYY-MM`（≤30字）
@@ -1788,11 +1800,12 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
 
 **视频号标题规则（全部模式）**：
 - 格式：`{报刊名} {日期字段}`，纯报刊名+日期
-- 日报：`今日羊报AI 2026年8月1日`
-- 周报：`羊报AI周刊 7月28日~8月1日`
+- 日报：`今日羊报AI 8月30日`（`今日羊报AI 2026年8月1日` 超 16 字，勿用）
+- 周报：`羊报AI周刊 8月24日至30日`（16 字）
 - 月报：`羊报AI月报 2026年8月`
 - 总字符数 ≤16（含空格）
-- 标题不能包含特殊字符，符号仅支持书名号、引号、冒号、加号、问号、百分号、摄氏度
+- 符号仅支持书名号、引号、冒号、加号、问号、百分号、摄氏度；**`.` `~` 不在白名单**
+- 🔴 反例：`羊报AI周刊 8月24日~8月30日` 同时 18 字超限 + 含非法 `~` →保存草稿按钮 silent disabled
 - 逗号可用空格代替
 - 视频号短标题 = 视频号标题，两者使用同一格式
 
@@ -2105,15 +2118,16 @@ browser_wait_for(time=3)
 ```
 1. 打开公众号后台 → 点击「新的创作」→「文章」（新标签页打开）
 2. 切换到新标签页
-3. 填写标题（ProseMirror）+ 作者（标准 input）
+3. 填写作者（标准 input，固定 `羊报AI周刊` / `今日羊报AI` / `羊报AI月报`，≤8 字；勿填署名格式）
 4. 点击正文区域获取 focus → 插入视频号内容
-5. 填写正文内容（ProseMirror + execCommand insertHTML，🔴 v3.23.0：禁直接 innerHTML）
+5. 填写正文内容（ProseMirror nth(1) + execCommand insertHTML，🔴 v3.23.0：禁直接 innerHTML）
 6. 通过「图片」→「本地上传」插入封面图到正文
 7. 上传封面（从正文选择 / 从图片库选择）
-8. 设置原创声明
-9. 设置赞赏
-10. 选择合集
-11. 保存草稿
+8. 填写标题（正文注入之后！`.ProseMirror`.first() + keyboard.type，回读 `#title.value`）
+9. 设置原创声明
+10. 设置赞赏
+11. 选择合集
+12. 保存草稿
 ```
 
 #### 12.1 打开公众号后台
@@ -2141,29 +2155,41 @@ browser_run_code_unsafe("""async (page) => {
 browser_tabs(action="select", index={最新标签页索引})
 ```
 
-#### 12.3 填写标题和作者
+#### 12.3 填写作者（标题放到 12.5b，正文注入之后）
 
-**🔴 公众号标题使用 ProseMirror 编辑器，不是标准 input：**
+**🔴 作者字段 ≤8 字（v3.24.0 / 2026-08-30 实测）**：映射表「公众号署名」只写进正文开头/文末，**禁止**填进作者栏。作者栏固定报刊名：
+
+| 模式 | 作者字段 | 字数 |
+|------|---------|------|
+| 日报 | `今日羊报AI` | 6 |
+| 周报 | `羊报AI周刊` | 5 |
+| 月报 | `羊报AI月报` | 5 |
+
+反例：`羊报AI周刊 · 08-24~08-30` → 保存被拦「作者不能超过8个字」。
 
 ```javascript
 browser_run_code_unsafe("""async (page) => {
   const result = await page.evaluate(() => {
-    const editors = document.querySelectorAll('.ProseMirror');
-    // 第一个 ProseMirror 是标题
-    if (editors[0]) {
-      editors[0].textContent = '标题内容';
-      editors[0].dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    // 作者是标准 input
     const authorInput = document.querySelector('input[placeholder="请输入作者"]');
-    if (authorInput) {
-      authorInput.value = 'Youngs羊示';
-      authorInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    return 'title and author set';
+    if (!authorInput) return 'author input not found';
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(authorInput, '羊报AI周刊');  // 日报改 今日羊报AI；月报改 羊报AI月报
+    authorInput.dispatchEvent(new Event('input', { bubbles: true }));
+    return 'author=' + authorInput.value + ' len=' + authorInput.value.length;
   });
   return result;
 }""")
+```
+
+**🔴 标题不要在这一步填。** `#title` 是 `h=0` 隐藏 TEXTAREA，直接 click 会 30s 超时；页面有**两个**可见 `.ProseMirror`（y≈194 标题代理 / y≈272 正文）。标题填写永远放到正文注入之后（12.5b）：
+
+```javascript
+// 12.5b 标题填写（正文注入之后）
+await page.locator('.ProseMirror').first().click();
+await page.keyboard.press('Meta+A');  // macOS；Linux/Windows 用 Control+A
+await page.keyboard.type('【MM-DD~MM-DD】核心标题｜本周N大AI新闻一次看完 | 羊报AI周刊');
+const titleVal = await page.evaluate(() => document.querySelector('#title')?.value || '');
+if (!titleVal || titleVal.length < 8) return 'FAILED title not synced to #title';
 ```
 
 #### 12.4 插入视频号内容
@@ -2802,8 +2828,8 @@ browser_run_code_unsafe("""async (page) => {
 
 | 组件 | 类型 | 操作方式 | 可靠性 |
 |------|------|----------|--------|
-| 标题 | **ProseMirror** | JS 注入 `textContent` | ✅ 高 |
-| 作者 | 标准 input | `value` + dispatch `input` | ✅ 高 |
+| 标题 | **隐藏 `#title` TEXTAREA + 可见 `.ProseMirror` 代理** | 正文注入后 `.ProseMirror`.first() click → Ctrl/Meta+A → keyboard.type；回读 `#title.value`（禁 textContent 直写） | ✅ 高 |
+| 作者 | 标准 input（≤8 字） | 原生 setter + dispatch `input`；固定 `羊报AI周刊`/`今日羊报AI`/`羊报AI月报`，勿填署名 | ✅ 高 |
 | 正文 | **ProseMirror** | 🔴 v3.23.0 修正：`execCommand('insertHTML')`（直接 innerHTML 被静默清空） | ✅ 高 |
 | 视频号 | 弹窗选择 | 工具栏「视频号」→ 选账号 → 选视频 → 插入 | ✅ 高 |
 | 图片上传 | 工具栏菜单 | 「图片」→「本地上传」→ file_upload | ✅ 高 |
@@ -2815,7 +2841,7 @@ browser_run_code_unsafe("""async (page) => {
 
 **关键经验**：
 1. **公众号编辑器使用 ProseMirror**，不是 Quill，注入方式不同
-2. **标题和正文都是 ProseMirror**，通过 `document.querySelectorAll('.ProseMirror')` 获取，第一个是标题，第二个是正文
+2. **标题是隐藏 `#title` TEXTAREA + 可见 `.ProseMirror` 代理**（h=0，直接 click 超时）；页面两个 `.ProseMirror`：first()=标题代理、nth(1)=正文。标题填写永远放到正文注入之后（12.5b），回读 `#title.value`，禁 `textContent` 直写
 3. **视频号插入是最可靠的视频方式**，通过工具栏「视频号」按钮 → 选择账号 → 选择视频 → 插入
 4. **图片通过工具栏「图片」→「本地上传」插入**，会插入到正文光标位置
 5. **「从正文选择」封面**：必须先通过工具栏上传图片到正文，然后用 `.js_selectCoverFromContent` class 选择器点击
@@ -2825,12 +2851,12 @@ browser_run_code_unsafe("""async (page) => {
 9. **保存草稿前不需要完成所有设置**，封面和合集可以后续手动添加
 10. **新标签页打开**：点击「文章」会打开新标签页，需要切换到最新标签页
 
-#### 12.3 填写作者
+#### 12.3 填写作者（旧节，以 12.3 主节为准）
 
 ```javascript
-// 作者是标准 input，可以直接 type
+// 作者是标准 input，≤8 字；周报固定「羊报AI周刊」，勿填「Youngs羊示」或署名格式
 browser_click(target={作者输入框ref})
-browser_type(target={作者输入框ref}, text="Youngs羊示")
+browser_type(target={作者输入框ref}, text="羊报AI周刊")
 ```
 
 #### 12.4 填写正文
@@ -2914,8 +2940,8 @@ browser_click(target={确认按钮ref})
 
 | 组件 | 类型 | 操作方式 | 可靠性 |
 |------|------|----------|--------|
-| 标题 | **ProseMirror** | JS 注入 `textContent` | ✅ 高 |
-| 作者 | 标准 input | `browser_type` | ✅ 高 |
+| 标题 | **隐藏 `#title` TEXTAREA + 可见 `.ProseMirror` 代理** | 正文注入后 `.ProseMirror`.first() click → Ctrl/Meta+A → keyboard.type；回读 `#title.value`（禁 textContent 直写） | ✅ 高 |
+| 作者 | 标准 input（≤8 字） | 原生 setter + dispatch `input`；固定 `羊报AI周刊`/`今日羊报AI`/`羊报AI月报`，勿填署名 | ✅ 高 |
 | 正文 | **ProseMirror** | 🔴 v3.23.0 修正：`execCommand('insertHTML')`（直接 innerHTML 被静默清空） | ✅ 高 |
 | 图片上传 | **隐藏 file input** | `setInputFiles`（但不插入文章） | ⚠️ 需手动插入 |
 | 封面 | 拖拽区域 | 需手动上传 | ❌ 建议手动 |
@@ -2924,7 +2950,7 @@ browser_click(target={确认按钮ref})
 
 **关键经验**：
 1. **公众号编辑器使用 ProseMirror**，不是 Quill，注入方式不同
-2. **标题和正文都是 ProseMirror**，通过 `document.querySelectorAll('.ProseMirror')` 获取，第一个是标题，第二个是正文
+2. **标题是隐藏 `#title` TEXTAREA + 可见 `.ProseMirror` 代理**（h=0，直接 click 超时）；页面两个 `.ProseMirror`：first()=标题代理、nth(1)=正文。标题填写永远放到正文注入之后（12.5b），回读 `#title.value`，禁 `textContent` 直写
 3. **图片上传到素材库成功，但不会自动插入文章**，需要手动定位光标后插入
 4. **合集选择器是自定义 Vue 组件**，JS click 不稳定，建议手动
 5. **保存草稿前不需要完成所有设置**，可以先保存再编辑
@@ -2933,7 +2959,7 @@ browser_click(target={确认按钮ref})
 
 **权限已在预授权阶段获得，直接执行。**
 
-**🔴 重要经验：视频号编辑器使用 iframe + 自定义 React 组件，自动化难度较高。必须先检测 iframe 结构。**
+**🔴 重要经验（v3.24.0）：2026-08-30 版 UI 全部表单在 `wujie-app` open shadow root 内。进入发布页先跑 13.1 结构判定：`hasWujie=true` → 走 shadow 协议；仅当 `hasWujie=false` 且 `page.frames()` 有 `name="content"` 时才用旧 iframe 法。禁止一上来就 `page.frame({name:'content'})`。**
 
 **🔴 v3.7.0 补充（2026-07-18）— 上传视频号「稳跑」协议**：
 1. 优先 **MCP 单会话闭环**：打开 create → 上传 → 填描述/短标题 → 封面 → 存草稿 → 草稿箱验收；全过程避免另起独立 Playwright 抢 profile。
@@ -2943,14 +2969,14 @@ browser_click(target={确认按钮ref})
 5. 封面 3:4 / 4:3：等 **「预览图生成中，请等待完成后再编辑」消失** 后再点对应「编辑」；DOM 可见 `input[accept*=image]` 在 `.single-cover-uploader-wrap`，但跨 frame 时 `setInputFiles` 易 detached——**已验证可用 CDP**：
    `DOM.performSearch` → `getSearchResults` → `describeNode` 过滤 image accept → `DOM.setFileInputFiles({ backendNodeId, files })`。
 6. 竖封面文件必须**带日期**（如 `vertical-3-4.png` 含 `2026-07-18`）；生成失败勿用 scene 截图顶替。
-7. 短标题 ≤16 中文字符。格式：`{报刊名} {日期字段}`，纯报刊名+日期（如 `今日羊报AI 2026年8月1日`），不加核心标题。
+7. 短标题 ≤16 中文字符（含空格）。格式：`{报刊名} {M月D日}` / `{报刊名} {M月D日至D日}`，纯报刊名+日期（如 `今日羊报AI 8月30日`），不加核心标题。禁 `.` `~`。
 
-#### 13.0 检测 iframe 结构（关键步骤）
+#### 13.0 结构判定（先 13.1 wujie，iframe 仅兜底）
 
-**🔴 视频号页面内容在 iframe 中渲染！必须先检测 iframe 才能操作表单元素。**
+**🔴 不要默认 iframe。** 先按 13.1 检测 `hasWujie`。仅当 `hasWujie=false` 且 `page.frames()` 含 `name="content"` 时，才用下面的旧 iframe 探测：
 
 ```javascript
-// 检测 iframe 结构
+// 仅 hasWujie=false 时检测 iframe 结构
 browser_run_code_unsafe("""async (page) => {
   const frames = page.frames();
   const frameInfo = frames.map(f => ({ url: f.url().substring(0, 80), name: f.name() }));
@@ -2982,20 +3008,89 @@ browser_run_code_unsafe("""async (page) => {
 - 主页面：`https://channels.weixin.qq.com/platform/post/...`
 - 内容 iframe：`name="content"`, URL 包含 `/micro/content/post/...`
 
-**操作 iframe 内容时必须用 `page.frame({ name: 'content' })`**：
+**仅 `hasWujie=false` 时**才用 `page.frame({ name: 'content' })`（`hasWujie=true` 时此调用拿不到表单）：
 ```javascript
 browser_run_code_unsafe("""async (page) => {
   const frame = page.frame({ name: 'content' });
   if (!frame) return 'frame not found';
   const result = await frame.evaluate(() => {
-    // 在 iframe 内操作 DOM
+    // 在 iframe 内操作 DOM（旧 UI 兜底）
     return document.querySelector('.some-class')?.textContent;
   });
   return result;
 }""")
 ```
 
-#### 13.1 打开视频号发布页
+#### 13.1 🔴 wujie shadow DOM 全套操作协议（v3.24.0 / 2026-08-30 W35 实测，替代旧 iframe/坐标法）
+
+**2026-08-30 版 UI：页面级 locator / 普通 evaluate / `page.frame({name:'content'})` 全部失效——页面 body 几乎为空（bodyLen≈81），全部表单内容渲染在 `wujie-app` 的 open shadow root 内。**
+
+**结构判定**（进入发布页先做一次）：
+```javascript
+browser_run_code_unsafe("""async (page) => {
+  return await page.evaluate(() => JSON.stringify({
+    bodyLen: document.body.textContent.length,
+    hasWujie: !!document.querySelector('wujie-app'),
+    inShadow: document.querySelector('wujie-app')
+      ? document.querySelector('wujie-app').shadowRoot.querySelectorAll('input,button,[contenteditable]').length
+      : -1,
+  }));
+}""")
+```
+- `hasWujie=true` → 走本节 shadow 协议；旧 iframe 结构（`page.frames()` 有 `name="content"`）才用 13.6 的旧法。
+
+**字段定位表（shadow root 内）**：
+
+| 组件 | 定位与操作 |
+|------|-----------|
+| 视频上传 | `wujie-app input[type=file]`（`.ant-upload` 内）——**setInputFiles 直传 file input**，无需点「上传」按钮（filechooser 监听在 shadow 内不触发） |
+| 封面上传 | `.single-cover-uploader-wrap input[type=file]`（Playwright CSS 可穿 open shadow，locator 直接 setInputFiles） |
+| 描述 | `.input-editor`（contenteditable）——evaluate 内 `shadowRoot.querySelector` → dispatchEvent mousedown/click → focus → `page.keyboard.type` |
+| 短标题 | `input[placeholder*="短标题"]`（**Vue 受控 input**，不是 contenteditable）——原生 setter 清空 + focus + `page.keyboard.type` |
+| 合集 | 点「选择合集」→ `.option-item` 按「羊报AI周刊」前缀匹配点击 |
+| 封面确认 | 封面弹窗内 `button.weui-desktop-btn_primary`「确认」（个人主页卡片 3:4 裁剪） |
+
+**shadow 内 contenteditable / input 操作模板**：
+```javascript
+browser_run_code_unsafe("""async (page) => {
+  // 描述：mousedown/click 激活 → focus → 逐字键入
+  await page.evaluate(() => {
+    const r = document.querySelector('wujie-app').shadowRoot;
+    const ed = r.querySelector('.input-editor');
+    ed.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    ed.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    ed.focus();
+  });
+  await page.keyboard.type('描述文本', {delay: 5});
+
+  // 短标题：Vue 受控，须原生 value setter 清空再键入
+  await page.evaluate(() => {
+    const r = document.querySelector('wujie-app').shadowRoot;
+    const inp = r.querySelector('input[placeholder*="短标题"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(inp, '');
+    inp.dispatchEvent(new Event('input', {bubbles: true}));
+    inp.focus();
+  });
+  await page.keyboard.type('短标题文本', {delay: 5});
+  return 'done';
+}""")
+```
+
+**🔴 短标题硬约束（v3.24.0，Phase 13.4 补强）**：
+- **≤16 字**（含空格）+ **特殊字符白名单**：仅 书名号/引号/冒号/加号/问号/百分号/摄氏度——`.` `~` 均被拒（实测 `8.24~8.30` 报「符号仅支持…」）
+- 格式统一 **`{报刊名} {M月D日至D日}`**：日报 `今日羊报AI 8月30日`；周报 `羊报AI周刊 8月24日至30日`（16字 ✅；`8月24日~8月30日` 18字超限 ❌）；月报 `羊报AI月报 2026年8月`
+- **超限/非法字符时「保存草稿」按钮 silent disabled**——无 toast、点击无反应。每次填完必须验证：
+```javascript
+// 回读 .error-title 可见错误项 + 保存按钮 disabled 状态
+const r = document.querySelector('wujie-app').shadowRoot;
+const errs = [...r.querySelectorAll('.error-title')]
+  .filter(e => e.offsetParent !== null && e.textContent.trim());
+const saveBtn = [...r.querySelectorAll('button')].find(b => b.textContent.includes('保存草稿'));
+return JSON.stringify({errors: errs.map(e => e.textContent.trim()), saveDisabled: saveBtn?.disabled});
+```
+
+#### 13.1b 打开视频号发布页
 
 ```
 # 直接导航到发布页（跳过首页）
@@ -3014,8 +3109,20 @@ browser_run_code_unsafe("""async (page) => {
 
 #### 13.2 上传视频
 
+**🔴 `hasWujie=true`（当前默认）**：Playwright CSS 可穿 open shadow，直接 `setInputFiles` 到 `wujie-app input[type=file]`。filechooser 监听在 shadow 内**不触发**，勿点「上传」按钮。
+
+```javascript
+browser_run_code_unsafe("""async (page) => {
+  const input = page.locator('wujie-app input[type=file]').first();
+  await input.setInputFiles('news-pipeline/YYYY-MM-DD/video/【YYYY-MM-DD】*.mp4');
+  return 'uploaded via wujie file input';
+}""")
 ```
-# 点击上传区域（+号按钮）触发 file chooser
+
+**仅 `hasWujie=false` 时**才用旧 filechooser 点击：
+
+```
+# 旧 UI：点击上传区域（+号按钮）触发 file chooser
 browser_run_code_unsafe("""async (page) => {
   const [fileChooser] = await Promise.all([
     page.waitForEvent('filechooser', { timeout: 5000 }),
@@ -3024,226 +3131,92 @@ browser_run_code_unsafe("""async (page) => {
   await fileChooser.setFiles('news-pipeline/YYYY-MM-DD/video/【YYYY-MM-DD】*.mp4');
   return 'uploaded';
 }""")
+```
 
 # 等待上传完成（15MB 视频约需 10-15 秒）
 browser_wait_for(time=15)
-```
 
-#### 13.3 填写视频描述（坐标方式）
+#### 13.3 填写视频描述
 
-**🔴 视频号描述使用自定义 contenteditable div，标准选择器找不到。必须用坐标点击 + 键盘输入：**
-
-```javascript
-browser_run_code_unsafe("""async (page) => {
-  // 1. 点击描述区域（根据截图估算坐标）
-  await page.mouse.click(990, 420);  // x=990, y=420 附近
-  await page.waitForTimeout(500);
-  // 2. 键盘输入描述
-  await page.keyboard.type('描述内容');
-  await page.waitForTimeout(500);
-  return 'description filled';
-}""")
-```
-
-**坐标估算方法**：截图后根据「视频描述」标签位置，描述输入框在其右侧约 200px 处。
+**🔴 按 13.1 shadow 协议操作 `.input-editor`（contenteditable）：mousedown/click 激活 → focus → `page.keyboard.type`。** 仅当页面仍是旧 iframe 结构时才用旧坐标法（坐标点击 + keyboard.type）。
 
 #### 13.4 填写短标题
 
-**🔴 短标题是 contenteditable div（不是标准 input），在 iframe 中！必须用 JS 在 iframe 内操作：**
+**🔴 按 13.1 shadow 协议操作 `input[placeholder*="短标题"]`（Vue 受控 input，原生 setter 清空 + focus + keyboard.type）。**
 
-```javascript
-// 方法1：坐标点击 + 键盘输入（推荐）
-browser_run_code_unsafe("""async (page) => {
-  await page.mouse.click(990, 550);  // 短标题区域坐标
-  await page.waitForTimeout(300);
-  await page.keyboard.type('标题内容');
-  return 'typed';
-}""")
+**短标题限制**：最多 **16 字**（含空格），超过会报「标题超过16字限制」。
+**短标题格式**：`{报刊名} {M月D日至D日}`，纯报刊名+日期，不加核心标题/副标题。
+- 日报：`今日羊报AI 8月30日`
+- 周报：`羊报AI周刊 8月24日至30日`（🔴 用「至」连接，勿用 `~`/`.`——特殊字符白名单禁 `.` `~`；`8月24日~8月30日` 同时 18 字超限）
+- 月报：`羊报AI月报 2026年8月`
 
-// 方法2：在 iframe 内用 JS 直接修改（更可靠）
-browser_run_code_unsafe("""async (page) => {
-  const frame = page.frame({ name: 'content' });
-  if (!frame) return 'frame not found';
-  const result = await frame.evaluate(() => {
-    const div = document.querySelector('.edit-shorttitle-content');
-    if (div) {
-      div.textContent = '新标题内容';
-      div.dispatchEvent(new Event('input', { bubbles: true }));
-      return 'updated: ' + div.textContent;
-    }
-    return 'div not found';
-  });
-  return result;
-}""")
-```
-
-**短标题限制**：最多 16 个中文字符（含空格），超过会报错「标题超过16字限制」。  
-**短标题格式**：`{报刊名} {日期字段}`，纯报刊名+日期，不加核心标题/副标题。  
-- 日报：`今日羊报AI 2026年8月1日`  
-- 周报：`羊报AI周刊 7月28日~8月1日`  
-- 月报：`羊报AI月报 2026年8月`  
-
-**字符限制**：标题不能包含特殊字符，符号仅支持书名号、引号、冒号、加号、问号、百分号、摄氏度。逗号可用空格代替。
+**字符白名单**：符号仅支持书名号、引号、冒号、加号、问号、百分号、摄氏度。逗号可用空格代替。
+**🔴 违规后果**：保存草稿按钮 **silent disabled**（无 toast、点击无反应）——填完必须按 13.1 的 `.error-title` + `button.disabled` 双验证。
 
 #### 13.5 选择合集
 
-```javascript
-browser_run_code_unsafe("""async (page) => {
-  // 1. 点击合集下拉框
-  const dropdown = page.locator('text=选择合集').first();
-  await dropdown.click();
-  await page.waitForTimeout(1000);
-  // 2. 用坐标点击选项（根据截图调整）
-  await page.mouse.click(880, 420);
-  await page.waitForTimeout(500);
-  return 'selected';
-}""")
-```
+按 13.1 shadow 协议：点「选择合集」→ 等下拉展开 → evaluate 内在 shadowRoot 找 `.option-item`，按「羊报AI周刊」前缀匹配点击（勿硬编码全名，防大小写差异）。仅旧 iframe 结构时才用坐标法。
 
-#### 13.6 上传封面和短标题（在 iframe 中操作）
+#### 13.6 上传封面（shadow 协议优先）
 
-**🔴 视频号页面内容在 iframe 中，必须用 `page.frame({ name: 'content' })` 操作！**
-
-##### 13.6.1 检测 iframe 结构
-
-```javascript
-browser_run_code_unsafe("""async (page) => {
-  const frames = page.frames();
-  const frameInfo = frames.map(f => ({ url: f.url().substring(0, 80), name: f.name() }));
-  return JSON.stringify(frameInfo);
-}""")
-```
-
-**常见 iframe 结构**：
-- 主页面：`https://channels.weixin.qq.com/platform/post/create`
-- 内容 iframe：`name="content"`, URL 包含 `/micro/content/post/...`
-
-##### 13.6.2 上传封面（在 iframe 中操作）
-
-**🔴 封面编辑在 iframe 中，通过「编辑」按钮触发 file chooser：**
-
-```javascript
-// 上传 3:4 个人主页卡片封面
-browser_run_code_unsafe("""async (page) => {
-  const frame = page.frame({ name: 'content' });
-  if (!frame) return 'frame not found';
-  
-  // 1. 找到「编辑」按钮并点击（触发 file chooser）
-  const [fileChooser] = await Promise.all([
-    page.waitForEvent('filechooser', { timeout: 5000 }),
-    frame.locator('.edit-btn, [class*="edit"]').first().click({ force: true })
-  ]);
-  
-  // 2. 上传 3:4 封面文件
-  await fileChooser.setFiles('news-pipeline/YYYY-MM-DD/vertical-3-4.png');
-  await page.waitForTimeout(2000);
-  return 'cover uploaded';
-}""")
-
-# 确认封面
-browser_run_code_unsafe("""async (page) => {
-  const frame = page.frame({ name: 'content' });
-  if (frame) {
-    await frame.evaluate(() => {
-      const buttons = document.querySelectorAll('button');
-      for (const btn of buttons) {
-        if (btn.textContent.trim() === '确认' && btn.offsetParent !== null) {
-          btn.click();
-          return;
-        }
-      }
-    });
-  }
-  await page.waitForTimeout(2000);
-  return 'cover confirmed';
-}""")
-```
+**🔴 `hasWujie=true`（当前默认）**：按 13.1 字段表操作——`.single-cover-uploader-wrap input[type=file]` `setInputFiles` → 弹窗 `button.weui-desktop-btn_primary`「确认」。短标题走 13.4 Vue input，**不是** `.edit-shorttitle-content`。
 
 **封面尺寸**：
 - 个人主页卡片：3:4（1152×1536）→ `vertical-3-4.png`
 - 分享卡片：4:3（1536×1152）→ `horizontal-4-3.png`
 
-##### 13.6.3 填写短标题（在 iframe 中操作）
+##### 13.6.1–13.6.3 旧 iframe 兜底（仅 `hasWujie=false`）
 
-**🔴 短标题是 contenteditable div（`.edit-shorttitle-content`），不是标准 input。格式：`{报刊名} {日期字段}`，≤16字，纯报刊名+日期，不使用核心标题：**
-
-```javascript
-// 方法1：在 iframe 内用 JS 直接修改（推荐）
-browser_run_code_unsafe("""async (page) => {
-  const frame = page.frame({ name: 'content' });
-  if (!frame) return 'frame not found';
-  
-  const result = await frame.evaluate(() => {
-    const div = document.querySelector('.edit-shorttitle-content');
-    if (div) {
-      div.textContent = '今日羊报AI 2026年8月1日';
-      div.dispatchEvent(new Event('input', { bubbles: true }));
-      return 'updated: ' + div.textContent;
-    }
-    return 'div not found';
-  });
-  return result;
-}""")
-
-// 方法2：坐标点击 + 键盘输入
-browser_run_code_unsafe("""async (page) => {
-  await page.mouse.click(990, 550);  // 短标题区域坐标
-  await page.waitForTimeout(300);
-  await page.keyboard.type('短标题内容');
-  return 'typed';
-}""")
-```
-
-**短标题限制**：最多 16 个中文字符，超过会报错。
+旧 UI 才检测 `name="content"` iframe、点 `.edit-btn` 触发 filechooser、以及 `.edit-shorttitle-content` contenteditable。**2026-08-30 版禁止当主路径**——短标题已是 Vue 受控 `input[placeholder*="短标题"]`，`textContent` 直写无效。旧示例标题 `今日羊报AI 2026年8月1日` 也已过期，改用 13.4 的 `M月D日` / `M月D日至D日`。
 
 #### 13.7 保存草稿（不发布）
 
-**🔴 保存草稿后视频进入草稿箱，用户可手动确认发布。**
+**🔴 保存成功无跳转、无可见 toast（textContent 长度也不变）——不能以 URL 变化判成败，必须去草稿箱列表页数条目验证（v3.24.0 实测）。**
+
+**保存前两道拦截检查**：
+1. **🔴 表单错误检查**（短标题超限/非法字符时按钮 silent disabled）：按 13.1 回读 `.error-title` 可见项 + 保存按钮 `disabled` 状态，有错误先修复再保存。
+2. **🔴 「编辑个人主页卡片」弹窗拦截**：封面操作后此弹窗可能残留，点保存会被吞——点弹窗内 primary「确认」关弹窗后再保存。
 
 ```javascript
 browser_run_code_unsafe("""async (page) => {
-  const frame = page.frame({ name: 'content' });
-  if (!frame) return 'frame not found';
-  
-  // 确保定时发表为「不定时」
-  const radio = frame.locator('text=不定时').first();
-  if (await radio.isVisible()) await radio.click();
-  
-  // 点击「保存草稿」按钮
-  const draftBtn = frame.locator('button:has-text("保存草稿"), button:has-text("存草稿")');
-  await draftBtn.first().click();
+  // shadow 协议（wujie 结构）：
+  await page.evaluate(() => {
+    const r = document.querySelector('wujie-app').shadowRoot;
+    const btn = [...r.querySelectorAll('button')].find(b => b.textContent.includes('保存草稿'));
+    if (btn.disabled) return 'DISABLED: check .error-title';
+    btn.click();
+  });
   await page.waitForTimeout(3000);
-  return 'saved as draft';
+  return 'clicked save';
 }""")
+// 旧 iframe 结构：page.frame({name:'content'}) 内点「保存草稿」，其余同
 ```
 
-**保存草稿后**：
-- 视频进入草稿箱，URL 变为 `/platform/post/draft`
-- 用户可手动在草稿箱中确认发布
-- **不自动跳转到发布成功页面**
+**草稿落库验收（强制）**：
+- 🔴 **正确草稿箱 URL：`/platform/post/draftListManager`**（侧栏入口：**外层 body** 的「内容管理」→「草稿箱」；`post/record?tab=draft` 会 302 到别处，勿用）
+- 导航后数草稿条目 / 找当日标题关键词（如「羊报AI周刊 8月24日至30日」）——条目出现即 ✅；反复点击保存无反应时先回 13.1 查 `.error-title`/`disabled`，勿空转
+- beforeunload 弹窗：`browser_handle_dialog(accept=true)`；瞬时弹窗可能自愈（handle_dialog 报 no modal state 时直接继续）
 
-#### 视频号上传组件操作总结（v1.7.0 实测）
+#### 视频号上传组件操作总结（v3.24.0 更新）
 
 | 组件 | 类型 | 操作方式 | 可靠性 |
 |------|------|----------|--------|
-| 视频上传 | file chooser | 点击 + 号 → `file_upload` | ✅ 高 |
-| 视频描述 | **iframe 内 contenteditable** | 坐标点击 + `keyboard.type` | ⚠️ 坐标方式 |
-| 短标题 | **iframe 内 contenteditable div** | iframe JS 修改 `.edit-shorttitle-content` | ✅ 高（用JS） |
+| 视频上传 | file input（shadow 内） | `wujie-app input[type=file]` setInputFiles 直传 | ✅ 高 |
+| 视频描述 | **shadow 内 contenteditable** | shadowRoot.querySelector `.input-editor` → focus → keyboard.type | ✅ 高 |
+| 短标题 | **shadow 内 Vue 受控 input** | 原生 setter 清空 + focus + keyboard.type（≤16字+白名单） | ✅ 高 |
 | 位置 | 下拉框 | 已有默认值，一般不需改 | ✅ 高 |
-| 合集 | **自定义下拉框** | 坐标点击（不稳定） | ⚠️ 可能需手动 |
-| 定时发表 | radio 按钮 | `browser_click` | ✅ 高 |
-| 发表 | 按钮 | `button:has-text("发表")` | ✅ 高 |
-| 封面上传 | **iframe 内 file chooser** | 点击编辑 → +号 → `file_upload` → 确认 | ✅ 高 |
-| 短标题修改 | **iframe 内 div** | JS 修改 `.edit-shorttitle-content` → 完成 → 确认修改 | ✅ 高 |
+| 合集 | 自定义下拉（shadow 内） | 「选择合集」→ `.option-item` 前缀匹配 | ✅ 高 |
+| 封面上传 | `.single-cover-uploader-wrap input[type=file]` | setInputFiles → 3:4 裁剪弹窗 `weui-desktop-btn_primary` 确认 | ✅ 高 |
+| 保存草稿 | shadow 内按钮 | 无错误 + 无弹窗拦截后点击；**无跳转无 toast** | ⚠️ 须草稿箱数条目验收 |
 
 **关键经验**：
-1. **🔴 视频号页面内容在 iframe 中**，必须用 `page.frame({ name: 'content' })` 操作表单元素
-2. **🔴 短标题是 contenteditable div**（`.edit-shorttitle-content`），不是标准 input
-3. **🔴 封面修改和短标题修改有「仅支持修改一次」限制**，修改前确认内容正确
-4. **坐标点击是描述填写的最可靠方式**，根据截图估算坐标
-5. **发布后跳转到 `/platform/post/list`**，可通过 URL 变化判断发布成功
-6. **修改后显示「修改审核中」**，约 30 分钟审核完成
-7. **视频号支持两种封面比例**：3:4（个人主页卡片）和 4:3（分享卡片）
+1. **🔴 wujie shadow DOM（2026-08-30 版 UI）**：全部表单在 `wujie-app` shadowRoot 内，页面级 locator/普通 evaluate/iframe 法失效；Playwright CSS 可穿 open shadow（file input 类），contenteditable/受控 input 须 evaluate 内 shadowRoot.querySelector + 事件派发（见 13.1 协议表）
+2. **🔴 短标题 = Vue 受控 input**（不是 contenteditable）——textContent 直改无效，须原生 value setter
+3. **🔴 短标题 ≤16 字 + 特殊字符白名单**（`.` `~` 禁用），违规时保存按钮 silent disabled
+4. **🔴 保存成功无跳转无 toast**——验收只能去 `/platform/post/draftListManager` 数条目
+5. **「编辑个人主页卡片」弹窗**未关会吞保存点击，先点确认关弹窗
+6. **视频号支持两种封面比例**：3:4（个人主页卡片）和 4:3（分享卡片）
+7. 旧 iframe 结构（`page.frame({name:'content'})`）仅当 13.1 结构判定 `hasWujie=false` 时才使用
 
 ## 目录结构
 
@@ -3629,51 +3602,33 @@ if (checkbox) checkbox.click();
 - 「视频号」按钮：约 x=1074, y=17（顶部工具栏右侧）
 - 使用 `browser_evaluate` 动态查找按钮位置更可靠
 
-### 🔴 微信视频号描述字段
-**问题**：视频号描述使用自定义 contenteditable div，标准 `textarea`、`placeholder`、`contenteditable="true"` 选择器都找不到。
-
-**解决**：使用坐标点击方式：
-1. 根据截图估算描述区域坐标（约 x=760, y=310）
-2. `page.mouse.click(x, y)` 点击
-3. `page.keyboard.type(text)` 输入内容
+### 🔴 微信视频号描述字段（v3.24.0 改走 shadow 协议）
+**问题**：页面级 `textarea` / `placeholder` / `contenteditable="true"` 选择器都找不到——描述在 `wujie-app` open shadow 的 `.input-editor` 里。
+**解决（当前默认）**：按 13.1——`hasWujie=true` 时 evaluate 内 `shadowRoot.querySelector('.input-editor')` + focus + `page.keyboard.type`。**禁止**把坐标点击当主路径。
+**旧 UI 兜底（仅 `hasWujie=false`）**：截图估坐标（约 x=760, y=310）→ `page.mouse.click` → `page.keyboard.type`。
 
 ### 🔴 微信视频号合集选择器
-**问题**：视频号合集选择器是自定义 React 组件，下拉框坐标方式偶尔有效。
-
-**解决**：
-1. 点击「选择合集」下拉框
-2. 用坐标点击选项（约 x=860, y=180）
-3. 如果失败，建议手动选择
+**问题**：合集选择器在 wujie shadow 内；页面级 locator 找不到。
+**解决（当前默认）**：按 13.1 点 shadow 内「选择合集」→ `.option-item` 前缀匹配。
+**旧 UI 兜底（仅 `hasWujie=false`）**：坐标点选项（约 x=860, y=180）；失败则手动。
 
 ### 🔴 微信视频号保存草稿限制
-**问题**：如果「定时发表」设为「定时」，保存草稿按钮会显示警告「使用定时发表将无法保存草稿」。
+**问题**：如果「定时发表」设为「定时」，保存草稿按钮会显示警告「使用定时发表将无法保存草稿」。另：超 16 字短标题会 **silent disable** 保存（无 toast）。
+**解决**：保存前确保「不定时」；短标题走 13.4（≤16 字、禁 `.` `~`）；保存无反应先查 `.error-title` 与 `button.disabled`。成功无跳转——必须去 `/platform/post/draftListManager` 数条目。
 
-**解决**：保存草稿前必须确保「定时发表」选中「不定时」。
+### 🟡 视频号描述自动填充失败（v3.24.0 降级）
+**问题**：`getByPlaceholder` / `getByText` / `locator('textarea')` 找不到描述框——因为节点在 shadow 内，不是「只能坐标点」。
+**解决**：走 13.1 `.input-editor` shadow 协议。坐标点击仅 `hasWujie=false` 兜底。
 
-### 🟡 视频号描述自动填充失败
-**问题**：尝试用 Playwright 的 `getByPlaceholder`、`getByText`、`locator('textarea')` 等方法都找不到描述输入框。
+### 🔴 视频号 wujie shadow DOM（v3.24.0 替代 v1.7.0 iframe）
+**问题**：2026-08-30 版全部表单在 `wujie-app` open shadow root 内；页面级 locator / 普通 evaluate / `page.frame({name:'content'})` 全部失效。v1.7.0 的 iframe + `.edit-shorttitle-content` 已不是主路径。
 
-**解决**：这是微信视频号的自定义组件，只能通过坐标点击 + 键盘输入的方式填写。
+**解决**：先跑 13.1 结构判定。`hasWujie=true` → shadow 协议（`setInputFiles` 穿 shadow、描述 `.input-editor`、短标题 Vue `input[placeholder*="短标题"]`）。仅 `hasWujie=false` 且存在 `name="content"` iframe 时才用旧 `page.frame` 法。
 
-### 🔴 视频号 iframe 结构（v1.7.0 新增）
-**问题**：视频号页面内容在 iframe 中渲染，直接操作 `document.querySelector` 找不到表单元素。短标题（`.edit-shorttitle-content`）、封面编辑弹窗等都在 iframe 内。
+### 🔴 视频号短标题是 Vue 受控 input（v3.24.0 修正 v1.7.0）
+**问题**：旧文档称短标题是 `.edit-shorttitle-content` contenteditable；实测是 `input[placeholder*="短标题"]`（Vue 受控），`textContent` / `fill()` 不同步。
 
-**解决**：
-1. 先用 `page.frames()` 检测 iframe 结构
-2. 找到 `name="content"` 的 iframe
-3. 用 `page.frame({ name: 'content' })` 获取 frame 对象
-4. 在 frame 内用 `frame.evaluate()` 操作 DOM
-
-### 🔴 视频号短标题是 contenteditable div（v1.7.0 新增）
-**问题**：短标题不是标准 `<input>`，而是 `<div class="edit-shorttitle-content">`，Playwright 的 `fill()`、`type()` 无法直接操作。
-
-**解决**：在 iframe 内用 JS 直接修改：
-```javascript
-const frame = page.frame({ name: 'content' });
-await frame.evaluate(() => {
-  document.querySelector('.edit-shorttitle-content').textContent = '新标题';
-});
-```
+**解决**：按 13.1：原生 `HTMLInputElement.value` setter 清空 + focus + `page.keyboard.type`；填完回读 `.error-title` + 保存按钮 `disabled`。格式 `{报刊名} {M月D日至D日}`，≤16 字，禁 `.` `~`。
 
 ### 🔴 视频号封面修改限制（v1.7.0 新增）
 **问题**：视频号修改封面和短标题有「仅支持修改一次，修改后不可撤回」限制。修改记录会展示在视频上。
@@ -3683,14 +3638,10 @@ await frame.evaluate(() => {
 2. 一次性完成所有修改再提交
 3. 修改后显示「修改审核中，预计30分钟内审核完成」
 
-### 🔴 视频号封面在 iframe 内上传（v1.7.0 新增）
-**问题**：封面编辑弹窗在 iframe 中，`browser_file_upload` 无法直接触发 file chooser。
+### 🔴 视频号封面在 wujie shadow 内上传（v3.24.0 修正 v1.7.0）
+**问题**：旧文档称封面弹窗在 iframe、需坐标点 `+` 触发 filechooser。实测 filechooser 监听在 shadow 内不触发。
 
-**解决**：
-1. 点击 `.edit-btn` 打开封面编辑弹窗
-2. 用坐标点击 `+` 号按钮（约 x=680, y=585）触发 file chooser
-3. 用 `browser_file_upload` 上传文件
-4. 点击「确认」保存
+**解决**：`hasWujie=true` 时 `page.locator('wujie-app .single-cover-uploader-wrap input[type=file]')` 直接 `setInputFiles`；弹窗点 `button.weui-desktop-btn_primary`「确认」。未关「编辑个人主页卡片」弹窗会吞掉保存。仅旧 iframe UI 才用 `.edit-btn` + filechooser。
 
 ### 🟡 B站封面隐藏 file input（v1.7.0 新增）
 **问题**：B站封面上传的 file input 是隐藏的（`accept: "image/png, image/jpeg"`），且有多个 file input（视频、封面、字幕等）。
@@ -3724,7 +3675,7 @@ await inputs[1].setInputFiles('horizontal-4-3.png');  // 设置封面
 1. 打开公众号后台 → 点击「新的创作」→「文章」
 2. 切换到新标签页
 3. 填写标题：`OpenAI二验风暴、Anthropic IPO、DeepSeek 500亿融资｜羊报AI周刊 YYYY-MM-DD~YYYY-MM-DD`
-4. 填写作者：Youngs羊示
+4. 填写作者：`羊报AI周刊`（≤8 字；署名 `羊报AI周刊 · MM-DD~MM-DD` 写进正文，勿填作者栏）
 5. 填写正文（ProseMirror execCommand insertHTML，🔴 v3.23.0）
 6. 上传封面图到正文：
    - 点击正文区域获取 focus
@@ -4293,7 +4244,7 @@ browser_run_code_unsafe("""async (page) => {
 
 **成功信号（满足其一即可记 ✅）**：
 1. 回到上传页出现 **「继续编辑」** / 「上次未发布」类恢复入口
-2. **内容管理 / 草稿**列表可见当日标题关键词（如 `Fable` / `通义` / `2026-07-20`）
+2. 直接导航 `https://creator.douyin.com/creator-micro/content/publish/record?tab=draft`（**不要**去 `content/manage`——那页只显示已发布，看不到草稿，会误判上传失败），列表可见当日标题关键词（如 `Fable` / `通义` / `2026-07-20`）
 3. 打开 `post/video?enter_from=draft` 时**表单非空**（标题长度 > 0，有视频预览）
 
 **失败信号 → 必须整段重传（视频+标题+双封面+暂存）**：
@@ -5200,6 +5151,31 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 **How to apply:** Phase 13.0b（已升级为复发协议）
 
 ## 更新日志
+
+### v3.24.0（2026-08-30）
+基于 **2026-08-30 W35 周报全流程**（B站/抖音/公众号 3 平台草稿 ✅ + 视频号当日补跑草稿箱(4) ✅）实战，吸收坑 161–167，把映射表/标题规则/Phase 12 作者标题/Phase 13 wujie 协议写成单一事实源：
+
+**映射表 + 标题（单一事实源）**
+- 视频号标题改为 `今日羊报AI M月D日` / `羊报AI周刊 M月D日至D日` / `羊报AI月报 YYYY年M月`（≤16 字，禁 `.` `~`；超限保存按钮 silent disabled）
+- 公众号作者字段与署名拆开：作者固定 `今日羊报AI` / `羊报AI周刊` / `羊报AI月报`（≤8 字）；署名格式仅用于正文/简介
+
+**公众号（Phase 12）**
+- 作者 ≤8 字；隐藏 `#title`（h=0）不可 click，走 `.ProseMirror`.first() + keyboard.type，回读 `#title.value`
+- 两个 `.ProseMirror`：first()=标题代理、nth(1)=正文；标题填写永远放到正文注入之后（12.5b）
+
+**视频号（Phase 13）——wujie shadow 全套**
+- 全部表单在 `wujie-app` open shadow；页面级 locator / 普通 evaluate / `page.frame({name:'content'})` 失效
+- 视频/封面 `setInputFiles` 穿 shadow；描述 `.input-editor`；短标题 Vue 受控 input（原生 setter + keyboard.type）
+- 封面弹窗「编辑个人主页卡片」未关会吞保存；保存成功无跳转、无 toast → 必须 `/platform/post/draftListManager` 数条目（`post/record?tab=draft` 会 302）
+- 旧 iframe / `.edit-shorttitle-content` / 描述坐标法全部降为 `hasWujie=false` 兜底
+
+**抖音 + TTS**
+- 草稿验收 URL 改为 `https://creator.douyin.com/creator-micro/content/publish/record?tab=draft`（`content/manage` 只显示已发布）
+- 换期硬性前置 `rm public/voiceover/scene*.wav`，否则 atempo SKIP 启发式被上期残留 wav 骗过 → 成片 0:52 音画/字幕错位
+
+**已知坑**：161–167 入「已知坑与经验教训」；v1.5.0 / v1.7.0 总结与坐标法记载已降级，避免与 13.1 矛盾
+
+**版本**：3.23.3 记载 → 3.24.0（skill 版本号；不另发 3.23.4）
 
 ### v3.23.0（2026-08-29）
 基于 **2026-08-29 日报视频全流程**（319 帖 → 视频 → B站/抖音/公众号 3 平台草稿 + 视频号 QR 连续两日复发按复发协议跳过）实战，**修正 2 处既有记载与实测相矛盾**，固化 6 组新坑：
