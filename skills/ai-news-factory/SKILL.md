@@ -1,14 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.24.0
+version: 3.25.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.24.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.25.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
-**核心原则：以真实音频为锚——faster-whisper 词级时间戳 + 脚本字符序列强制对齐（difflib.SequenceMatcher），字幕内容 100% 来自原始脚本、时间 100% 来自音频真实发音时刻，与音频严格同步。**
+**核心原则：语义 `group_caps` 先切行，再以真实音频为锚——faster-whisper 词级时间戳 + SequenceMatcher 对齐。字幕内容 100% 来自原始脚本、时间 100% 来自音频真实发音时刻。禁止逐标点切行，禁止按字硬切，禁止按字数比例切时间轴。**
 
 ### 🔴 全局规则：所有平台上传一律存草稿
 
@@ -1366,214 +1366,113 @@ ffmpeg -y -i /tmp/sceneN_edge.mp3 -filter:a atempo=1.4 \
 - `captions.json` 字幕时间轴
 - 然后重新渲染视频
 
-### Phase 7: 字幕生成（faster-whisper 词级时间戳 + 脚本字符强制对齐）
+### Phase 7: 字幕生成（语义 `group_caps` 切行 + whisper 词级对齐）
 
-**v2.3.0 当前默认方案（2026-08-23 W33 周报实测）**：以真实音频为锚——用 faster-whisper 跑 `word_timestamps=True`，再把已知脚本句子按字符序列对齐到 whisper 词时间戳（`difflib.SequenceMatcher` 模糊匹配，容忍 ASR 个别错字）。每句字幕的 `start/end` 都来自音频里该句真实被说出的时刻，与音频严格同步。
+**v3.25.0 当前默认（2026-08-31 月报实测）**：先用语义 `group_caps` 切出字幕字符串，再用 faster-whisper `word_timestamps=True` + `SequenceMatcher` 把每条字幕对齐到音频真实发音时刻。内容 100% 来自脚本，时间 100% 来自音频。
+
+> **规则全文**：`templates/captions.md`  
+> **可运行脚本**：`templates/gen_captions.py`（`--report-dir` / `--dry-run` / `--extra-word`）
 
 > **🔴 经验教训（2026-06-12）**：FunASR 对专业术语识别极差（GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末），修正字典永远追不上新术语。**字幕内容必须用原始 TTS 脚本文本，绝不依赖 ASR 识别文字。**
 >
-> **🔴 经验教训（2026-07-15）**：纯等字符比例分配（v2.1.0）/ 加权字符估算 + silencedetect 吸附（v2.2.0）仍会漂移——TTS 读中文、数字、英文的语速差异极大，且句间停顿不计入字符数；加权系数只是平均拟合，单句偏差累积后中后段字幕仍与音频错位。**v2.3.0 彻底放弃「估算每句时长」的思路，改用音频真实发音时刻作锚。**
+> **🔴 经验教训（2026-07-15）**：纯等字符比例分配（v2.1.0）/ 加权字符估算 + silencedetect 吸附（v2.2.0）仍会漂移。**v2.3.0 放弃「估算每句时长」，改用音频真实发音时刻作锚——这一条仍有效。**
+>
+> **🔴 经验教训（2026-08-31）**：v2.3.0 的 `split_sentences` 把 `，。；！？：、` **所有标点一视同仁**切行，再叠加 16 字硬墙，会切出 `延期；`（3 字 0.5s 闪行）、`有效` / `主题近一万。`、`终止Cursor` / `官方直连`。**切行必须语义优先；whisper 只负责时间轴。**
 
-#### 7.1 默认方案：whisper 词级时间戳 + 脚本字符强制对齐（gen_captions_v2.py）
+#### 7.1 默认方案：语义切行 + whisper 对齐（`templates/gen_captions.py`）
 
-> 🔴 **v3.21.0 字幕补丁（治 2s 跳出 44%）**：Hook 的 5s 文本须独立成段，字幕时间戳 0-5s，前 5s 字幕字号 +20%（`Subtitles.tsx` 已支持，基于字幕时间戳 `caption.startMs < 5000` 判断 Hook 段放大，`fontSize: enlarged ? 48 : 40`）。前 2s 视觉与口播同步兑现封面大字承诺。
+> 🔴 **v3.21.0 字幕补丁（治 2s 跳出 44%）**：Hook 的 5s 文本须独立成段，字幕时间戳 0-5s，前 5s 字幕字号 +20%（`Subtitles.tsx` 已支持，基于字幕时间戳 `caption.startMs < 5000` 判断 Hook 段放大，`fontSize: enlarged ? 48 : 40`）。前 2s 视觉与口播同步兑现封面大字承诺。 Remotion 字幕 **单行**，不做双行长度平衡。
+
+**物理下限**（先于语义；详见 `templates/captions.md`）：
+
+| 项 | 规则 |
+|----|------|
+| 目标行长 | 15–20 汉字（空格不计） |
+| `max_len` | 16：到此长度遇软标点才断 |
+| `hard_max` | 20：允许略超 16 以保住专名/动宾/正反并列 |
+| 无合法切点 | **整句保留**（可到 24–25），**禁止按字符下标硬切** |
+| 最短显示 | 对齐后 `merge_short_dwell(min_sec=1.0)`，<1s 并回上一行 |
+| 视觉 | Remotion `Subtitles.tsx` **单行**；不做双行长度平衡 |
+
+**语义切点**：
+
+| 标点 | 行为 |
+|------|------|
+| `。！？；`（`SENT_END`） | **强制断行** |
+| `，、：`（`SOFT_PUNCT`） | 仅当当前行 ≥ `max_len` 才断 |
+| 所有标点一视同仁 | **禁止**（旧 `split_sentences`，会切出 `延期；`） |
+
+超 `hard_max`：黄金分割 40–60%（扩 30–70%）→ `WEAK_BEFORE` 弱连接 → 整句保留。
+
+**禁切反例（2026-08 月报实测，切开即错）**：
+
+| 类型 | 必须同一行 |
+|------|-----------|
+| 正反并列 | `稳不稳` |
+| 偏正 | `硬新闻主轴` |
+| 动宾 / 专名+动宾 | `规划步骤`、`编程 Agent`、`终止Cursor官方直连` |
+| 专名连发 | `Hy四连发`、`羊报AI月报` |
+| 品牌+宾语 | `整月风向` |
+| 数量+名 | `主题近一万`（禁止 `有效` / `主题近一万。`） |
+| 短尾巴 | `延期；` 不得单独成行 |
+
+后处理：`GLUE_TAILS` + `BAD_ENDS`/`BAD_STARTS` + 当期 `jieba.add_word`。
+
+**算法摘录**（完整实现 `templates/gen_captions.py`，禁止再贴 170 行硬编码 WEEKLY 路径）：
 
 ```python
-#!/usr/bin/env python3
-"""字幕生成 v2 — Whisper 词级时间戳 + 脚本字符强制对齐
+SENT_END = set('。！？；')
+SOFT_PUNCT = set('，、：')
 
-v1/v2.2（加权字符估算 + silencedetect 吸附）在音频与脚本语速不均时仍会整体错位。
-v2.3：以真实音频为锚——用 faster-whisper 跑 word_timestamps，再把已知脚本句子按字符
-序列对齐到 whisper 词时间戳上（difflib.SequenceMatcher 模糊匹配，容忍 ASR 个别错字）。
-结果：每句字幕的 start/end 都来自音频里该句真实被说出的时刻，与音频严格同步。
+def group_caps(tokens, max_len=16, min_len=6, hard_max=20):
+    """语义优先切行：句末强制断；软标点在 ≥max_len 时断；
+    允许略超 16 字（≤hard_max=20）以保住专名/动宾/正反并列；
+    超 hard_max 才黄金分割。短尾巴并回上一行。无合法切点整句保留，绝不按字硬切。"""
+    ...  # _split_overlong → 黄金分割 → WEAK_BEFORE → 整句保留
+    ...  # GLUE_TAILS / min_len 并回上一行；BAD_ENDS+BAD_STARTS 二次粘合
 
-输入：
-  public/voiceover/sceneN.wav   （atempo 后，视频实际音轨）
-  scripts/voiceover-texts.json  （每场景原始脚本文本）
-输出：
-  captions/captions.json       （全局 startMs/endMs，含场景累加偏移）
-  video-project/public/captions.json（同上，供 Remotion 读取）
-"""
-import json, re, os, sys
-from pathlib import Path
-from difflib import SequenceMatcher
-from faster_whisper import WhisperModel
-
-BASE = Path('/Users/youngsdream/Documents/learn-claude-code')
-# 周报示例路径，daily/monthly 按当期 REPORT_DIR 替换
-WEEKLY = BASE / 'news-pipeline/weekly/2026-08-17~2026-08-23'
-VT_JSON = WEEKLY / 'scripts/voiceover-texts.json'
-VO_DIR = BASE / 'news-pipeline/video-project/public/voiceover'
-N_SCENES = 8
-
-VT = json.load(open(VT_JSON))
-SCENES = VT['scenes']
-
-PUNCT_SPLIT = re.compile(r'([，。；！？、：])')
-
-def split_sentences(text):
-    parts = re.split(PUNCT_SPLIT, text)
-    sents, cur = [], ''
-    for p in parts:
-        cur += p
-        if p and p in '，。；！？：、':
-            sents.append(cur.strip()); cur = ''
-    if cur.strip():
-        sents.append(cur.strip())
-    return [s for s in sents if s]
-
-def norm_chars(s):
-    """归一化字符序列：仅保留 CJK / 数字 / 拉丁，便于模糊对齐"""
-    out = []
-    for ch in s:
-        if '一' <= ch <= '鿿' or ch.isdigit() or ch.isalpha():
-            out.append(ch.lower())
-    return out
-
-# ---- 加载 whisper 模型（缓存内 small, int8 CPU）----
-print("loading whisper-small ...", file=sys.stderr)
-MODEL = WhisperModel("small", device="cpu", compute_type="int8")
-
-def whisper_word_chars(wav):
-    """返回该音频每个归一化字符的 (char, start, end) 时间戳"""
-    segs, info = MODEL.transcribe(wav, language="zh", word_timestamps=True, vad_filter=False)
-    wchars = []
-    for s in segs:
-        for w in s.words:
-            word = w.word.strip()
-            if not word:
-                continue
-            chars = norm_chars(word)
-            if not chars:
-                continue
-            # 词内字符均分 [w.start, w.end]
-            span = max(w.end - w.start, 0.001)
-            for i, c in enumerate(chars):
-                t0 = w.start + span * (i / len(chars))
-                t1 = w.start + span * ((i + 1) / len(chars))
-                wchars.append((c, float(t0), float(t1)))
-    return wchars, info.duration
-
-def align_script_to_audio(script_text, wchars):
-    """把脚本文本的句子对齐到音频字符时间戳，返回每句 (sentence, start_s, end_s)"""
-    sents = split_sentences(script_text)
-    if not sents or not wchars:
-        return []
-    script_chars, char2sent = [], []
-    for si, sent in enumerate(sents):
-        for c in norm_chars(sent):
-            script_chars.append(c)
-            char2sent.append(si)
-    whisper_chars = [c for c, _, _ in wchars]
-    whisper_ts = [(t0, t1) for _, t0, t1 in wchars]
-    # 序列模糊对齐：脚本 → 音频
-    sm = SequenceMatcher(None, script_chars, whisper_chars, autojunk=False)
-    char_ts = [None] * len(script_chars)
-    for m in sm.get_matching_blocks():
-        for k in range(m.size):
-            char_ts[m.a + k] = whisper_ts[m.b + k]
-    # 先前向填充（用上一个匹配的 end）
-    last = None
-    for i in range(len(char_ts)):
-        if char_ts[i] is not None:
-            last = char_ts[i][1]
-        elif last is not None:
-            char_ts[i] = (last, last)
-    # 再后向填充剩余（开头未匹配）
-    nxt = None
-    for i in range(len(char_ts) - 1, -1, -1):
-        if char_ts[i] is not None:
-            nxt = char_ts[i][0]
-        elif nxt is not None:
-            char_ts[i] = (nxt, nxt)
-    # 兜底：全 None
-    if all(t is None for t in char_ts):
-        dur = wchars[-1][2] if wchars else 1.0
-        for i in range(len(char_ts)):
-            char_ts[i] = (dur * i / max(len(char_ts), 1), dur * (i + 1) / max(len(char_ts), 1))
-    # 按句聚合
-    sent_start = [None] * len(sents)
-    sent_end = [None] * len(sents)
-    for ci, si in enumerate(char2sent):
-        t0, t1 = char_ts[ci]
-        if sent_start[si] is None:
-            sent_start[si] = t0
-        sent_end[si] = t1
-    for si in range(len(sents)):
-        if sent_start[si] is None:
-            if si == 0:
-                sent_start[si] = sent_end[si] = 0.0
-            else:
-                sent_start[si] = sent_end[si] = sent_end[si - 1] if sent_end[si - 1] is not None else 0.0
-    return [(sents[si], sent_start[si], sent_end[si]) for si in range(len(sents))]
-
-def main():
-    all_caps = []
-    offset_ms = 0
-    for i in range(1, N_SCENES + 1):
-        wav = VO_DIR / f'scene{i}.wav'
-        if not wav.exists():
-            print(f"WARN missing scene{i}.wav", file=sys.stderr); continue
-        wchars, dur = whisper_word_chars(str(wav))
-        text = SCENES[str(i)]
-        aligned = align_script_to_audio(text, wchars)
-        # 保证单调 & 不重叠
-        for k in range(len(aligned)):
-            s, st, en = aligned[k]
-            if en < st:
-                en = st + 0.05
-            aligned[k] = (s, st, en)
-        for k in range(len(aligned) - 1):
-            if aligned[k][2] > aligned[k + 1][1]:
-                mid = (aligned[k][2] + aligned[k + 1][1]) / 2
-                aligned[k] = (aligned[k][0], aligned[k][1], mid)
-                aligned[k + 1] = (aligned[k + 1][0], mid, aligned[k + 1][2])
-        # 首句从 0 起，末句对齐到场景总时长
-        if aligned:
-            if aligned[0][1] > 0.2:
-                aligned[0] = (aligned[0][0], 0.0, aligned[0][2])
-            aligned[-1] = (aligned[-1][0], aligned[-1][1], dur)
-        for s, st, en in aligned:
-            all_caps.append({
-                'text': s,
-                'startMs': int(offset_ms + st * 1000),
-                'endMs': int(offset_ms + en * 1000),
-            })
-        offset_ms += int(dur * 1000)
-    out = WEEKLY / 'captions/captions.json'
-    out.parent.mkdir(parents=True, exist_ok=True)
-    json.dump(all_caps, open(out, 'w'), ensure_ascii=False, indent=2)
-    vp = BASE / 'news-pipeline/video-project/public/captions.json'
-    json.dump(all_caps, open(vp, 'w'), ensure_ascii=False, indent=2)
-    print(f"\nTotal {len(all_caps)} captions, {offset_ms/1000:.2f}s", file=sys.stderr)
-
-main()
+# 时间轴：group_caps 先切 → whisper word_timestamps → SequenceMatcher 对齐
+#        → merge_short_dwell(min_sec=1.0) → captions.json
+# WhisperModel 必须在 --dry-run 提前 return 之后才 import，避免 dry-run 加载模型
 ```
 
-> **脚本落盘**：完整可运行版本固化在当期 `news-pipeline/{date}/gen_captions_v2.py`（周报示例见 `weekly/2026-08-17~2026-08-23/gen_captions_v2.py`）。跑前按当期改 `WEEKLY` / `N_SCENES`。
+> **脚本落盘**：复制 `templates/gen_captions.py` → 当期 `scripts/gen_captions.py`；按脚本补 `jieba.add_word` 专名；先 `--dry-run` 人工扫禁切反例，再全量 whisper。
+>
+> ```
+> python3 templates/gen_captions.py --report-dir news-pipeline/monthly/2026-08 --dry-run
+> python3 templates/gen_captions.py --report-dir news-pipeline/monthly/2026-08
+> python3 templates/gen_captions.py --report-dir news-pipeline/2026-08-31 --extra-word 专名
+> ```
+>
+> 旧 `gen_captions_v2.py` / `split_sentences`（所有标点一视同仁）**已废弃作切行器**；whisper 对齐仍是时间轴唯一锚。
 
 #### 7.2 完整流程
 
 ```
-视频脚本(Phase 2) → 提取每场景 TTS 文本存 scripts/voiceover-texts.json
-    → faster-whisper(word_timestamps=True) 跑 public/voiceover/sceneN.wav
-    → 归一化脚本字符 + 归一化 whisper 词字符
-    → difflib.SequenceMatcher 模糊对齐 → 每个脚本字符分到音频真实时间戳
-    → 按句聚合（首句 start=0，末句 end=场景 ffprobe 时长）
-    → 场景间累加偏移 → 输出 captions.json（同时写 video-project/public/captions.json）
+视频脚本(Phase 2) → 提取每场景 TTS 文本存 scripts/voiceover-texts.json（或 scenes-meta.json）
+    → 复制 templates/gen_captions.py → 当期 scripts/gen_captions.py，补 jieba 专名
+    → --dry-run：jieba 分词 + 语义 group_caps 切行（不加载 whisper）
+    → 人工扫禁切反例（稳不稳 / 硬新闻主轴 / 规划步骤 / 编程 Agent / 终止Cursor官方直连 / Hy四连发 / 羊报AI月报 / 整月风向 / 主题近一万 / 延期；）
+    → faster-whisper(word_timestamps=True) 跑当期 wav
+    → 每条字幕 SequenceMatcher 滑动窗口对齐到词级时间戳
+    → merge_short_dwell(min_sec=1.0)
+    → 场景间累加偏移 → captions.json + video-project/public/captions.json
 ```
 
 **关键点**：
+- **切行先于对齐**：`group_caps` 产出字幕字符串；whisper **只**负责时间轴。禁止 `split_sentences` 逐标点切行，禁止 16 字硬墙按字符下标切开专名/动宾
 - **内容用原始脚本文本**，不依赖 ASR 识别文字，字幕文字 100% 准确
-- **时间用音频真实发音时刻**：whisper 词级时间戳是唯一锚点，不再做任何「估算每句时长」
-- **SequenceMatcher 容忍 ASR 错字**：脚本与 whisper 字符序列做模糊匹配，个别字识别错也能对上正确时间区间，未匹配字符用前后邻居插值
-- **首句从 0、末句对齐 ffprobe 场景时长**，场景间累加偏移，总时长严格 = 各场景 ffprobe 之和
+- **时间用音频真实发音时刻**：whisper 词级时间戳是唯一锚点，不再做任何「估算每句时长」；无 whisper 词时才允许比例兜底
+- **SequenceMatcher 容忍 ASR 错字**：每条字幕对归一化词序列做滑动窗口模糊匹配，个别字识别错也能对上正确时间区间
+- **最短显示 1s**：对齐后 `merge_short_dwell`，<1s 并回上一行（治 `延期；` 0.5s 闪行）
 - **必须与 Phase 8 的 Composition/Root 时长同源**（同一批 atempo 后的 wav）
+- **v2.3.0「按句聚合」已废弃作切行器**；whisper 对齐仍有效
 
-**为什么放弃 v2.2.0 加权字符 + silencedetect**：
+**为什么放弃 v2.2.0 加权字符 + silencedetect**（历史，时间轴仍适用）：
 - 加权系数（中文 1.0 / 数字 0.6 / 英文 0.35）是平均拟合，单句（尤其含大量版本号、英文术语）偏差大，仍逐句累积漂移
 - silencedetect 只能在「正好有停顿」时吸附边界，无停顿的句子仍纯靠估算，后半段依旧偏
-- v2.3.0 让每个字符的时间戳都直接取自音频，从根本上消除漂移；whisper small 模型 int8 CPU 单场景约 5–15s，8 场景总耗时可接受
+- v2.3.0 让时间戳直接取自音频，从根本上消除漂移；whisper small 模型 int8 CPU 单场景约 5–15s，可接受
+- **v3.25.0 再修切行**：v2.3.0 的 `split_sentences` 把所有标点一视同仁，叠加 16 字硬墙会切开专名/动宾；改语义 `group_caps` + 黄金分割 + 禁切粘合
 
 **字体使用规范**：
 - 使用系统字体：`"PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif`
@@ -3272,9 +3171,9 @@ news-pipeline/
 
 ## 已知坑与经验教训
 
-### 🔴 字幕与音频不同步（v2.0.0 → v2.1.0 → v2.2.0 → v2.3.0 演进）
+### 🔴 字幕与音频不同步（v2.0.0 → v2.1.0 → v2.2.0 → v2.3.0 → v3.25.0 演进）
 
-**问题**：字幕时间轴与音频不齐——越到后面偏差越大，或某场景整体错位、口播与字幕对不上。
+**问题**：字幕时间轴与音频不齐——越到后面偏差越大，或某场景整体错位、口播与字幕对不上。**v3.25.0 再修切行**：时间轴对齐了，但切行把专名/动宾切开，出现 0.5s 闪行。
 
 **v2.0.0 方案（已废弃）**：FunASR 语音识别 + ffprobe 比例调整
 - FunASR 对专业术语识别极差：GPT→GDP、DeepSeek→Deep triep、Claude Code→Claude coat、Fable-5→核酸efbo杠五、Codex→搞dex、Hermes→HMMI、MiMo→mini/明末
@@ -3288,28 +3187,40 @@ news-pipeline/
 - 加权系数（中文 1.0 / 数字 0.6 / 英文 0.35）是平均拟合，含大量版本号/英文术语的单句偏差大
 - silencedetect 只在「正好有停顿」时吸附边界，无停顿句仍纯估算，中后段仍逐句累积漂移
 
-**v2.3.0 方案（当前默认，2026-08-23 W33 周报实测）**：faster-whisper 词级时间戳 + 脚本字符强制对齐（gen_captions_v2.py）
+**v2.3.0 方案（时间轴仍有效；切行已废弃，2026-08-23 W33 周报实测）**：faster-whisper 词级时间戳 + 脚本字符强制对齐（旧 `gen_captions_v2.py`）
 ```python
 # 1. 字幕文字：直接用 Phase 2 原始 TTS 脚本文本（内容 100% 准确，不依赖 ASR）
-
 # 2. 时间锚：faster-whisper(word_timestamps=True) 跑 public/voiceover/sceneN.wav
-#    得到每个真实发音词的 (start, end)，再归一化到字符级
-
 # 3. 强制对齐：difflib.SequenceMatcher(脚本归一化字符, whisper 归一化字符)
-#    匹配块上的脚本字符直接继承音频时间戳；未匹配字符用前后邻居插值
-#    容忍 ASR 个别错字，单句偏差不再累积
-
 # 4. 按句聚合：首句 start=0，末句 end=场景 ffprobe 时长；场景间累加偏移
+#    ↑ 切行器已废弃：split_sentences 把 ，。；！？：、 所有标点一视同仁
 ```
 
+**v3.25.0 方案（当前默认，2026-08-31 月报实测）**：语义 `group_caps` 先切行 + whisper 词级对齐（`templates/gen_captions.py`）
+```python
+# 1. 切行：jieba + group_caps（SENT_END 强制断；SOFT_PUNCT 仅 ≥max_len=16 才断；
+#    允许略超 16 至 hard_max=20；超 hard_max 黄金分割 40–60% → WEAK_BEFORE → 整句保留）
+#    禁止按字符下标硬切；GLUE_TAILS / BAD_ENDS+BAD_STARTS 粘合禁切结构
+# 2. 时间锚：faster-whisper(word_timestamps=True) 跑当期 wav（WhisperModel 在 --dry-run return 之后才 import）
+# 3. 对齐：每条字幕 SequenceMatcher 滑动窗口对齐到词级时间戳
+# 4. merge_short_dwell(min_sec=1.0)：<1s 并回上一行
+```
+
+**新坑（2026-08 月报）**：v2.3.0 逐标点切行 + 16 字硬墙会切开专名/动宾：
+- `延期；`（3 字 0.5s 闪行）
+- `有效` / `主题近一万。`
+- `终止Cursor` / `官方直连`、`硬新闻` / `主轴`、`稳` / `不稳`
+
 **关键点**：
+- **切行先于对齐**：`group_caps` 产出字幕字符串；whisper **只**负责时间轴
 - **内容用原始脚本文本**，不需要 ASR 识别文字，字幕内容 100% 准确
 - **时间用音频真实发音时刻**：whisper 词级时间戳是唯一锚点，不再「估算每句时长」
-- **SequenceMatcher 容忍 ASR 错字**，未匹配字符用前后邻居插值，单句偏差不累积
+- **SequenceMatcher 容忍 ASR 错字**，单句偏差不累积
 - **必须用 ffprobe 校验总时长对齐**（见 Step 8.3 校验）
+- Remotion 字幕 **单行**，不做双行长度平衡
 
-**Why:** 任何「估算每句时长」的方案（纯比例/加权/silence 吸附）都无法消除单句偏差累积；只有让每个字符的时间戳直接取自音频真实发音，才能从根本上对齐。
-**How to apply:** Phase 7 一律用 gen_captions_v2.py（whisper + SequenceMatcher），不再用加权字符 + silencedetect。
+**Why:** 任何「估算每句时长」的方案都无法消除单句偏差累积（v2.3.0 已修时间轴）；但所有标点一视同仁 + 16 字硬墙会切开专名/动宾，必须语义切行。
+**How to apply:** Phase 7 用 `templates/gen_captions.py`（`group_caps` + whisper），先 `--dry-run` 扫禁切反例。禁止逐标点切行、禁止按字硬切、禁止回退纯比例时间轴。旧 `gen_captions_v2.py` / `split_sentences` 已废弃作切行器。
 
 ### 🔴 旧音频残留导致整体 desync（v3.20.0 / 2026-08-23 W33 周报实测）
 
@@ -3324,12 +3235,12 @@ news-pipeline/
 1. **归档旧音频**：把 `public/voiceover/` 下的旧 wav 移到 `.stale_archive/` 子目录（用 Python `shutil.move`；**`rm` 会被自动权限模式判定为「不可逆本地删除」而拒绝**，改用归档挪移）。
 2. **重新 atempo**：用当期周报源音频重新 atempo（scene1-5,7 atempo=1.25；锚点 scene6 atempo=1.4）→ 覆盖写入 `public/voiceover/sceneN.wav`。
 3. **刷新时长**：ffprobe 实测每个新 wav → 同步刷新 `Composition.tsx` 的 `sceneConfig.duration` + `Root.tsx` 的 `TOTAL_DURATION_SEC`。
-4. **重算字幕**：跑 `gen_captions_v2.py`（whisper + SequenceMatcher）→ 覆盖 `captions/captions.json` + `video-project/public/captions.json`。
+4. **重算字幕**：跑 `templates/gen_captions.py`（或当期 `scripts/gen_captions.py`：`group_caps` + whisper）→ 覆盖 `captions/captions.json` + `video-project/public/captions.json`。
 5. **重新渲染**：`npx remotion render`。
 6. **whisper 验证**：在视频里抽 3–4 个边界点（场景切点 / 长句起止），用 whisper 听对应音频段，确认字幕 startMs/endMs 与真实发音时刻一致（误差 < 200ms）。
 
 **Why:** 旧音频 + 旧时长 + 旧字幕三者来自不同批次，三条时间轴互相错位；必须让音频/时长/字幕三者来自同一批新音频。
-**How to apply:** 每次重跑 TTS 或换期前，先确认 `public/voiceover/` 是当期音频（看 mtime / 听内容），再走「atempo → 刷新时长 → gen_captions_v2 → 渲染 → 验证」全链。`rm` 被拒时用 `shutil.move` 归档，不要硬删。
+**How to apply:** 每次重跑 TTS 或换期前，先确认 `public/voiceover/` 是当期音频（看 mtime / 听内容），再走「atempo → 刷新时长 → templates/gen_captions.py → 渲染 → 验证」全链。`rm` 被拒时用 `shutil.move` 归档，不要硬删。
 
 ### 🔴 TTS 并发冲突
 **问题**：`mimo-tts.sh` 内部使用 `mktemp /tmp/mimo-tts-request-XXXXXX.json` 生成临时文件。并行调用时多个进程竞争同一文件名，导致 `mktemp: mkstemp failed: File exists` 错误，TTS 静默失败不生成音频。
@@ -5151,6 +5062,33 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 **How to apply:** Phase 13.0b（已升级为复发协议）
 
 ## 更新日志
+
+### v3.25.0（2026-08-31）
+基于 **2026-08 月报字幕实测**（语义切行后 48 条、min_dur≈1.30s、禁切反例整行保留），把切行从「所有标点一视同仁 + 16 字硬墙」换成语义 `group_caps`：
+
+**切行（Phase 7 当前默认）**
+- `SENT_END`（`。！？；`）强制断；`SOFT_PUNCT`（`，、：`）仅 ≥`max_len=16` 才断
+- 允许略超 16 至 `hard_max=20` 保住专名/动宾/正反并列；超 hard_max 黄金分割 40–60%（扩 30–70%）→ `WEAK_BEFORE` → **整句保留**
+- **禁止按字符下标硬切**（会切开 `终止Cursor官方直连` / `硬新闻主轴`）
+- 后处理：`GLUE_TAILS` + `BAD_ENDS`/`BAD_STARTS` + 当期 `jieba.add_word`
+- 对齐后 `merge_short_dwell(min_sec=1.0)`，治 `延期；` 0.5s 闪行
+- Remotion 字幕 **单行**，不做双行长度平衡
+
+**禁切反例（切开即错）**
+- `稳不稳` / `硬新闻主轴` / `规划步骤` / `编程 Agent` / `终止Cursor官方直连` / `Hy四连发` / `羊报AI月报` / `整月风向` / `主题近一万` / `延期；`
+
+**时间轴（不回退）**
+- 内容 100% 来自脚本，时间 100% 来自音频；whisper 只负责时间轴
+- 禁止按字数比例切时间轴（v2.1/v2.2 已废弃）；无 whisper 词时才允许比例兜底
+- `WhisperModel` 必须在 `--dry-run` 提前 return 之后才 import
+
+**落盘**
+- 规则全文：`templates/captions.md`
+- 可运行脚本：`templates/gen_captions.py`（`--report-dir` / `--dry-run` / `--extra-word`）
+- 复制到当期 `scripts/gen_captions.py`，先 dry-run 扫禁切，再全量 whisper
+- 旧 `gen_captions_v2.py` / `split_sentences` **已废弃作切行器**
+
+**版本**：3.24.0 → 3.25.0
 
 ### v3.24.0（2026-08-30）
 基于 **2026-08-30 W35 周报全流程**（B站/抖音/公众号 3 平台草稿 ✅ + 视频号当日补跑草稿箱(4) ✅）实战，吸收坑 161–167，把映射表/标题规则/Phase 12 作者标题/Phase 13 wujie 协议写成单一事实源：
