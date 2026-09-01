@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.25.0
+version: 3.26.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.25.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.26.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -2404,7 +2404,8 @@ browser_run_code_unsafe("""async (page) => {
 5. **封面失败不阻塞草稿**：标题/正文/原创/保存优先  
 6. **保存成功判定**：`appmsgid=` 比「已保存」文案更稳  
 7. **裁剪确认 =「确认」**；禁用点 disabled「确定」  
-8. **验收 = preview `display:block` + `mmbiz` 背景**，勿被残留「拖拽或选择封面」文案误导
+8. **验收 = preview `display:block` + `mmbiz` 背景**，勿被残留「拖拽或选择封面」文案误导  
+9. **🔴 v3.26.0 保存后禁止重建**：`appmsgid=` 一旦出现即视为草稿已落盘。后续 snapshot 即使显示标题 `0/64`、正文「从这里开始写正文」、封面「拖拽或选择封面」，也**禁止**再点「新建」/再跑 Phase 12 全文注入。原因：编辑器 SPA 切 tab 或 snapshot 读到空壳，不等于草稿丢失（0901 实测 `appmsgid=100000882` 后空壳 UI，重建会重复稿）
 
 #### 12.7b 从图片库选封面（v3.20.0 / 2026-08-23 W33 周报实测）
 
@@ -2902,6 +2903,19 @@ browser_run_code_unsafe("""async (page) => {
 1. `page.reload` 1–2 次后仍失败 → 标记 `channels: login_required`。
 2. 写 `upload-status.md` 为 `⏭`（跳过本平台），停止空转。
 3. **明确**：自主流程无法完成视频号扫码登录，需用户手动扫码。Phase 13 结束并在 `upload-status.md` 注明「等待用户手动扫码后重跑」。
+
+**🔴 v3.26.0 / 2026-09-01 补「QR 已加载仍需扫码」变体**：
+`login.html` 上 QR **已成功加载**（console `qrcode loaded， duration: …`，截图可见「请使用微信扫描二维码登录」）**同样**走复发止损，**不要空等扫码、不要因 QR 可见就多轮 reload**。
+
+与 v3.23.0「加载失败，点击重试」的区别：
+- 本变体 QR 可见、iframe 未报加载失败；create URL 可能闪一下再 302 回 `login.html`。
+- console 常见噪声**不是**继续重试的理由：
+  - `网络错误，错误码：300334`
+  - `fastLogin: false` / `fast_login: null`
+  - `localhost.weixin.qq.com:14xxx/130xx/api/check-login` `ERR_CONNECTION_REFUSED`（微信桌面端 fast-login 探测端口，无桌面客户端时必然失败）
+- Playwright `browser_snapshot` YAML 在 `login.html` 上可能为空 → **用截图判定**，勿因空 snapshot 再 reload。
+
+**止损不变**：重试 1 次（navigate `/platform/post/create`）仍落 `login.html` → `channels: login_required` → QR 截图落盘（如 `channels-login-YYYY-MM-DD.png` + `channels-create-retry-YYYY-MM-DD.png`）→ `upload-status.md` 写 6 步补跑 → 不阻塞其他平台。
 
 **常见 iframe 结构**：
 - 主页面：`https://channels.weixin.qq.com/platform/post/...`
@@ -3616,6 +3630,14 @@ await inputs[1].setInputFiles('horizontal-4-3.png');  // 设置封面
 **权限已在预授权阶段获得，直接执行。**
 
 **🔴 重要经验：抖音创作者中心使用自定义组件，封面上传需要用 force click，发布需要短信验证码。**
+
+#### 14.0-pre 用户手动上传跳过（v3.26.0 / 2026-09-01 实测）
+
+用户明确说「抖音已手动上传 / 不要再自动传 / 记为已手动」时：
+1. **立即停止** Phase 14，禁止再打开 `creator.douyin.com` 上传页，禁止点上传 / 暂存 / 重新上传。
+2. 标记 `douyin: user-manual`（`upload-status.md` 写 `⏭ 用户手动`）。
+3. 不把已打开的创作者页当失败重试；不阻塞其他平台。
+4. 验收 URL 仍是 `https://creator.douyin.com/creator-micro/content/publish/record?tab=draft`——**仅当用户要求核验时**才打开，默认不核验、不改稿。
 
 #### 14.0 草稿恢复弹窗处理（v3.18.0 / 2026-08-18 实测）
 
@@ -5061,7 +5083,49 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 **Why:** 跨域 iframe 自主流程无法修复，止损输出比反复重试有价值。
 **How to apply:** Phase 13.0b（已升级为复发协议）
 
+### 🔴 抖音用户手动上传后禁止再自动传（v3.26.0 / 2026-09-01）
+**问题**：用户已手动把当期视频传到抖音后，流水线仍按 Phase 14 打开创作者中心、点上传/暂存，会撞上未发布草稿弹窗、混入旧素材或重复稿。
+**解决**：用户说「已手动 / 不要再自动传」→ 立即停 Phase 14，标记 `douyin: user-manual`，不重开上传页、不核验除非用户要求。
+**Why:** 手动稿优先于自动稿；再跑会破坏用户已完成的草稿。
+**How to apply:** Phase 14.0-pre（新增）
+
+### 🔴 视频号 login.html QR 已加载仍须止损（v3.26.0 / 2026-09-01）
+**问题**：0901 打开 `/platform/post/create` 被 302 到 `login.html`，QR **已加载**（`qrcode loaded`，截图可见扫码框），不是「加载失败，点击重试」。console 同时刷 `300334`、`fastLogin: false`、`localhost.weixin.qq.com:14xxx/api/check-login ERR_CONNECTION_REFUSED`。误判成「QR 好了再等一会 / 再 reload」会空转。
+**解决**：与 v3.23.0 复发协议同一止损——重试 1 次仍 `login.html` → `channels: login_required`。上述 console 噪声是微信桌面 fast-login 探测失败，**不是**继续重试的理由。
+**Why:** 无桌面客户端时 fast-login 必然失败；QR 可见仍需真人扫码，自主流程做不到。
+**How to apply:** Phase 13.0b（v3.26.0 变体）
+
+### 🔴 公众号 appmsgid 已落后禁止因空壳 snapshot 重建（v3.26.0 / 2026-09-01）
+**问题**：草稿已保存（URL 含 `appmsgid=100000882`）后，再 snapshot 可能读到标题 `0/64`、正文「从这里开始写正文」、封面「拖拽或选择封面」空壳，看起来像没写过。
+**解决**：以 `appmsgid=` 为唯一成功信号；空壳 UI **禁止**再点新建 / 再跑全文注入。
+**Why:** 编辑器 SPA 切 tab 或无障碍树读到空代理，不等于草稿丢失；重建会重复稿。
+**How to apply:** Phase 12 保存关键经验第 9 条
+
+### 🔴 视频号 login.html snapshot YAML 为空（v3.26.0 / 2026-09-01）
+**问题**：`login.html` 上 `browser_snapshot` 落盘 YAML 可能是 0 字节，无法用 a11y 树判断 QR 是否在。
+**解决**：改 `browser_take_screenshot`（如 `channels-login-YYYY-MM-DD.png`）判定；空 snapshot 不构成再 reload 的理由。
+**Why:** 登录页跨域 iframe / 无障碍树残缺，截图比 snapshot 可靠。
+**How to apply:** Phase 13.0b 截图落盘步骤
+
 ## 更新日志
+
+### v3.26.0（2026-09-01）
+基于 **2026-09-01 日报全流程**（B站草稿 ✅ / 公众号 `appmsgid=100000882` ✅ / 抖音用户手动 ⏭ / 视频号 `login.html` QR 已加载仍 `login_required` ⏭）实测，吸收坑 169–172：
+
+**抖音（Phase 14）**
+- 新增 14.0-pre：用户说已手动上传 / 不要再自动传 → 立即停 Phase 14，标记 `douyin: user-manual`，不重开创作者页
+
+**视频号（Phase 13.0b）**
+- 补「QR 已加载仍需扫码」变体：`login.html` + `qrcode loaded` 与「加载失败，点击重试」走同一止损（重试 1 次）
+- `300334` / `fastLogin: false` / `localhost.weixin.qq.com:14xxx/api/check-login ERR_CONNECTION_REFUSED` 是桌面 fast-login 噪声，不是继续重试的理由
+- `login.html` 上 snapshot YAML 可能为空 → 用截图判定
+
+**公众号（Phase 12）**
+- `appmsgid=` 一旦出现即禁止因后续空壳 snapshot（标题 `0/64` / 空正文）重建草稿
+
+**已知坑**：169–172 入「已知坑与经验教训」
+
+**版本**：3.25.0 → 3.26.0
 
 ### v3.25.0（2026-08-31）
 基于 **2026-08 月报字幕实测**（语义切行后 48 条、min_dur≈1.30s、禁切反例整行保留），把切行从「所有标点一视同仁 + 16 字硬墙」换成语义 `group_caps`：
