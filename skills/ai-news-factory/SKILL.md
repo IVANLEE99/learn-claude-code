@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.27.0
+version: 3.29.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.27.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.29.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -1030,6 +1030,8 @@ curl -s --resolve api.luka77.cc:443:$REAL_IP ...
 
 **🔴 重要优化：封面生成耗时较长（每个约 30-60s），应与 TTS 配音并行执行！**
 
+**🔴 v3.29.0 日期居中硬要求（用户明确要求，缺此项封面判不合格）**：封面上的日期 `{YYYY-MM-DD}` 必须**水平居中**（画面中央大字，带阴影），禁止靠左/靠右/偏置。无论 API 出图还是本地 Pillow 叠字，生成后必须 `Read` 视觉校验日期是否在画面中线；不居中即重生成/重叠字。本地脚本基准写法：`dx = (tw - dw) // 2`（按 textbbox 宽度取画面中线），`dy ≈ int(th * 0.34)`。
+
 在 Phase 5 图片生成完成后，使用 `Agent` 工具异步生成所有封面：
 
 ```python
@@ -1215,7 +1217,7 @@ python3 news-pipeline/YYYY-MM-DD/scripts/gen_covers_local.py
 - 日期/品牌名变量**必须按模式参数映射表读取**，禁止硬编码 `2026-08-21`——改日期时只改 `DATE` 一处
 - 本地 scene 图是抽象几何风格，视觉质量低于 API 出图；**仅作兜底**，API 恢复后应切回 API
 - 脚本依赖系统字体：`/System/Library/Fonts/STHeiti Medium.ttc`（品牌名）、`/Library/Fonts/Arial Unicode.ttf`（日期）；缺字体时换 `PingFang.ttc` / `Helvetica.ttc`
-- 生成后**必须视觉校验**：`Read` 打开 PNG 确认日期/品牌文字清晰无糊无错字
+- 生成后**必须视觉校验**：`Read` 打开 PNG 确认日期/品牌文字清晰无糊无错字，且**日期水平居中**（v3.29.0 硬要求，见 Phase 5.5）
 
 #### 决策流程
 
@@ -1643,6 +1645,7 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
   "platform": {
     "bilibili": {
       "title": "【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI",
+      "partition": "人工智能",
       "tags": ["今日羊报AI", "AI日报", "..."],
       "description": "B站简介，含 hashtag\n\n🔴 注意：简介中数字不能太多（会被检测为违规推广），版本号简化，数字用中文替代"
     },
@@ -1676,7 +1679,7 @@ A professional Chinese AI news studio cover image. Empty modern curved news desk
 - `wechat.article`：`wechat-article-YYYY-MM.md`
 
 **标题规则（v3.17：日期在前、报刊名在后）**:
-- 日报 B站：`【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI`
+- 日报 B站：`【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI`（🔴 v3.29.0：publish.json bilibili 段固定 `"partition": "人工智能"`，Phase 11.4 按此字段选择分区）
 - 日报 抖音：`今日羊报AI YYYY-MM-DD`（≤30字，纯报刊名+日期，无特殊符号）
 - 日报 视频号：`今日羊报AI M月D日`（≤16字，仅支持中文、数字、空格、书名号、引号、冒号、加号、问号、百分号、摄氏度；`.` `~` 不在白名单）
 - 日报 公众号：`【YYYY-MM-DD】{核心标题}… | 今日羊报AI`
@@ -1863,9 +1866,30 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 
 **⚠️ 实测经验（v3.3.0 / 被 v3.12.0 覆盖）**：旧文档建议「封面不稳就跳过」。**2026-07-25 实测可自动补封面**，见下方 v3.12 草稿编辑页流程；首次投稿若封面失败，可**打开草稿再补**，不要默认放弃。
 
-#### 11.4 选择分区「人工智能」（v3.17 新增）
+#### 11.4 选择分区「人工智能」（v3.17 新增；🔴 v3.29.0 提级为存草稿前必验收项）
 
 **🔴 分区选择器是自定义下拉框，必须用 JS evaluate。视频投稿必须选择「人工智能」分区。**
+
+**🔴 v3.29.0 / 2026-09-02 实测坑：B站上传页「分区」字段会**默认预填「人工智能」**（snapshot 里 heading「分区」下方 paragraph 直接显示「人工智能」，无「请选择分区」占位）。此时**极易误以为"已选好"而跳过**——但这只是默认值展示，**不能替代显式选择与验收**。正确做法：无论 snapshot 是否已显示「人工智能」，都执行一遍 11.4 的显式选择（点开下拉 → JS 点击「人工智能」）+ 存草稿前验收；snapshot 文字校验用**「heading 分区 相邻 paragraph」结构定位**，勿用 `document.body.innerText.includes('人工智能')`（标签/简介里出现「人工智能」会误判通过，0902 实测 body 校验假阳性）。**
+
+```javascript
+// 0. 🔴 v3.29.0 结构化验收（存草稿前必跑）：heading「分区」旁的 paragraph 必须是「人工智能」
+//    snapshot 证据（0902 实测）：heading "分区" → generic → paragraph: 人工智能
+browser_evaluate("""() => {
+  const hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,div,span'));
+  const h = hs.find(e => e.children.length === 0 && e.textContent.trim() === '分区');
+  if (!h) return '分区 heading not found';
+  let p = h.parentElement && h.parentElement.querySelector('p, span');
+  // 向上找一层兄弟容器里的值文本
+  if (!p || p.textContent.trim() === '分区') {
+    const sib = h.parentElement && h.parentElement.parentElement;
+    p = sib && sib.querySelector('p, span:not(:has(*))');
+  }
+  const val = p ? p.textContent.trim() : '';
+  return JSON.stringify({ partition: val, ok: val === '人工智能' });
+}""")
+// 返回 ok:false → 必须走下面 1-2 显式选择，再重跑本验收；ok:true 才允许点「存草稿」
+```
 
 ```javascript
 // 1. 点击打开分区下拉框（textbox 或 当前分区占位）
@@ -1884,12 +1908,8 @@ browser_evaluate("""() => {
   return 'not found';
 }""")
 
-// 3. 校验分区已选中（确认输入框/占位文本变为「人工智能」）
-browser_evaluate("""() => {
-  const txt = document.body.innerText;
-  const el = document.querySelector('[class*="select"], [class*="partition"], [class*="region"]');
-  return txt.includes('人工智能') ? 'partition=人工智能' : 'partition NOT set';
-}""")
+// 3. 校验分区已选中：用步骤 0 的结构化验收（heading「分区」相邻 paragraph），
+//    禁止用 body.innerText.includes('人工智能')（0902 实测：标签/简介含该词会假阳性）
 ```
 
 **兜底**：若自定义下拉框无法展开，可尝试 `browser_run_code_unsafe` 触发点击分区元素后等待 500ms 再执行 JS 选选项。**分区未选对会导致投稿分类错误，必须验收。**
@@ -1983,7 +2003,7 @@ browser_wait_for(time=3)
 |------|------|----------|--------|
 | 视频上传 | file chooser | `browser_click(ref)` → `file_upload` | ✅ 高 |
 | 封面设置 | 弹窗 | 点击封面设置 → 上传封面 → file_upload → 完成 | ✅ 高 |
-| 分区「人工智能」 | **自定义下拉框** | 点击展开 → **JS evaluate 点击「人工智能」**（v3.17 新增，见 11.4） | ⚠️ 必须用 JS |
+| 分区「人工智能」 | **自定义下拉框** | 点击展开 → **JS evaluate 点击「人工智能」**（v3.17 新增，见 11.4）；存草稿前跑结构化验收（heading「分区」相邻 paragraph，禁 body 全文 includes） | ⚠️ 必须用 JS + 验收 |
 | 创作声明 | **自定义下拉框** | 点击 textbox → **JS evaluate 点击选项** | ⚠️ 必须用 JS |
 | 标签 | 输入框 | `type` + `Enter`，最多 10 个 | ✅ 高 |
 | 简介 | **Quill 编辑器** | **JS 注入 `.ql-editor`** | ⚠️ 必须用 JS |
@@ -5116,7 +5136,78 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 **Why:** 登录页跨域 iframe / 无障碍树残缺，截图比 snapshot 可靠。
 **How to apply:** Phase 13.0b 截图落盘步骤
 
+### 🔴 公众号正文 insertHTML 扁平化 → 剪贴板粘贴模拟（v3.28.0 / 2026-09-02）
+**问题**：0902 实测 `execCommand('insertHTML')` 注入多段落正文（`<section><p>…<h2>…`）会**扁平化结构**——h2/hr 样式丢失，且注入时若正文含重复占位符 `[IMG:COVER]` 会产生**重复图片节点**（imgSection 索引漂移）。
+**解决**：先 focus 正文 + `selectNodeContents + execCommand('delete')` 清空，再构造 `const dt = new DataTransfer(); dt.setData('text/html', html);` 派发 `new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true})`。注入后**必须回读**：`Array.from(body.children)` 列出顶层节点类型逐个核对（勿对 NodeList 直接 `.filter()`——会 TypeError）；目标位置含 `hr`/`h2` 才算结构完整。
+**Why:** ProseMirror 对 paste 事件走完整 schema 解析，对 execCommand 只做纯文本/扁平 HTML 落地；回读是唯一防「看起来 ok 实际扁平」的手段。
+**How to apply:** Phase 12.5 正文注入
+
+### 🔴 公众号 filechooser 事件不触发 → 直接 setInputFiles（v3.28.0 / 2026-09-02）
+**问题**：`Promise.all([waitForEvent('filechooser'), click(本地上传)])` 在 12.6 正文图片上传时 filechooser 事件**从不触发**（webuploader 内部拦了原生 chooser），Promise 挂起。
+**解决**：跳过 filechooser，点完「图片→本地上传」后直接 `page.locator('input[type="file"]:visible').first().setInputFiles([path])`（或 evaluate 找 `input[type=file]` 后 `setInputFiles`）。**插入位置跟随 ProseMirror 光标**：点「本地上传」前先把光标点到目标段落末尾（`pm.focus()` + Range 折叠到目标节点后），否则图插到开头。
+**Why:** 公众号用 webuploader 自管队列，不派发标准 filechooser；直接 setInputFiles 是唯一稳路。
+**How to apply:** Phase 12.6
+
+### 🔴 公众号标题 ProseMirror 填完后必须 blur 才同步 #title（v3.28.0 / 2026-09-02）
+**问题**：12.5b 流程对标题代理 `execCommand('insertText')` 后界面已显示标题，但隐藏 `#title` textarea 仍 `value:''`——直接保存会得到无标题草稿。
+**解决**：insertText 后 `titlePm.blur()`（或 dispatch input + blur），再回读 `#title.value` 验证 `match && len` 才算成功。12.5b 现有「回读 #title.value」检查本身是对的，但漏了 blur 这一步会永远 FAILED。
+**Why:** #title 由 blur 事件的同步钩子写值，input 事件不触发。
+**How to apply:** Phase 12.5b
+
+### 🔴 公众号原创「确定」首击可能不提交 → 复点一次（v3.28.0 / 2026-09-02）
+**问题**：0902 原创弹窗（文字原创 checkbox 已 checked）点「确定」后弹窗关闭，但开关仍显示「未声明」——首次点击是 no-op。
+**解决**：点「确定」后**回读开关** `.js_original_apply`（文本=未声明/已声明）+ 状态组 `.js_original_apply_cell` 是否含「已开启快捷转载」；若仍「未声明」，重新点开关重开弹窗再点「确定」，以组内出现「文字原创 · 作者：… · 已开启快捷转载」+「撤销声明」为验收。
+**Why:** Vue 组件首击可能只关弹窗不提交 state；重开重点是唯一恢复路径。
+**How to apply:** Phase 12.8
+
+### 🔴 公众号合集实际 DOM 流（v3.28.0 / 2026-09-02）
+**问题**：12.10 旧流程 `getByRole('textbox', {name:'请选择合集'})` 与 `getByText('「今日羊报 AI」')` 在 0902 实测**找不到节点**；`[class*="collect"]` 系选择器也全空。合集入口不是按钮而是**可见文本 SPAN**。
+**解决**（已验证流）：
+1. 全 DOM 按 `offsetParent!==null` 过滤找 `textContent==='合集'` 的 SPAN（在 `.frm_checkbox_label` 内，即 `.lbl_content`）→ click **宿主 label** 勾选 checkbox
+2. click 同行 `.lbl_content_after.lbl_content_desc`（文本「未添加」）→ 弹「合集」对话框（含「每篇文章最多添加1个合集/清空/创建新合集/确认/取消」）
+3. click `input[placeholder="请选择合集"]` → 等下拉 `li.select-opt-li` 出现 → click 目标项
+4. click「确认」→ 回读合集行文本含合集名即成功
+**Why:** 合集组件是自定义 select2 式控件，role/text 匹配全部失效；唯一稳定锚点是「合集」/「未添加」的可见文本 + `li.select-opt-li` 下拉项。
+**How to apply:** Phase 12.10
+
+### 🔴 通用 DOM 工具坑：NodeList 无 filter / :visible 非法（v3.28.0 / 2026-09-02）
+**问题**：① `document.querySelectorAll(...).filter(...)` → TypeError（NodeList 无 filter）；② evaluate 里 `querySelector('div:visible')` → SyntaxError（`:visible` 是 Playwright 选择器引擎语法，非 CSS）。
+**解决**：① 一律 `Array.from(document.querySelectorAll(...))` 再 `.filter()`；② 可见性判定用 `el.offsetParent !== null`（display:none 时为 null）。
+**How to apply:** Phase 12 全部 evaluate 代码
+
 ## 更新日志
+
+### v3.29.0（2026-09-02）
+基于 **2026-09-02 用户复盘指令**（「封面图记得按照要求生成」+「b站投稿分区选择人工智能」）实测，吸收坑 180–181：
+
+**B站分区（Phase 11.4，坑 180）**
+- 🔴 B站上传页「分区」字段**默认预填「人工智能」**（snapshot：heading「分区」→ paragraph「人工智能」，无「请选择分区」占位）→ 极易误判"已选好"而跳过
+- 分区验收升级为**存草稿前必跑**的结构化校验：定位 heading「分区」相邻的 paragraph，值必须 ===「人工智能」
+- 🔴 **禁止** `body.innerText.includes('人工智能')` 做验收——标签/简介含该词即假阳性（0902 实测）
+- publish.json 模板 bilibili 段新增固定字段 `"partition": "人工智能"`（单一事实源）
+
+**封面日期居中（Phase 5.5/5.6，坑 181）**
+- 🔴 用户明确要求：封面日期 `{YYYY-MM-DD}` 必须**水平居中**（中央大字+阴影），不居中即重生成
+- 本地脚本基准：`dx = (tw - dw) // 2`（textbbox 取中线）；生成后 `Read` 视觉校验日期居中为必做步骤
+- 0902 封面 `horizontal-4-3.png` / `vertical-3-4.png` 已验证日期居中合规
+
+**版本**：3.28.0 → 3.29.0
+
+### v3.28.0（2026-09-02）
+基于 **2026-09-02 日报全流程**（linuxdo 427 帖/29 批零 error → 361；视频 151.44s；B站 ✅ 12:14:27 / 抖音 ✅ 第86集 / 视频号 login_required ⏭ / 公众号 `appmsgid=100000904` ✅）实测，吸收坑 174–179：
+
+**公众号（Phase 12）**
+- 正文注入换**剪贴板粘贴模拟**（ClipboardEvent + DataTransfer('text/html')），execCommand insertHTML 会扁平化结构
+- 正文图片：filechooser 事件不触发 → 直接 `input[type=file]:visible` setInputFiles；插入位置跟随光标（先定位再上传）
+- 标题 ProseMirror 填完后必须 `blur()` 才同步 `#title`（否则保存出无标题草稿）
+- 原创「确定」首击可能 no-op（开关仍「未声明」）→ 重开弹窗复点，验收看 `.js_original_apply_cell` 含「已开启快捷转载」
+- 合集实际 DOM 流：`lbl_content`合集 → 未添加 desc → 弹窗 input → `li.select-opt-li` → 确认（旧 getByRole/getByText 全失效）
+- 通用：NodeList 无 `.filter()`（须 Array.from）；`:visible` 在 evaluate 里非法（用 `offsetParent!==null`）
+
+**0902 产物**
+- 上传状态 `news-pipeline/2026-09-02/upload-status.md`：3/4 平台草稿完成，视频号待人工扫码（QR `channels-login-2026-09-02.png` + 6 步补跑清单）
+
+**版本**：3.27.0 → 3.28.0
 
 ### v3.27.0（2026-09-01）
 基于 **2026-09-01 抖音机审**（原片 09:21:28 发布 → 减少作品推荐 / 引导至风险不可控渠道 / 标签「画面」）实测，吸收坑 173：
