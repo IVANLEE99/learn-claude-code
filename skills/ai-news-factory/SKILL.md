@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.30.0
+version: 3.31.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.30.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.31.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -181,9 +181,7 @@ version: 3.30.0
 
 ### 周报封面提示词模板
 
-```
-A professional Chinese AI news studio weekly cover image. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens showing: {本周核心事件相关视觉元素，产品/抽象图形}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI周刊" in large white Chinese characters. In the center of the image, display the date range "{YYYY-MM-DD} ~ {YYYY-MM-DD}" in very large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, 16:9 aspect ratio. No people, no faces.
-```
+**🔴 v3.31.0**：周报横/竖封面与日报共用海报风模板，文字源 = `publish.json.title`（`【MM-DD~MM-DD】{核心标题}… | 羊报AI周刊`）。完整提示词见 `templates/cover-prompt.md`，水印品牌 `羊报AI周刊`，日期 `{YYYY-MM-DD} ~ {YYYY-MM-DD}`。禁止再用演播室空镜英文 prompt。
 
 ### 周报过滤规则
 
@@ -233,9 +231,7 @@ A professional Chinese AI news studio weekly cover image. Empty modern curved ne
 
 ### 月报封面提示词模板
 
-```
-A professional Chinese AI news studio monthly cover image. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本月4条趋势相关视觉元素}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI月报" in large white Chinese characters. In the center of the image, display the month "{YYYY-MM}" in very large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces.
-```
+**🔴 v3.31.0**：月报横/竖封面与日报共用海报风模板，文字源 = `publish.json.title`（`【YYYY-MM】{核心标题}… | 羊报AI月报`）。完整提示词见 `templates/cover-prompt.md`，水印品牌 `羊报AI月报`，日期 `{YYYY-MM}`。禁止再用演播室空镜英文 prompt。场景图仍可用 `templates/image-prompt-monthly.md`（与封面分离）。
 
 ### 月报选材规则（最关键，区别于周报）
 
@@ -1030,7 +1026,9 @@ curl -s --resolve api.luka77.cc:443:$REAL_IP ...
 
 **🔴 重要优化：封面生成耗时较长（每个约 30-60s），应与 TTS 配音并行执行！**
 
-**🔴 v3.29.0 日期居中硬要求（用户明确要求，缺此项封面判不合格）**：封面上的日期 `{YYYY-MM-DD}` 必须**水平居中**（画面中央大字，带阴影），禁止靠左/靠右/偏置。无论 API 出图还是本地 Pillow 叠字，生成后必须 `Read` 视觉校验日期是否在画面中线；不居中即重生成/重叠字。本地脚本基准写法：`dx = (tw - dw) // 2`（按 textbbox 宽度取画面中线），`dy ≈ int(th * 0.34)`。
+**🔴 v3.31.0 封面主路径 = 极简中文科技资讯海报**（0910 用户确认可行）：横 `horizontal-4-3.png`、竖 `vertical-3-4.png` **都按** `templates/cover-prompt.md` 出图，文字源 = **发布标题** `publish.json.title`（与 B站/公众号标题同形）。禁止再用演播室空镜 / news desk 英文 prompt 当封面。
+
+**🔴 v3.29.0 日期居中硬要求仍有效**：封面上的日期字段必须**水平居中**（海报风里日期单独一行居中，不是旧演播室中央大白字）。无论 API 出图还是本地 Pillow 叠字，生成后必须 `Read` 视觉校验；不居中即重生成。本地脚本基准：`dx = (tw - dw) // 2`，`dy ≈ int(th * 0.34)`。
 
 在 Phase 5 图片生成完成后，使用 `Agent` 工具异步生成所有封面：
 
@@ -1045,7 +1043,13 @@ API_URL = "用户提供的 API URL"  # 优先使用 eo.ioll.pp.ua
 API_KEY = "用户提供的 API Key"
 MODEL = "gpt-image-2"
 
-COVER_PROMPT = """A professional Chinese AI news studio cover image. Empty modern curved news desk in a high-tech studio, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，产品/抽象图形，勿放可识别真人}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the center of the image, display the date "{YYYY-MM-DD}" in very large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces."""
+# 🔴 v3.31.0：完整中文海报模板在 templates/cover-prompt.md
+# 这里只放调用约定。PUBLISH_TITLE 必须 = publish.json.title（或与之同文的 video-script 标题）
+COVER_PROMPT_FILE = "templates/cover-prompt.md"
+PUBLISH_TITLE = "{publish.json.title}"   # 例：【2026-09-10】DeepSeek发新模型砍价又IPO，OpenAI算力告急限购Pro | 今日羊报AI
+# 竖版 ratio=3:4 size 优先 1024x1536（接口不认再 1152x1536）
+# 横版 ratio=4:3 size 优先 1536x1152（接口不认再 1536x1024）
+# 端点：settings.json GEN_IMG_API_URL 起，失败走 _001/_002/_003；日志禁打印 key
 
 # 封面配置
 COVERS = [
@@ -1620,16 +1624,17 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 | B站/通用 | 4:3 | 1536x1152 | `horizontal-4-3.png` | B站投稿封面、公众号/视频号横版 |
 | 抖音/竖版 | 3:4 | 1152x1536 | `vertical-3-4.png` | 抖音封面、抖音个人主页卡片、公众号/视频号竖版 |
 
-**封面模板 Prompt**（按 `REPORT_MODE` 读取品牌名与日期字段，**禁止硬编码**；周报用"羊报AI周刊"+日期范围，月报用"羊报AI月报"+`{YYYY-MM}` 见月报模式章节）：
+**封面模板 Prompt**（**v3.31.0 单一事实源**：`templates/cover-prompt.md`）：
 
-**🔴 v3.13.0 封面铁律（视频号 2026-07-26 限流教训）**：
-- 🚫 **禁止**写实真人主播 / news anchor / 假新闻脸出镜（易触肖像与虚假内容）
-- ✅ 用抽象科技视觉、产品 UI、芯片/屏幕信息拼贴、无人演播室空镜
+- 横/竖封面都用海报风中文模板，**文字源 = `publish.json.title`**（禁止用 Hook 短句或「对应封面大字」顶替）
+- 日报水印 `今日羊报AI`；周报 `羊报AI周刊`；月报 `羊报AI月报`
+- 日期字段按模式映射表；日期单独一行且水平居中
+- 生成后 `Read` PNG 对照 `cover-prompt.md` 验收清单，缺一项重出
+
+**🔴 v3.13.0 封面铁律仍有效（视频号 2026-07-26 限流教训）**：
+- 🚫 **禁止**写实真人主播 / news anchor / 假新闻脸出镜
+- ✅ 海报风本身无人像、无照片、无插画，已满足该铁律
 - 完整策略见 `templates/platform-compliance.md` §3.2
-
-```
-A professional Chinese AI news studio cover image. Empty modern curved news desk in a high-tech studio, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens arranged in a grid showing: {本期核心新闻相关的视觉元素，产品/抽象图形，勿放可识别真人}. The studio has dramatic blue and red neon lighting, with red accent lights along the desk edges and blue ambient lighting. In the top right corner, display the text "今日羊报 AI" on the first line and "AI 新闻" on the second line in large white Chinese characters. In the center of the image, display the date "{YYYY-MM-DD}" in very large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, {ratio} aspect ratio. No people, no faces.
-```
 
 输出到 `{REPORT_MODE 对应的输出目录}`（daily `news-pipeline/YYYY-MM-DD/`；weekly `news-pipeline/weekly/...`；monthly `news-pipeline/monthly/YYYY-MM/`）
 
@@ -5217,6 +5222,19 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 **How to apply:** Phase 12 全部 evaluate 代码
 
 ## 更新日志
+
+### v3.31.0（2026-09-10）
+基于 **2026-09-10 封面试出**：用户确认极简中文科技资讯海报（浅灰蓝底 + 蓝引号 + 发布标题排版 + 右下小羊水印）可行，吸收为封面主路径。
+
+**封面（Phase 5.5 / 10.1，坑 184）**
+- 横 `horizontal-4-3.png`、竖 `vertical-3-4.png` **都按** `templates/cover-prompt.md` 出图
+- 文字源 = **`publish.json.title`**（与 B站/公众号标题同形），禁止 Hook 短句 / 「对应封面大字」顶替，禁止硬编码旧期示例（Astra/Plus/2026-09-05）
+- 英文品牌/关键词科技蓝，中文深黑；日期单独一行水平居中（v3.29.0 居中要求仍有效）
+- 水印：淡灰「{品牌}」+ **小羊图标**（禁止微信气泡）
+- 旧演播室空镜英文 prompt（news desk / 右上「今日羊报 AI」+ 中央大白日期）**降级废弃**，周报/月报封面入口同步改引用本模板
+- 本地 `gen_covers_local.py` 仅 API 全挂兜底，视觉不是海报风；恢复后必须重出再上传
+
+**版本**：3.30.0 → 3.31.0
 
 ### v3.30.0（2026-09-10）
 基于 **2026-09-10 日报全流程**（linuxdo 627 帖/44 批；视频 177.32s edge-tts 兜底；B站 ✅ 分区=人工智能 / 抖音用户手动 ✅ / 公众号 `appmsgid=100001064` ✅ / 视频号 login_required → 用户手动 ✅）实测，吸收坑 182–183：
