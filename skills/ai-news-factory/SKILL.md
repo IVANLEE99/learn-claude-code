@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.29.0
+version: 3.30.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.29.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.30.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -2039,7 +2039,7 @@ browser_wait_for(time=3)
 2. 切换到新标签页
 3. 填写作者（标准 input，固定 `羊报AI周刊` / `今日羊报AI` / `羊报AI月报`，≤8 字；勿填署名格式）
 4. 点击正文区域获取 focus → 插入视频号内容
-5. 填写正文内容（ProseMirror nth(1) + execCommand insertHTML，🔴 v3.23.0：禁直接 innerHTML）
+5. 填写正文内容（ProseMirror nth(1) + 真实剪贴板粘贴 Meta+A/Meta+V，🔴 v3.30.0：禁 innerHTML / 禁 insertHTML / 禁合成 ClipboardEvent）
 6. 通过「图片」→「本地上传」插入封面图到正文
 7. 上传封面（从正文选择 / 从图片库选择）
 8. 填写标题（正文注入之后！`.ProseMirror`.first() + keyboard.type，回读 `#title.value`）
@@ -2182,8 +2182,46 @@ browser_run_code_unsafe("""async (page) => {
 
 #### 12.5 填写正文内容
 
-**🔴 v3.23.0 / 2026-08-29 实测修正：禁止对 ProseMirror 正文直接 `innerHTML = ...` 赋值！**
-0829 实测：赋值返回"ok"但编辑器立即回滚，验证 `pm.textContent.length === 1`——**内容被静默清空**（无任何报错）。唯一可靠方式是 `document.execCommand('insertHTML')`：
+**🔴 v3.30.0 / 2026-09-10 重大修正：insertHTML 注入成功 ≠ 存活——上传图片/保存草稿会从内部空模型回刷清空正文！**
+0910 实测：`execCommand('insertHTML')` 注入后 pmLen 回读通过（1193 字），随后任一操作（工具栏「本地上传」插图、点「保存为草稿」）都会让编辑器**从 ProseMirror 内部 doc 重渲染**——内部 doc 仍为空，正文被静默清空（标题/作者不受影响）。**pmLen 只证明 DOM 改了，不证明内部 state 同步**，v3.23.0 的回读验证不足以保证存活。合成 `ClipboardEvent('paste')` + `DataTransfer`（v3.28.0）同样无效（pmLen=0，编辑器不认）。**唯一已验证可靠方案是真实系统剪贴板 + 真实键盘粘贴**（走 ProseMirror 原生输入管线，内部 state 同步）：
+
+```javascript
+browser_run_code_unsafe("""async (page) => {
+  const htmlContent = `<h2>1. 新闻标题</h2><p>正文内容...</p>`; // 由外部传入
+  const context = page.context();
+  // 1. 授予剪贴板权限（否则 navigator.clipboard.write 静默失败）
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://mp.weixin.qq.com' });
+  // 2. 写入系统剪贴板（text/html + text/plain 双格式）
+  await page.evaluate(async (html) => {
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html': new Blob([html], { type: 'text/html' }),
+      'text/plain': new Blob([html.replace(/<[^>]+>/g, ' ')], { type: 'text/plain' })
+    })]);
+  }, htmlContent);
+  // 3. 点正文编辑器 → 全选 → 真实粘贴
+  await page.evaluate(() => document.querySelectorAll('.ProseMirror')[1].click());
+  await page.waitForTimeout(300);
+  await page.keyboard.press('Meta+A');   // Linux/Windows 用 Control+A
+  await page.keyboard.press('Meta+V');
+  await page.waitForTimeout(2000);
+  const len = await page.evaluate(() => document.querySelectorAll('.ProseMirror')[1].textContent.trim().length);
+  if (len < 1000) return `FAILED pmLen=${len}`;  // 日报正文应 >1000 字
+  // 4. 立刻点「保存为草稿」固化服务器基线，再回读 bodyLen 不降才算存活
+  await page.evaluate(() => {
+    for (const btn of document.querySelectorAll('button')) {
+      if ((btn.textContent || '').trim() === '保存为草稿' && btn.offsetParent) { btn.click(); return; }
+    }
+  });
+  await page.waitForTimeout(4000);
+  const after = await page.evaluate(() => document.querySelectorAll('.ProseMirror')[1].textContent.trim().length);
+  return after >= 1000 ? `pasted+saved pmLen=${after}` : `FAILED after-save pmLen=${after}`;
+}""")
+```
+
+**🔴 v3.30.0 配套铁律：每张图上传后立即「保存为草稿」固化服务器基线**——上传每张正文图（选中占位符 → 工具栏图片 → 本地上传 → setInputFiles → Escape 关挡层）后**立刻点「保存为草稿」**，验证 bodyLen 不降再传下一张。这样即使触发回刷，恢复基线也是有内容的版本而非空稿。上传产生的 `src=""` 空 img 是编辑器装饰节点，execCommand delete 删不掉，保存时服务端忽略（有效 mmbiz 图数不变），勿纠结。
+
+**🔴 v3.23.0 / 2026-08-29 历史修正（已被 v3.30.0 取代，勿再当主路径）：禁止对 ProseMirror 正文直接 `innerHTML = ...` 赋值！**
+0829 实测：赋值返回"ok"但编辑器立即回滚，验证 `pm.textContent.length === 1`——**内容被静默清空**（无任何报错）。当时认为 `document.execCommand('insertHTML')` 可靠；0910 实测 insertHTML 同样存在「DOM 成功、内部 state 空」的回刷问题。**以下 insertHTML 代码块仅作反例保留，禁止当主路径：**
 
 ```javascript
 browser_run_code_unsafe("""async (page) => {
@@ -2260,6 +2298,8 @@ browser_run_code_unsafe("""async (page) => {
 browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png")
 
 # 重复以上步骤插入多张图片
+# 🔴 v3.30.0：每张图上传完成后立刻点「保存为草稿」，验证 bodyLen 不降再传下一张
+# （否则 insertHTML/未走原生粘贴时，上传会触发内部空模型回刷，正文整篇消失）
 ```
 
 #### 12.7 上传封面（已验证流程 v3.8.0 / 2026-07-19 周报实测）
@@ -2750,7 +2790,7 @@ browser_run_code_unsafe("""async (page) => {
 |------|------|----------|--------|
 | 标题 | **隐藏 `#title` TEXTAREA + 可见 `.ProseMirror` 代理** | 正文注入后 `.ProseMirror`.first() click → Ctrl/Meta+A → keyboard.type；回读 `#title.value`（禁 textContent 直写） | ✅ 高 |
 | 作者 | 标准 input（≤8 字） | 原生 setter + dispatch `input`；固定 `羊报AI周刊`/`今日羊报AI`/`羊报AI月报`，勿填署名 | ✅ 高 |
-| 正文 | **ProseMirror** | 🔴 v3.23.0 修正：`execCommand('insertHTML')`（直接 innerHTML 被静默清空） | ✅ 高 |
+| 正文 | **ProseMirror** | 🔴 v3.30.0 修正：真实剪贴板 + Meta+A/Meta+V 粘贴（insertHTML/合成 paste 都会回刷清空） | ✅ 高 |
 | 视频号 | 弹窗选择 | 工具栏「视频号」→ 选账号 → 选视频 → 插入 | ✅ 高 |
 | 图片上传 | 工具栏菜单 | 「图片」→「本地上传」→ file_upload | ✅ 高 |
 | 封面 | 拖拽区域 | 「从图片库选择」/ 「从正文选择」 | ⚠️ 需坐标点击（图库缩略图在子 `<i>` 的 backgroundImage，非 `<img>`）|
@@ -2781,7 +2821,7 @@ browser_type(target={作者输入框ref}, text="羊报AI周刊")
 
 #### 12.4 填写正文
 
-**🔴 v3.23.0 / 2026-08-29 实测修正：此节旧方案（直接 innerHTML）已被证伪**——赋值返回"ok"但编辑器立即回滚清空（pmLen=1）。**必须用 12.5 的 `execCommand('insertHTML')` 流程**（selectNodeContents + insertHTML + 回读字数验证），勿再使用本节的 dispatch input 方案。
+**🔴 v3.30.0 / 2026-09-10 实测修正：此节旧方案（直接 innerHTML）以及 12.5 旧主路径（execCommand insertHTML）均已被证伪**——innerHTML 立即回滚（pmLen=1）；insertHTML 的 pmLen 回读通过但上传/保存会从内部空模型回刷清空。**必须用 12.5 的真实剪贴板 + Meta+A/Meta+V 粘贴流程**，注入后立刻保存草稿验证 bodyLen 不降。
 
 #### 12.5 上传图片（复杂，建议手动）
 
@@ -2862,7 +2902,7 @@ browser_click(target={确认按钮ref})
 |------|------|----------|--------|
 | 标题 | **隐藏 `#title` TEXTAREA + 可见 `.ProseMirror` 代理** | 正文注入后 `.ProseMirror`.first() click → Ctrl/Meta+A → keyboard.type；回读 `#title.value`（禁 textContent 直写） | ✅ 高 |
 | 作者 | 标准 input（≤8 字） | 原生 setter + dispatch `input`；固定 `羊报AI周刊`/`今日羊报AI`/`羊报AI月报`，勿填署名 | ✅ 高 |
-| 正文 | **ProseMirror** | 🔴 v3.23.0 修正：`execCommand('insertHTML')`（直接 innerHTML 被静默清空） | ✅ 高 |
+| 正文 | **ProseMirror** | 🔴 v3.30.0 修正：真实剪贴板 + Meta+A/Meta+V 粘贴（insertHTML/合成 paste 都会回刷清空） | ✅ 高 |
 | 图片上传 | **隐藏 file input** | `setInputFiles`（但不插入文章） | ⚠️ 需手动插入 |
 | 封面 | 拖拽区域 | 需手动上传 | ❌ 建议手动 |
 | 合集 | **自定义 Vue 组件** | JS click（不稳定） | ❌ 建议手动 |
@@ -3451,7 +3491,7 @@ await titleInput.fill('代码偷吃SSD+豆包对标Opus｜今日羊报AI');
 
 **解决**：用 `browser_evaluate` 注入内容：
 - 标题：`editors[0].textContent = '标题'` + dispatch `input` 事件
-- 🔴 v3.23.0 修正：正文禁直接 `innerHTML`（被静默清空）→ `execCommand('insertHTML')`（见 Phase 12.5）
+- 🔴 v3.30.0 修正：正文禁 innerHTML / 禁 insertHTML / 禁合成 ClipboardEvent → 真实剪贴板 + Meta+A/Meta+V 粘贴，每图后立刻保存草稿（见 Phase 12.5）
 
 ### 🔴 微信公众号图片插入
 **问题**：通过 `setInputFiles` 可以将图片上传到素材库，但图片不会自动插入到文章正文中。需要先在文章中定位光标，然后通过工具栏「图片」→「本地上传」手动插入。
@@ -3621,7 +3661,7 @@ await inputs[1].setInputFiles('horizontal-4-3.png');  // 设置封面
 2. 切换到新标签页
 3. 填写标题：`OpenAI二验风暴、Anthropic IPO、DeepSeek 500亿融资｜羊报AI周刊 YYYY-MM-DD~YYYY-MM-DD`
 4. 填写作者：`羊报AI周刊`（≤8 字；署名 `羊报AI周刊 · MM-DD~MM-DD` 写进正文，勿填作者栏）
-5. 填写正文（ProseMirror execCommand insertHTML，🔴 v3.23.0）
+5. 填写正文（ProseMirror 真实剪贴板粘贴，🔴 v3.30.0）
 6. 上传封面图到正文：
    - 点击正文区域获取 focus
    - 按回车创建新行
@@ -5072,9 +5112,9 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 
 ### 🔴 公众号正文 ProseMirror 拒绝 innerHTML 直接赋值（v3.23.0 / 2026-08-29）
 **问题**：`bodyEditor.innerHTML = html` 返回"ok"但编辑器回滚，`pm.textContent.length === 1`——正文被静默清空，无报错。
-**解决**：`focus()` → `range.selectNodeContents(pm)` → `sel.addRange(range)` → `document.execCommand('insertHTML', false, html)`；注入后回读 `textContent.length > 1000` 验证。
-**Why:** ProseMirror 通过 selection/execCommand 管状态，直接 DOM 写入会被视图层丢弃。
-**How to apply:** Phase 12.5（已重写，替代旧 innerHTML 方案）
+**解决（v3.23.0，已被 v3.30.0 取代）**：`focus()` → `range.selectNodeContents(pm)` → `sel.addRange(range)` → `document.execCommand('insertHTML', false, html)`；注入后回读 `textContent.length > 1000` 验证。
+**Why:** ProseMirror 通过 selection/execCommand 管状态，直接 DOM 写入会被视图层丢弃。0910 进一步证明 execCommand 只改 DOM、不同步内部 doc——上传/保存会回刷清空。
+**How to apply:** Phase 12.5（v3.30.0 改真实剪贴板 + Meta+A/Meta+V；本条仅作历史）
 
 ### 🔴 公众号标题被正文注入操作灌入全文（v3.23.0 / 2026-08-29）
 **问题**：正文注入操作导致标题框变成整篇文章（计数器 1776/64）。
@@ -5136,11 +5176,12 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 **Why:** 登录页跨域 iframe / 无障碍树残缺，截图比 snapshot 可靠。
 **How to apply:** Phase 13.0b 截图落盘步骤
 
-### 🔴 公众号正文 insertHTML 扁平化 → 剪贴板粘贴模拟（v3.28.0 / 2026-09-02）
+### 🔴 公众号正文 insertHTML 扁平化 → 剪贴板粘贴模拟（v3.28.0 / 2026-09-02；🔴 v3.30.0 已证伪合成 paste）
 **问题**：0902 实测 `execCommand('insertHTML')` 注入多段落正文（`<section><p>…<h2>…`）会**扁平化结构**——h2/hr 样式丢失，且注入时若正文含重复占位符 `[IMG:COVER]` 会产生**重复图片节点**（imgSection 索引漂移）。
-**解决**：先 focus 正文 + `selectNodeContents + execCommand('delete')` 清空，再构造 `const dt = new DataTransfer(); dt.setData('text/html', html);` 派发 `new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true})`。注入后**必须回读**：`Array.from(body.children)` 列出顶层节点类型逐个核对（勿对 NodeList 直接 `.filter()`——会 TypeError）；目标位置含 `hr`/`h2` 才算结构完整。
-**Why:** ProseMirror 对 paste 事件走完整 schema 解析，对 execCommand 只做纯文本/扁平 HTML 落地；回读是唯一防「看起来 ok 实际扁平」的手段。
-**How to apply:** Phase 12.5 正文注入
+**v3.28.0 当时解法**（0910 已证伪）：构造 `DataTransfer` + 派发合成 `ClipboardEvent('paste')`。0910 实测合成 paste **pmLen=0，编辑器不认**。
+**v3.30.0 真正解法**：`grantPermissions(['clipboard-read','clipboard-write'])` → `navigator.clipboard.write([ClipboardItem text/html + text/plain])` → 点正文 → `Meta+A` → `Meta+V` **真实键盘粘贴**；立刻「保存为草稿」验证 bodyLen 不降。
+**Why:** ProseMirror 只认用户手势触发的原生 paste；合成 ClipboardEvent 与 execCommand 都不同步内部 doc。
+**How to apply:** Phase 12.5 正文注入（v3.30.0 主路径）
 
 ### 🔴 公众号 filechooser 事件不触发 → 直接 setInputFiles（v3.28.0 / 2026-09-02）
 **问题**：`Promise.all([waitForEvent('filechooser'), click(本地上传)])` 在 12.6 正文图片上传时 filechooser 事件**从不触发**（webuploader 内部拦了原生 chooser），Promise 挂起。
@@ -5177,6 +5218,21 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 
 ## 更新日志
 
+### v3.30.0（2026-09-10）
+基于 **2026-09-10 日报全流程**（linuxdo 627 帖/44 批；视频 177.32s edge-tts 兜底；B站 ✅ 分区=人工智能 / 抖音用户手动 ✅ / 公众号 `appmsgid=100001064` ✅ / 视频号 login_required → 用户手动 ✅）实测，吸收坑 182–183：
+
+**公众号正文注入（Phase 12.5，坑 182）**
+- 🔴 `execCommand('insertHTML')` 注入后 pmLen 回读通过（1193 字），随后「本地上传」插图或「保存为草稿」会从 **ProseMirror 内部空 doc 回刷清空正文**（标题/作者不受影响）
+- 🔴 v3.28.0 的合成 `ClipboardEvent('paste')` + `DataTransfer` 同样无效（pmLen=0，编辑器不认）
+- ✅ 唯一已验证方案：`grantPermissions(['clipboard-read','clipboard-write'])` → `navigator.clipboard.write([ClipboardItem text/html + text/plain])` → 点正文 → `Meta+A` → `Meta+V` 真实键盘粘贴 → **立刻保存草稿**验证 bodyLen 不降
+- pmLen 只证明 DOM 改了，不证明内部 state 同步——v3.23.0 的回读验证不足以保证存活
+
+**每图后立刻保存（Phase 12.6，坑 183）**
+- 占位符选中 → 工具栏图片 → 本地上传 → setInputFiles → Escape → **立刻「保存为草稿」** → 验证 replaced + bodyLen 不降，再传下一张
+- 上传产生的 `src=""` 空 img 是编辑器装饰节点，execCommand delete 删不掉，保存时服务端忽略（有效 mmbiz 图数不变），勿纠结
+
+**版本**：3.29.0 → 3.30.0
+
 ### v3.29.0（2026-09-02）
 基于 **2026-09-02 用户复盘指令**（「封面图记得按照要求生成」+「b站投稿分区选择人工智能」）实测，吸收坑 180–181：
 
@@ -5197,7 +5253,7 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 基于 **2026-09-02 日报全流程**（linuxdo 427 帖/29 批零 error → 361；视频 151.44s；B站 ✅ 12:14:27 / 抖音 ✅ 第86集 / 视频号 login_required ⏭ / 公众号 `appmsgid=100000904` ✅）实测，吸收坑 174–179：
 
 **公众号（Phase 12）**
-- 正文注入换**剪贴板粘贴模拟**（ClipboardEvent + DataTransfer('text/html')），execCommand insertHTML 会扁平化结构
+- 正文注入换**剪贴板粘贴模拟**（ClipboardEvent + DataTransfer('text/html')），execCommand insertHTML 会扁平化结构（🔴 v3.30.0 已证伪合成 paste，改真实键盘粘贴）
 - 正文图片：filechooser 事件不触发 → 直接 `input[type=file]:visible` setInputFiles；插入位置跟随光标（先定位再上传）
 - 标题 ProseMirror 填完后必须 `blur()` 才同步 `#title`（否则保存出无标题草稿）
 - 原创「确定」首击可能 no-op（开关仍「未声明」）→ 重开弹窗复点，验收看 `.js_original_apply_cell` 含「已开启快捷转载」
@@ -5298,7 +5354,7 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 基于 **2026-08-29 日报视频全流程**（319 帖 → 视频 → B站/抖音/公众号 3 平台草稿 + 视频号 QR 连续两日复发按复发协议跳过）实战，**修正 2 处既有记载与实测相矛盾**，固化 6 组新坑：
 
 **公众号（Phase 12）——核心矛盾修正**
-- 🔴 12.5 重写：ProseMirror 正文**禁止直接 innerHTML 赋值**（实测被静默清空 pmLen=1）→ 唯一可靠方式 `selectNodeContents` + `execCommand('insertHTML')`，注入后回读字数验证
+- 🔴 12.5 重写：ProseMirror 正文**禁止直接 innerHTML 赋值**（实测被静默清空 pmLen=1）→ 当时认为唯一可靠方式 `selectNodeContents` + `execCommand('insertHTML')`（🔴 v3.30.0 已证伪：insertHTML 的 pmLen 通过但上传/保存会回刷清空，改真实剪贴板粘贴）
 - 🔴 12.5b 新增：正文注入操作会把标题框灌入全文（计数器 1776/64）→ data-placeholder 定位 + delete + insertText 重置；标题填写固定放到正文注入之后
 - 🔴 12.8 修正：「我已阅读并同意」协议 checkbox **不会**自动勾选（实测 checked:false，直接点确定 no-op）→ 点 `closest('label')` 容器验证 checked 后再确定
 - 12.7c 新增：封面 4 子坑——hover 菜单 mouse.move、webuploader-pick label 拦截（force click + filechooser，勿用含点动态 id）、`.selected` 类回读验证、2.35:1 裁剪 radio 视口外 evaluate 点 label
