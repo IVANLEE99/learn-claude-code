@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.31.0
+version: 3.31.1
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.31.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.31.1
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -1028,6 +1028,8 @@ curl -s --resolve api.luka77.cc:443:$REAL_IP ...
 
 **🔴 v3.31.0 封面主路径 = 极简中文科技资讯海报**（0910 用户确认可行）：横 `horizontal-4-3.png`、竖 `vertical-3-4.png` **都按** `templates/cover-prompt.md` 出图，文字源 = **发布标题** `publish.json.title`（与 B站/公众号标题同形）。禁止再用演播室空镜 / news desk 英文 prompt 当封面。
 
+**🔴 v3.31.1 封面顺序铁律（坑 190 / 2026-09-11）**：封面文字源单一事实源是 `publish.json.title`，**标题定稿必须早于封面生成**——Phase 10 若改标题，封面文字源不一致，必须 `rm` 旧封面按新标题重出，**禁止沿用旧图**。Phase 5.5 开工前先确认 Phase 10 标题已冻结。
+
 **🔴 v3.29.0 日期居中硬要求仍有效**：封面上的日期字段必须**水平居中**（海报风里日期单独一行居中，不是旧演播室中央大白字）。无论 API 出图还是本地 Pillow 叠字，生成后必须 `Read` 视觉校验；不居中即重生成。本地脚本基准：`dx = (tw - dw) // 2`，`dy ≈ int(th * 0.34)`。
 
 在 Phase 5 图片生成完成后，使用 `Agent` 工具异步生成所有封面：
@@ -1536,6 +1538,8 @@ done
 > **🔴 经验教训（2026-07-12）：重跑 TTS 后必须同步更新 Composition.tsx 和 Root.tsx 的时长，否则字幕漂移。**
 > 现象：只重新生成了音频 + 重算了 captions.json，但 `sceneConfig` 的 `duration` 还是旧音频的值。视频画面按旧时长排布、字幕按新音频时长对齐，两条时间轴从中段开始逐渐错位，到 1 分多钟处字幕与音频明显重叠、对不上。
 > 铁律：**任何一次重跑 TTS（哪怕只改一个场景），都必须重新 ffprobe 全部音频 → 同步刷新 Composition.tsx 的 `sceneConfig` 时长 + 标题浮层 `NewsTitle` 的 `durationInFrames` + Root.tsx 的 `TOTAL_DURATION_SEC` → 再重算 captions.json → 最后渲染。**四者必须来自同一批音频，缺一步就会漂移。
+
+> **🔴 v3.31.1 铁律（坑 189 / 2026-09-11）：NewsTitle 首屏日期禁止跨期硬编码。** 该组件日期曾写死为 09-09，0911 期重渲后首屏仍显示上一期日期，成片渲完才发现。必须抽成顶部常量 `const PERIOD_DATE = 'YYYY-MM-DD'` 与 `const BRAND`，并加 🔴 注释；渲染后**抽首帧视觉校验**：`ffmpeg -i out.mp4 -vf "select=eq(n\,0)" -frames:v 1 first.png` 后 Read。Phase 8-9 校验须 `grep -rn "20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]" video-project/src/` 与 `publish.json.date` 对齐（任何日期字符串都不得残留上一期）。
 
 #### Step 8.3: 更新 Root.tsx
 
@@ -2225,6 +2229,13 @@ browser_run_code_unsafe("""async (page) => {
 
 **🔴 v3.30.0 配套铁律：每张图上传后立即「保存为草稿」固化服务器基线**——上传每张正文图（选中占位符 → 工具栏图片 → 本地上传 → setInputFiles → Escape 关挡层）后**立刻点「保存为草稿」**，验证 bodyLen 不降再传下一张。这样即使触发回刷，恢复基线也是有内容的版本而非空稿。上传产生的 `src=""` 空 img 是编辑器装饰节点，execCommand delete 删不掉，保存时服务端忽略（有效 mmbiz 图数不变），勿纠结。
 
+**🔴 v3.31.1 事故（坑 185 / 2026-09-11）：正文被标题框操作顶掉——静默丢整篇正文。**
+- **事故链**：为给封面找落脚点，在**标题代理框** `document.querySelectorAll('.ProseMirror')[0]` 上做了「图片→本地上传」，随后又对它 `Meta+A` → 正文（`nth(1)`）的 4 段图文被清空，只剩标题文本；紧接着的「保存为草稿」把坏状态**固化到服务器**（覆盖原草稿基线）
+- **铁律**：`.ProseMirror` **idx0=标题代理 / idx1=正文**；任何正文操作必须**显式 `nth(1)`**，封面图插入务必走正文 `nth(1)` 末尾；`Meta+A` 前先 `document.activeElement` 确认焦点在正文
+- **事故信号**：每步保存前用 `pmLen` 校验，**正文长度骤降到≈标题长度即事故**，立即停止保存并走恢复流程
+- **恢复**：重新 `pbcopy` 带 `PLACEHOLDER_IMG_N` 的纯文本版 → 点正文 → `Meta+A` → `Backspace` → `Meta+V` 真实粘贴 → 保存固化 → 逐张替换占位符
+- **How to apply:** Phase 12.5/12.7 每次保存前断言 `nth(1).textContent.length` 不为标题长度
+
 **🔴 v3.23.0 / 2026-08-29 历史修正（已被 v3.30.0 取代，勿再当主路径）：禁止对 ProseMirror 正文直接 `innerHTML = ...` 赋值！**
 0829 实测：赋值返回"ok"但编辑器立即回滚，验证 `pm.textContent.length === 1`——**内容被静默清空**（无任何报错）。当时认为 `document.execCommand('insertHTML')` 可靠；0910 实测 insertHTML 同样存在「DOM 成功、内部 state 空」的回刷问题。**以下 insertHTML 代码块仅作反例保留，禁止当主路径：**
 
@@ -2256,6 +2267,8 @@ browser_run_code_unsafe("""async (page) => {
 **🔴 v3.23.0 新增坑：正文注入操作可能把标题框灌入整篇文章**（实测标题计数器变 1776/64、标题区显示正文全文）。恢复流程见 12.5b；**预防规则：标题填写永远放到正文注入之后**（调整 12.0 顺序：正文 → 图片 → 封面 → **再填标题** → 原创 → 合集 → 保存）。
 
 #### 12.5b 标题被正文注入覆盖后的重置（v3.23.0 / 2026-08-29 实测）
+
+**🔴 v3.31.1 标题写入只认 Playwright 真实点击（坑 187 / 2026-09-11）**：`#title` 是 `visibility:hidden; height:0` 的代理框，用 evaluate 的 `.focus()` + `keyboard.insertText` **写不进去**（回读 `#title.value === ''`）。**可行**：`page.locator('.ProseMirror').first().click()`（Playwright 真实鼠标）→ `Meta+A` → `keyboard.type(title, {delay:30})` → 回读 `nth(0).textContent` 长度 === 标题字符数验证。evaluate 内 click 对 ProseMirror 无效。
 
 用 `data-placeholder` 含「标题」定位（勿依赖编辑器索引——注入操作后索引可能漂移）：
 
@@ -2320,6 +2333,18 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png")
 5. 「从正文选择」节点常 `display:none`：先 hover `#js_cover_area .js_cover_btn_area`，再 **强制 style 显示** 后点 `.js_selectCoverFromContent`
 6. 缩略图是 **`span.appmsg_content_img.cover` + background-image**，优先点带 `mmbiz` 背景的 `.appmsg_content_img_item`
 7. 已有草稿可直接打开：`appmsg?…&appmsgid={id}&token=…`（比「新的创作」稳）
+
+**🔴 v3.31.1 封面完整可靠路径（坑 186 / 2026-09-11 打通，替代 v3.23.1「从图片库选择」）——当前主路径：**
+1. **前置铁律**：封面图**必须先插入正文**（正文 `nth(1)` 末尾 → 工具栏「图片」→「本地上传」→ setInputFiles；见下方步骤1），否则「从正文选择」对话框里一张图都没有
+2. **打开菜单**：点 `.js_cover_btn_area.select-cover__btn` 中心 → 弹 `.pop-opr__group`（含「从正文选择/从图片库选择/微信扫码上传/AI 配图」）
+3. **🔴 点菜单项必须 `force: true`**：`page.mouse.click(坐标)` 与 evaluate 内 `.click()` 均**无效**（点了没反应）；只有 `locator.click({force:true})` 能打开对话框
+4. **对话框延迟出现**：`waitForSelector('.weui-desktop-dialog', {state:'visible'})` 会**超时**（该元素 Playwright 判定不可见，对话框实际已开）——改用轮询 `getBoundingClientRect().height > 100` 判定
+5. **🔴 缩略图不是 `<img>`**：5 张候选图是 `[style*="background-image"]` 元素（`.appmsg_content_img.cover`，115×115，y≈345，x 依次 350/480/610/740/870），查 `img` 永远 count=0——用 background-image 选择器定位后取坐标点击
+6. **确认**：「下一步」→「编辑封面」对话框（显示 2.35:1 消息列表 + 1:1 转发卡片预览）→ 点 enabled 的「**确认**」（「取消」vis=false 勿点）
+7. **验收**：`.js_cover_preview_new{display:block, backgroundImage 含 mmbiz}` + URL 保留 `appmsgid=`；点确认前先读预览 img src 确认是目标封面
+8. 🔴 **`browser_drop` 拖拽上传封面禁用**：会卡 loading（`.js_cover_loading` 12s+ 不完成）
+
+**🔴 v3.31.1 变体坑（坑 188 / 2026-09-11）：误触「未授权使用切换账号能力」弹窗遮蔽全页。** 点封面区后偶发弹出「未授权使用切换账号能力，请退出后扫码登录其他账号」，其 wrp 层级最高，之后所有点封面操作都被它拦截（元素 `offsetParent:false` 但仍在拦截 pointer events）。**解决**：遍历 `.weui-desktop-dialog` 点 `.weui-desktop-dialog__close-btn` 或「我知道了」逐个关闭，再重试封面流程；**打开封面菜单前先清一次 dialog**。
 
 ```
 # 步骤1：上传封面图到正文（工具栏「图片」→「本地上传」）
@@ -5222,6 +5247,30 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 **How to apply:** Phase 12 全部 evaluate 代码
 
 ## 更新日志
+
+### v3.31.1（2026-09-11）
+基于 **2026-09-11 日报全流程**（linuxdo 595 帖；视频 105.81s edge-tts 云扬 + atempo 1.4，mimo 白桦全挂；B站/视频号/抖音**用户人工上传**；公众号 `appmsgid=100001078` ✅；锚点 open_weights 79.73% ∈ [0.7,0.8] ✅）实测，吸收坑 185–190：
+
+**公众号正文被标题框顶掉（Phase 12.5，坑 185）**
+- 🔴 `.ProseMirror` idx0=标题代理 / idx1=正文；在**标题代理框**上做「图片→本地上传」+ `Meta+A` → 正文 4 段图文被清空，只剩标题；「保存为草稿」把坏状态固化服务器（覆盖基线）
+- 任何正文操作必须显式 `nth(1)`；封面图插入务必走正文 `nth(1)` 末尾；保存前断言 `nth(1).textContent.length` 不为标题长度
+- 恢复：`pbcopy` 带 `PLACEHOLDER_IMG_N` 纯文本版 → 点正文 → `Meta+A` → `Backspace` → `Meta+V` → 保存 → 逐张替换占位符
+
+**公众号封面完整路径（Phase 12.7，坑 186）**
+- 封面图必须先插入正文（否则「从正文选择」没图）；点 `.js_cover_btn_area.select-cover__btn` 弹菜单
+- 点菜单项必须 **`force: true`**（mouse.click / evaluate 内 click 无效）；对话框延迟 `waitForSelector(visible)` 超时 → 轮询 `getBoundingClientRect().height > 100`
+- 缩略图不是 `<img>`，是 `.appmsg_content_img.cover` 的 **background-image**（115×115，y≈345，x 350/480/610/740/870）
+- 确认= enabled「确认」；验收 `.js_cover_preview_new{display:block, bg 含 mmbiz}` + `appmsgid=` 保留；`browser_drop` 卡 loading 禁用
+
+**公众号 v3.31.1 变体坑**
+- 标题写入只认 Playwright 真实点击：`.ProseMirror.first().click()` → `Meta+A` → `keyboard.type(..., {delay:30})`；evaluate 内 click + insertText 写不进 `#title`（坑 187 / 12.5b）
+- 「未授权使用切换账号能力」弹窗遮蔽全页：遍历 `.weui-desktop-dialog` 点 close-btn /「我知道了」逐个关闭再重试（坑 188 / 12.7 前置）
+
+**渲染与封面顺序（坑 189 / 190）**
+- NewsTitle 首屏日期跨期硬编码：抽 `PERIOD_DATE`/`BRAND` 常量 + 🔴 注释；渲染后 `ffmpeg ... select=eq(n\,0)` 抽首帧 Read 校验；Phase 8-9 校验须 `grep -rn "20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]" video-project/src/` 与 `publish.json.date` 对齐
+- 封面文字源 = `publish.json.title`，标题定稿必须早于封面生成；Phase 10 改标题 → `rm` 旧封面重出，禁止沿用
+
+**版本**：3.31.0 → 3.31.1
 
 ### v3.31.0（2026-09-10）
 基于 **2026-09-10 封面试出**：用户确认极简中文科技资讯海报（浅灰蓝底 + 蓝引号 + 发布标题排版 + 右下小羊水印）可行，吸收为封面主路径。
