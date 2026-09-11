@@ -234,13 +234,33 @@ if 'xiaomimimo.com' in anthropic_url and anthropic_token:
 else:
     # 使用专用的 MIMO_TTS 配置
     url = env.get('MIMO_TTS_API_URL', 'https://token-plan-cn.xiaomimimo.com')
+    # v2.8: URL 可能带 /anthropic 后缀，必须去掉再拼 /v1/chat/completions
+    url = url.rstrip('/')
+    for _suffix in ['/anthropic/v1', '/anthropic', '/v1']:
+        if url.endswith(_suffix):
+            url = url[:-len(_suffix)]
+            break
     key = env.get('MIMO_TTS_API_KEY', '')
     print(f'{url}')
     print(f'{key}')
+    # v3.15: _001 fallback 端点
+    url1 = env.get('MIMO_TTS_API_URL_001', '')
+    key1 = env.get('MIMO_TTS_API_KEY_001', '')
+    if url1 and key1:
+        url1 = url1.rstrip('/')
+        for _suffix in ['/anthropic/v1', '/anthropic', '/v1']:
+            if url1.endswith(_suffix):
+                url1 = url1[:-len(_suffix)]
+                break
+        print(f'{url1}')
+        print(f'{key1}')
 " 2>/dev/null)
 
 API_URL=$(echo "$CONFIG" | sed -n '1p')
 API_KEY=$(echo "$CONFIG" | sed -n '2p')
+# v3.15: 可选 fallback 端点（第3/4行）
+API_URL_001=$(echo "$CONFIG" | sed -n '3p')
+API_KEY_001=$(echo "$CONFIG" | sed -n '4p')
 
 if [ -z "$API_KEY" ]; then
     echo "错误: 未找到 API Key，请在 ~/.claude/settings.json 的 env 中配置 MIMO_TTS_API_KEY" >&2
@@ -332,10 +352,37 @@ echo "  文本: ${TEXT:0:60}$([ ${#TEXT} -gt 60 ] && echo '...')"
 [ -n "$PROFILE" ] && echo "  音色档案: $PROFILE"
 [ -n "$VOICE_DESC" ] && echo "  音色描述: ${VOICE_DESC:0:40}"
 
-RESPONSE=$(curl -s --max-time 120 "${API_URL}/v1/chat/completions" \
-    -H "Content-Type: application/json" \
-    -H "api-key: ${API_KEY}" \
-    -d "@${REQUEST_BODY_FILE}")
+# v3.15: 端点尝试函数（key 无效/配额尽/无响应时切下一个端点；api-key 与 Bearer 双认证头兼容）
+try_endpoint() {
+    local u="$1" k="$2"
+    RESPONSE=$(curl -s --max-time 120 "${u}/v1/chat/completions" \
+        -H "Content-Type: application/json" \
+        -H "api-key: ${k}" \
+        -d "@${REQUEST_BODY_FILE}")
+    if [ -z "$RESPONSE" ] || echo "$RESPONSE" | grep -qiE '"Invalid token"|"Invalid API Key"|invalid_api_key|unauthorized'; then
+        RESPONSE=$(curl -s --max-time 120 "${u}/v1/chat/completions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${k}" \
+            -d "@${REQUEST_BODY_FILE}")
+    fi
+    [ -z "$RESPONSE" ] && return 1
+    if echo "$RESPONSE" | grep -q '"error"'; then
+        if echo "$RESPONSE" | grep -qiE 'invalid api key|invalid token|quota|unauthorized|无可用|认证|密钥'; then
+            return 1
+        fi
+    fi
+    return 0
+}
+
+RESPONSE=""
+if [ -n "$API_URL" ] && [ -n "$API_KEY" ] && try_endpoint "$API_URL" "$API_KEY"; then
+    echo "  端点: ${API_URL}（主）"
+elif [ -n "$API_URL_001" ] && [ -n "$API_KEY_001" ] && try_endpoint "$API_URL_001" "$API_KEY_001"; then
+    echo "  端点: ${API_URL_001}（fallback _001）"
+else
+    echo "错误: 所有 TTS 端点均失败" >&2
+    exit 1
+fi
 
 # === 检查响应 ===
 if [ -z "$RESPONSE" ]; then
