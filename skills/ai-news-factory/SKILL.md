@@ -4,9 +4,11 @@ description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短�
 version: 3.31.1
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.31.1
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.32.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.32.0 核心改进（2026-09-15 日报实测）**：**状态判定禁读隐藏节点**——原创声明的 `Undeclared` 是折叠面板内陈旧占位节点的假象，声明其实早已生效，为此空转 6 轮；状态一律以「可见设置行摘要 + 行高」为准，`element.click()` 对 `display:none` 元素照样有效是错觉根因（坑 191）。**正文粘贴必须放行「Content Structure Check」弹窗的 `Continue Inserting`**，并用剥离 `ProseMirror-widget` 的 `bodyLen()` 读长度（空态占位符 `Start text here` 15 字符会污染裸读）（坑 192）。英文 UI 标签集（`Save as draft`/`Confirm`/`image(s)`/`Collections`）与 `Page.captureScreenshot` 须用页面坐标 + `captureBeyondViewport`。
 
 **核心原则：语义 `group_caps` 先切行，再以真实音频为锚——faster-whisper 词级时间戳 + SequenceMatcher 对齐。字幕内容 100% 来自原始脚本、时间 100% 来自音频真实发音时刻。禁止逐标点切行，禁止按字硬切，禁止按字数比例切时间轴。**
 
@@ -5227,9 +5229,95 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 
 ### 🔴 公众号原创「确定」首击可能不提交 → 复点一次（v3.28.0 / 2026-09-02）
 **问题**：0902 原创弹窗（文字原创 checkbox 已 checked）点「确定」后弹窗关闭，但开关仍显示「未声明」——首次点击是 no-op。
-**解决**：点「确定」后**回读开关** `.js_original_apply`（文本=未声明/已声明）+ 状态组 `.js_original_apply_cell` 是否含「已开启快捷转载」；若仍「未声明」，重新点开关重开弹窗再点「确定」，以组内出现「文字原创 · 作者：… · 已开启快捷转载」+「撤销声明」为验收。
+**解决**：点「确定」后**回读可见设置行** `.appmsg-editor__setting-group.js_original_apply_cell` 的 `innerText` 是否含「已开启快捷转载」（中文 UI）/ `Quick repost enabled`（英文 UI）。若仍「未声明」，重新点开关重开弹窗再点「确定」，以组内出现「文字原创 · 作者：… · 已开启快捷转载」为验收。
+**⚠️ v3.32.0 更正**：**禁止**用 `.js_original_apply` 的 `textContent` 判定状态（恒为「未声明」假象，见下节 v3.32.0）；判定只看 `.js_original_apply_cell` 行的摘要。
 **Why:** Vue 组件首击可能只关弹窗不提交 state；重开重点是唯一恢复路径。
 **How to apply:** Phase 12.8
+
+### 🔴 原创声明状态判定：只读「可见设置行摘要」，禁读隐藏占位节点（v3.32.0 / 2026-09-15，坑 191）
+
+**事故**：0915 公众号草稿其余项（标题/作者/909 字正文/5 图/封面/合集）全部验收通过，唯独「原创声明」反复报 `Undeclared`，为此重复点开关、重开弹窗、勾协议、点「确定」共 6 轮，并把每次尝试都「保存为草稿」固化，仍未「生效」。
+
+**真相**：声明**第一次就已生效**。`Undeclared` 来自 `.js_unset_original_title` 节点，它位于 **折叠子面板** `.setting-group__content.origined__area-new.js_original_type`（`display:none`）内，是**陈旧占位节点**：
+- `textContent` / `innerText` 会读到隐藏文本 → 恒为 `Undeclared`
+- `getBoundingClientRect()` 返回 `0×0`（因祖先 `display:none`）
+- `input.js_ori_setting_checkbox` 自身 `style="display:none"`，其 `.checked` **声明生效后仍为 false** → 同样不可作判据
+
+**正解——读可见设置行的摘要**：
+```js
+// ✅ 行元素「自身」就带 js_original_apply_cell，必须直接从 document 查
+const g = document.querySelector('.appmsg-editor__setting-group.js_original_apply_cell');
+const rowH = g.getBoundingClientRect().height;   // 已声明时 h≈62（可见行）
+const sum  = g.innerText.replace(/\s+/g, ' ').trim();
+// 未声明 → "Original 未声明"
+// 已声明 → "Original Text Originality · Author: 今日羊报AI · Quick repost enabled"（英文 UI）
+//          "原创 文字原创 · 作者：今日羊报AI · 已开启快捷转载"（中文 UI）
+const declared = /Text Originality|文字原创/i.test(sum) && rowH > 20;
+```
+⚠️ 不能写 `document.querySelector('.appmsg-editor__setting-group').querySelector('.js_original_apply_cell')`——`querySelector` 只匹配**后代**，匹配不到行元素自身的 class。
+
+**交叉验证**：声明生效后，原本可见的「Reward 赞赏／可在声明原创后开启」gate 行（`.js_unorigin_reward`）会消失，改为「Reward Don't enable」。
+
+**通用铁律（不止原创）**：
+1. **任何开关/声明状态判定，一律以「可见设置行的摘要文案 + 行高」为准**；`.textContent`+隐藏节点＝假信号，会稳定骗过每一轮验证。
+2. `offsetParent === null` **无法**区分「被 `display:none` 祖先隐藏」与「`position:fixed`」；判可见性要用 `getBoundingClientRect()`（`w/h>0`）。
+3. 判定被隐藏时，**向上遍历祖先链找第一个 `display:none` 的元素**（本次是 `.setting-group__content...js_original_type`），一眼定位是哪个容器把它藏了。
+4. **`element.click()` 对 `display:none` 元素照样能派发事件**——弹窗会正常打开，造成「点了有反应＝元素可见」的错觉。这是本次连错 6 轮的根因。
+5. **截图取证**：`Page.captureScreenshot` 的 `clip` 必须传**页面坐标**（`rect.top + window.scrollY`）且 `captureBeyondViewport: true`；传视口坐标会截到空白图（曾据此误判「无内容」）。
+
+**How to apply:** Phase 12.8 及任何平台「开关类」设置验收；视觉终检优先于 DOM 断言。
+
+### 🔴 公众号粘贴必须放行「Content Structure Check」弹窗（v3.32.0 / 2026-09-15，坑 192）
+
+**事故**：长期存在的 `paste failed pmLen=8 / len=15 / len=0`。两个成因叠加：
+1. **占位符 widget 污染长度**：正文 `ProseMirror` 空态含 `contenteditable="false"` 的 `.editor_content_placeholder.ProseMirror-widget`，文本 `Start text here`（15 字符）。裸读 `pm.textContent.length` 得到 15/8，误判「有内容」或「粘贴失败」。
+2. **真因**：粘贴内容触发微信**「内容结构检查 / Content Structure Check」模态**拦截，正文实际**未插入**，直到点 **`Continue Inserting`（继续插入）** 才写入。
+
+**正解**：
+```js
+// 长度：剥掉 widget 与 contenteditable=false 再读
+const bodyLen = (page) => page.evaluate((i) => {
+  const pm = document.querySelectorAll('.ProseMirror')[i];
+  if (!pm) return -1;
+  const c = pm.cloneNode(true);
+  c.querySelectorAll('.ProseMirror-widget, [contenteditable="false"]').forEach(e => e.remove());
+  return c.textContent.trim().length;
+}, BODY_IDX);
+
+// 放行结构检查弹窗（轮询最多 12×400ms）
+async function continueInserting(page) {
+  for (let i = 0; i < 12; i++) {
+    const hit = await page.evaluate(() => {
+      for (const d of document.querySelectorAll('.weui-desktop-dialog')) {
+        if (d.getBoundingClientRect().height < 30) continue;
+        const t = d.querySelector('.weui-desktop-dialog__title')?.textContent || '';
+        if (/Structure Check|结构检查/i.test(t)) {
+          for (const b of d.querySelectorAll('button, a.weui-desktop-btn')) {
+            const bt = (b.textContent || '').trim();
+            if (/Continue Inserting|继续插入/i.test(bt)) { b.click(); return 'clicked:' + bt; }
+          }
+        }
+      }
+      return null;
+    });
+    if (hit) return hit;
+    await page.waitForTimeout(400);
+  }
+  return 'no-dialog';
+}
+// 粘贴走 CDP 真实剪贴板：Input.dispatchKeyEvent{..., commands:['paste']}，随后 continueInserting()
+```
+验收阈值：`bodyLen > 800` 才算正文到位（日报正文约 900+ 字）。
+
+**How to apply:** Phase 12.5 正文粘贴；`continueInserting()` 在 paste 后立即调用，回读用 `bodyLen()` 而非裸 `textContent.length`。
+
+### 🔴 公众号编辑器为英文 UI 时的标签集（v3.32.0 / 2026-09-15）
+
+0915 实测该账号后台**英文 UI**（占位符却是中文 `请在这里输入标题`）：按钮/文案须按英文匹配——
+`Save as draft`（保存为草稿）、`Confirm` / `Cancel`、工具栏 `image(s)`、合集入口 `Collections`、原创 `Original` / `Text Originality` / `Undeclared` / `Quick repost enabled`、结构检查 `Content Structure Check` / `Continue Inserting`。
+**写法**：所有文案匹配一律用双语正则，如 `/^(Save as draft|保存为草稿)$/i`、`/(Continue Inserting|继续插入)/i`，避免只写中文导致 no-op。
+
+**How to apply:** Phase 12 全流程；新增文案匹配必须双语。
 
 ### 🔴 公众号合集实际 DOM 流（v3.28.0 / 2026-09-02）
 **问题**：12.10 旧流程 `getByRole('textbox', {name:'请选择合集'})` 与 `getByText('「今日羊报 AI」')` 在 0902 实测**找不到节点**；`[class*="collect"]` 系选择器也全空。合集入口不是按钮而是**可见文本 SPAN**。
