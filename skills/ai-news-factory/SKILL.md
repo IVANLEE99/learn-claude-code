@@ -1,14 +1,16 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.31.1
+version: 3.33.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.32.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.33.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
 > **🔴 v3.32.0 核心改进（2026-09-15 日报实测）**：**状态判定禁读隐藏节点**——原创声明的 `Undeclared` 是折叠面板内陈旧占位节点的假象，声明其实早已生效，为此空转 6 轮；状态一律以「可见设置行摘要 + 行高」为准，`element.click()` 对 `display:none` 元素照样有效是错觉根因（坑 191）。**正文粘贴必须放行「Content Structure Check」弹窗的 `Continue Inserting`**，并用剥离 `ProseMirror-widget` 的 `bodyLen()` 读长度（空态占位符 `Start text here` 15 字符会污染裸读）（坑 192）。英文 UI 标签集（`Save as draft`/`Confirm`/`image(s)`/`Collections`）与 `Page.captureScreenshot` 须用页面坐标 + `captureBeyondViewport`。
+
+> **🔴 v3.33.0 核心改进（2026-09-16 日报实测）**：**上传阶段浏览器必须常驻**——脚本化 Playwright 严禁把 `launch_persistent_context` 放进 `with sync_playwright()`（脚本退出含异常即杀浏览器、表单状态全丢、整轮重传；0916 期连丢 3 次）；先用守护进程持有浏览器（CDP 9222），后续脚本 `connect_over_cdp` 只附着不断连（坑 193）。B站新版投稿页**分区是级联面板**：`人工智能` 是 `科技数码` 的子分区，老的「点开下拉→JS 点选项」不再命中（坑 194）。公众号登录判据 = **页面出现「新的创作」**（登录页文案是「微信扫一扫」，搜「扫码」会漏判）（坑 195）。生图 prompt 里的中文水印尾巴会诱发画面大面积乱码中文，须删掉并显式加 `no text`；主站欠费时 `_003` prism `gpt-image-2` 为实测可用兜底（坑 196）。
 
 **核心原则：语义 `group_caps` 先切行，再以真实音频为锚——faster-whisper 词级时间戳 + SequenceMatcher 对齐。字幕内容 100% 来自原始脚本、时间 100% 来自音频真实发音时刻。禁止逐标点切行，禁止按字硬切，禁止按字数比例切时间轴。**
 
@@ -1021,6 +1023,8 @@ curl -s --resolve api.luka77.cc:443:$REAL_IP ...
 - **超时设置**：图片生成可能需要 30-180 秒，单张 curl `--max-time` 建议 90–180；整批脚本 timeout 按张数放大
 - **DNS 劫持**：如遇连接超时，用 `nslookup` + `curl --resolve` 绕过
 - **🔴 settings.env 多端点（v3.10 / 2026-07-21）**：从 `~/.claude/settings.json` 的 `env` 读取 `GEN_IMG_API_URL`/`GEN_IMG_API_KEY` 及 `_001`/`_002` fallback；日志**禁止**打印 key（只允许 set/empty/len）
+- **🔴 v3.33.0 中文水印尾巴致乱码（0916 实测）**：scene prompt 结尾的「『今日羊报 AI』『AI 新闻』分两行显示在右上角充当背景」会诱发模型把大段伪中文/整段英文文案画进画面（scene2 伪中文、scene4 整段英文，均报废重制）。修复：删掉该尾巴，追加 `absolutely no text, no letters, no Chinese characters, no watermark`；`Read` PNG 目检必须逐张过，乱码常在整段文案级别才显眼
+- **🔴 v3.33.0 端点降级顺序（0916 实测）**：主站欠费返回 `预扣费额度失败`（HTTP 200 包 error）时，`_003`（prism `gpt-image-2`）为实测可用兜底；重试脚本应把**上一张成功的端点提到循环最前**，避免每张都先撞欠费主站浪费 2 次×超时
 - **🔴 部分成功续跑**：已存在且 >5KB 的 `sceneN.png` 跳过；失败端点记 http 状态后切下一端点
 - **scene CTA 兜底**：最后 1 张若全端点失败，可用昨日同结构 CTA 图或 scene1 临时顶替，**封面竖图禁止**此兜底
 
@@ -1826,6 +1830,18 @@ cp news-pipeline/video-project/out/【YYYY-MM-DD】*.mp4 news-pipeline/YYYY-MM-D
 
 **权限已在预授权阶段获得，直接执行。**
 
+**🔴 v3.33.0 / 0916 实测：MCP 缺席时的脚本化 Playwright 协议（浏览器常驻，坑 193）**
+
+MCP 不可用时由脚本接管，**严禁**每轮把 `launch_persistent_context` 放进 `with sync_playwright()`：脚本退出（含异常）driver 会杀掉浏览器，表单状态全丢、只能整轮重传（0916 期连丢 3 次）。协议：
+
+1. **先起守护进程**（后台任务，全程不退）：`launch_persistent_context(PROFILE, headless=False, args=[..., "--remote-debugging-port=9222"])` + `while True: sleep`。启动前照旧清 `SingletonLock`。模板：`templates/browser_daemon.py`
+2. **后续所有脚本** `p.chromium.connect_over_cdp("http://localhost:9222")` 附着；结束时**只断连**（0915 期结论不变）
+3. **选页按 URL 匹配**（如 `member.bilibili.com` / `cgi-bin/appmsg`），禁止 `pages[-1]`——daemon 初始的 `about:blank` 空页会顶到最后，导致后续 `ClipboardItem undefined` / `author input not found` 一类假错
+4. **一步一截图**（`/tmp/bili_step.png` + Read 目检），存草稿前全项验收；单脚本失败先看截图诊断再改，不要盲改重跑
+5. **B站标题复核（坑 197）**：native setter + input 事件在 UI 里显示正常（截图确认过全文），但存草稿后**列表仍显示文件名**（0916 实测 `bili_upload`）——存草稿后必须开草稿复核标题字段，不对就用 `locator.fill()` 重填再存
+6. **B站新版分区是级联面板（坑 194）**：`人工智能` 是 `科技数码` 的**子分区**，老路径「点开下拉→JS click 『人工智能』」返回 `not found`（子面板未渲染）。需点「科技数码」父节点 → 等子面板渲染 → 再点「人工智能」。v3.29.0 结构化验收仍要做，但注意 0916 出现过**面板未开时的假阳性 `ok:true`**（选择器在该瞬间没找到 `科技数码` 文本）——验收前先确认面板已收起、以 `innerText` 的 `分区\n人工智能` 正则为最终判据
+7. **B站上传完成信号**：等标题输入框出现（`textarea, input[placeholder*=标题]`）即为表单就绪，勿用「上传成功」文案轮询（0916 轮了 5 分钟没命中）
+
 #### 11.0 处理浏览器锁（自动处理，不询问用户）
 
 如果 Playwright MCP 报错 "Browser is already in use" 或 "Target page, context or browser has been closed"：
@@ -2031,6 +2047,15 @@ browser_wait_for(time=3)
 ### Phase 12: 微信公众号自动上传（Playwright MCP）
 
 **权限已在预授权阶段获得，直接执行。**
+
+**🔴 v3.33.0 / 0916 实测补充（脚本化 Playwright 同样适用）**
+
+1. **登录判据 = 页面出现「新的创作」（坑 195）**。登录页 innerText 是「微信扫一扫，选择公众平台账号登录」——用「扫码/请重新登录」做关键词会漏判（0916 因此空转两轮）。等待循环：`while '新的创作' not in innerText`，10s 轮询、上限 10 分钟，期间提示用户扫码即可全自动续跑。
+2. **「新的创作→文章」后必须按 URL 找编辑器新标签页**（`cgi-bin/appmsg`），找不到时对同一页重试点击（≤3 次）；禁止取 `pages[-1]`（daemon 的 about:blank 空页会顶到最后 → `ClipboardItem undefined` / `author input not found` 假错）。
+3. **正文占位符插图路径（v3.30 每图即存的完整可复制实现，0916 全量验证 6/6）**：粘贴 HTML 时图片位置写 `<p>PLACEHOLDER_IMG_N</p>`（**封面图占位排最后**）→ 每图：TreeWalker 找占位符文本节点 → `range` 精确选中 → 工具栏「图片→本地上传」→ `setInputFiles` → Escape 关挡层 → **立刻保存草稿** → 断言占位符数递减、`pmLen` 只因占位符消失而下降（每图 ≈17 字）。全部传完占位符必须为 0。
+4. **封面「从正文选择」直接选最后一张缩略图（坑 186 补充）**：封面占位符在正文最末，弹窗缩略图按正文顺序排列 → `items[items.length-1].click()`；后续「下一步 → 编辑封面 → 确认 → 轮询 `.js_cover_preview_new`」与 v3.31.1 流程一致（0916 复验：2 轮轮询内 `display:block + mmbiz`）。
+5. **保存时 Content Structure Check 弹窗**：每步 `保存为草稿` 后扫「继续插入/继续保存」可见按钮点击放行（坑 192 的脚本化等价实现）。
+6. **原创声明跳过不变**（坑 191 / 0915 同款）：不进原创弹窗，直接保存草稿，upload-status.md 备注。
 
 **🔴 2026-08-13 日报视频实测流程优化（v3.17.0）**——公众号上传建议按以下**已验证顺序**执行，避免踩坑：
 
