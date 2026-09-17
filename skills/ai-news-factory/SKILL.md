@@ -1,15 +1,17 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.33.0
+version: 3.34.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.33.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.34.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
 > **🔴 v3.32.0 核心改进（2026-09-15 日报实测）**：**状态判定禁读隐藏节点**——原创声明的 `Undeclared` 是折叠面板内陈旧占位节点的假象，声明其实早已生效，为此空转 6 轮；状态一律以「可见设置行摘要 + 行高」为准，`element.click()` 对 `display:none` 元素照样有效是错觉根因（坑 191）。**正文粘贴必须放行「Content Structure Check」弹窗的 `Continue Inserting`**，并用剥离 `ProseMirror-widget` 的 `bodyLen()` 读长度（空态占位符 `Start text here` 15 字符会污染裸读）（坑 192）。英文 UI 标签集（`Save as draft`/`Confirm`/`image(s)`/`Collections`）与 `Page.captureScreenshot` 须用页面坐标 + `captureBeyondViewport`。
 
+> **🔴 v3.34.0 核心改进（2026-09-17 日报实测）**：**上传 daemon 必须用日常 Chrome，禁止 Chrome for Testing**（坑 198）。Playwright driver 不能当 daemon 持有浏览器——弹窗协议错误会把 driver+浏览器一起打死（坑 199）。B站「存草稿」是 `span.submit-draft` 不是 `button`，点错 5 次草稿箱一直空（坑 200）；失败禁止 `goto` 草稿箱，表单页会被冲掉（坑 201）。公众号英文 UI 登录判据补 `New creation`；`navigator.clipboard.write` 成功 ≠ 正文进去，必须坐标点击正文再 Meta+V，以 `bodyLen>800` 为准（坑 202）。
+>
 > **🔴 v3.33.0 核心改进（2026-09-16 日报实测）**：**上传阶段浏览器必须常驻**——脚本化 Playwright 严禁把 `launch_persistent_context` 放进 `with sync_playwright()`（脚本退出含异常即杀浏览器、表单状态全丢、整轮重传；0916 期连丢 3 次）；先用守护进程持有浏览器（CDP 9222），后续脚本 `connect_over_cdp` 只附着不断连（坑 193）。B站新版投稿页**分区是级联面板**：`人工智能` 是 `科技数码` 的子分区，老的「点开下拉→JS 点选项」不再命中（坑 194）。公众号登录判据 = **页面出现「新的创作」**（登录页文案是「微信扫一扫」，搜「扫码」会漏判）（坑 195）。生图 prompt 里的中文水印尾巴会诱发画面大面积乱码中文，须删掉并显式加 `no text`；主站欠费时 `_003` prism `gpt-image-2` 为实测可用兜底（坑 196）。
 
 **核心原则：语义 `group_caps` 先切行，再以真实音频为锚——faster-whisper 词级时间戳 + SequenceMatcher 对齐。字幕内容 100% 来自原始脚本、时间 100% 来自音频真实发音时刻。禁止逐标点切行，禁止按字硬切，禁止按字数比例切时间轴。**
@@ -26,7 +28,7 @@ version: 3.33.0
 **各平台存草稿方式**：
 | 平台 | 存草稿操作 |
 |------|-----------|
-| B站 | 点击「存草稿」按钮（ref=e496） |
+| B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） |
 | 抖音 | 点击「暂存离开」或直接关闭标签页（视频自动保存） |
 | 视频号 | 点击「保存草稿」按钮 |
 | 公众号 | 点击「保存为草稿」按钮 |
@@ -1834,13 +1836,18 @@ cp news-pipeline/video-project/out/【YYYY-MM-DD】*.mp4 news-pipeline/YYYY-MM-D
 
 MCP 不可用时由脚本接管，**严禁**每轮把 `launch_persistent_context` 放进 `with sync_playwright()`：脚本退出（含异常）driver 会杀掉浏览器，表单状态全丢、只能整轮重传（0916 期连丢 3 次）。协议：
 
-1. **先起守护进程**（后台任务，全程不退）：`launch_persistent_context(PROFILE, headless=False, args=[..., "--remote-debugging-port=9222"])` + `while True: sleep`。启动前照旧清 `SingletonLock`。模板：`templates/browser_daemon.py`
-2. **后续所有脚本** `p.chromium.connect_over_cdp("http://localhost:9222")` 附着；结束时**只断连**（0915 期结论不变）
+1. **先起守护进程**（后台任务，全程不退）。**🔴 v3.34.0 / 0917 坑 198+199**：
+   - **浏览器本体必须是日常 Chrome** `/Applications/Google Chrome.app`，**禁止** Playwright 自带的 `Google Chrome for Testing`（`chromium-NNNN`）。Testing 版窗口图标/标题不同，扩展和站点行为也不同；0917 用户一眼看出「不是 9 月 10 日那颗」。
+   - **禁止用 Playwright driver 当 daemon 持有浏览器**（`templates/browser_daemon.py` 的 `with sync_playwright() + launch_persistent_context + while True`）。0917 实测：上传页弹窗触发 `Protocol error (Page.handleJavaScriptDialog): No dialog is showing` → driver Node 进程崩 → 浏览器陪葬 → CDP `ECONNREFUSED`。正确做法：裸启 Chrome 进程（无 driver）+ `--remote-debugging-port=9222` + `--user-data-dir=mcp-chrome-10b76e5`，后续脚本 `connect_over_cdp` 附着。
+   - 启动前清 `SingletonLock`。模板已改为裸 Chrome，见 `templates/browser_daemon.py`。
+2. **后续所有脚本** `p.chromium.connect_over_cdp("http://localhost:9222")` 附着；结束时**只断连**（0915 期结论不变）。若报 `Browser context management is not supported`，换一次 attach 或确认 daemon 是裸 Chrome 而非 Testing+driver。
 3. **选页按 URL 匹配**（如 `member.bilibili.com` / `cgi-bin/appmsg`），禁止 `pages[-1]`——daemon 初始的 `about:blank` 空页会顶到最后，导致后续 `ClipboardItem undefined` / `author input not found` 一类假错
 4. **一步一截图**（`/tmp/bili_step.png` + Read 目检），存草稿前全项验收；单脚本失败先看截图诊断再改，不要盲改重跑
 5. **B站标题复核（坑 197）**：native setter + input 事件在 UI 里显示正常（截图确认过全文），但存草稿后**列表仍显示文件名**（0916 实测 `bili_upload`）——存草稿后必须开草稿复核标题字段，不对就用 `locator.fill()` 重填再存
 6. **B站新版分区是级联面板（坑 194）**：`人工智能` 是 `科技数码` 的**子分区**，老路径「点开下拉→JS click 『人工智能』」返回 `not found`（子面板未渲染）。需点「科技数码」父节点 → 等子面板渲染 → 再点「人工智能」。v3.29.0 结构化验收仍要做，但注意 0916 出现过**面板未开时的假阳性 `ok:true`**（选择器在该瞬间没找到 `科技数码` 文本）——验收前先确认面板已收起、以 `innerText` 的 `分区\n人工智能` 正则为最终判据
 7. **B站上传完成信号**：等标题输入框出现（`textarea, input[placeholder*=标题]`）即为表单就绪，勿用「上传成功」文案轮询（0916 轮了 5 分钟没命中）
+8. **🔴 B站存草稿按钮是 `span.submit-draft`（坑 200 / 0917）**：文案「存草稿」，tag=`SPAN` class=`submit-draft`，**不是** `button`。`button:has-text("存草稿")` 恒 count=0；evaluate 点 `button` 也是 no-op。必须 `page.locator('span.submit-draft').click({force:true})` 或坐标点中心。存草稿成功信号仍是草稿箱出现当日标题，**不是** URL 仍停在 `upload/video/frame`。
+9. **🔴 存草稿失败禁止 `goto` 草稿箱（坑 201 / 0917）**：表单未保存时跳去 `upload-manager/article?group=draft` 会把编辑页冲掉（0917 连丢 5 次表单）。失败时**留在表单页**截图诊断；验证草稿用**新标签页**打开草稿箱，不动编辑页。
 
 #### 11.0 处理浏览器锁（自动处理，不询问用户）
 
@@ -2019,9 +2026,10 @@ browser_evaluate("""() => {
 **🔴 重要：所有平台上传一律存草稿，不直接发布！用户确认后再手动发布。**
 
 ```
-browser_click(target=e496)  # 点击「存草稿」
-# 等待页面提示保存成功
-browser_wait_for(time=3)
+# 🔴 v3.34.0：存草稿是 span.submit-draft，不是 button（坑 200）
+page.locator('span.submit-draft').click({force: true})
+# 等待；成功信号 = 新标签打开草稿箱能搜到当日标题
+# 禁止在未确认保存前 page.goto 草稿箱（会冲掉表单，坑 201）
 ```
 
 #### B站上传组件操作总结（v1.4.0 实测）
@@ -2050,12 +2058,15 @@ browser_wait_for(time=3)
 
 **🔴 v3.33.0 / 0916 实测补充（脚本化 Playwright 同样适用）**
 
-1. **登录判据 = 页面出现「新的创作」（坑 195）**。登录页 innerText 是「微信扫一扫，选择公众平台账号登录」——用「扫码/请重新登录」做关键词会漏判（0916 因此空转两轮）。等待循环：`while '新的创作' not in innerText`，10s 轮询、上限 10 分钟，期间提示用户扫码即可全自动续跑。
+1. **登录判据 = 页面出现「新的创作」或英文 UI「New creation」（坑 195 / 0917 补）**。登录页 innerText 是「微信扫一扫，选择公众平台账号登录」——用「扫码/请重新登录」做关键词会漏判（0916 因此空转两轮）。0917 账号后台是英文 UI，首页可见 `New creation` 而不是中文「新的创作」，只搜中文会误判未登录。等待循环：`while not ('新的创作' in t or 'New creation' in t)`，10s 轮询、上限 10 分钟。菜单项 class 仍是 `.new-creation__menu-item`（语言无关）。
 2. **「新的创作→文章」后必须按 URL 找编辑器新标签页**（`cgi-bin/appmsg`），找不到时对同一页重试点击（≤3 次）；禁止取 `pages[-1]`（daemon 的 about:blank 空页会顶到最后 → `ClipboardItem undefined` / `author input not found` 假错）。
 3. **正文占位符插图路径（v3.30 每图即存的完整可复制实现，0916 全量验证 6/6）**：粘贴 HTML 时图片位置写 `<p>PLACEHOLDER_IMG_N</p>`（**封面图占位排最后**）→ 每图：TreeWalker 找占位符文本节点 → `range` 精确选中 → 工具栏「图片→本地上传」→ `setInputFiles` → Escape 关挡层 → **立刻保存草稿** → 断言占位符数递减、`pmLen` 只因占位符消失而下降（每图 ≈17 字）。全部传完占位符必须为 0。
 4. **封面「从正文选择」直接选最后一张缩略图（坑 186 补充）**：封面占位符在正文最末，弹窗缩略图按正文顺序排列 → `items[items.length-1].click()`；后续「下一步 → 编辑封面 → 确认 → 轮询 `.js_cover_preview_new`」与 v3.31.1 流程一致（0916 复验：2 轮轮询内 `display:block + mmbiz`）。
 5. **保存时 Content Structure Check 弹窗**：每步 `保存为草稿` 后扫「继续插入/继续保存」可见按钮点击放行（坑 192 的脚本化等价实现）。
 6. **原创声明跳过不变**（坑 191 / 0915 同款）：不进原创弹窗，直接保存草稿，upload-status.md 备注。
+7. **🔴 剪贴板 write 成功 ≠ 正文进去（坑 202 / 0917）**：`navigator.clipboard.write` 返回 wrote 后，evaluate 派发 click/focus 再 Meta+V 可能 `bodyLen=0`（空态 widget 15 字）。必须 **坐标点击** `.ProseMirror[1]` 中心 → Meta+A → Meta+V → 放行 Structure Check → `bodyLen()>800` 才算粘上。0917 第一轮脚本粘贴失败就是因为没点到正文。
+8. **封面弹窗会挡住编辑器**：从正文选择若正文还没图，会弹出 `Select an image / No available images`。先 Escape/`Cancel` 关掉，再插图；不要在空正文上点封面。
+9. **`appmsgid=` 截断误判**：`log(url[:120])` 可能把 `appmsgid=` 截掉，看起来像 NO_APPMSGID。验收读完整 URL 或 `'appmsgid=' in url`。草稿列表不要用老接口 `appmsg?action=list_ex`（会返回 2019 年稿）。
 
 **🔴 2026-08-13 日报视频实测流程优化（v3.17.0）**——公众号上传建议按以下**已验证顺序**执行，避免踩坑：
 
@@ -5359,7 +5370,56 @@ async function continueInserting(page) {
 **解决**：① 一律 `Array.from(document.querySelectorAll(...))` 再 `.filter()`；② 可见性判定用 `el.offsetParent !== null`（display:none 时为 null）。
 **How to apply:** Phase 12 全部 evaluate 代码
 
+### 🔴 上传 daemon 禁止 Chrome for Testing（v3.34.0 / 2026-09-17，坑 198）
+**问题**：0917 上传 daemon 裸启 Playwright 自带 `chromium-1228/Google Chrome for Testing` + mcp-chrome profile。登录态能用，但窗口图标/标题变成 Testing 版，用户质问「为啥现在起的是 chrome for testing，9 月 10 日不是这样」。
+**解决**：上传 daemon 必须 `/Applications/Google Chrome.app`；Testing 版只允许 linuxdo-daily **抓取**兜底（MCP 断连时 headed 过 Cloudflare）。profile 仍用 `mcp-chrome-10b76e5`。
+**Why:** Testing Chromium 与日常 Chrome 不是同一颗二进制（149 vs 153），扩展/指纹/站点行为有差。
+**How to apply:** `templates/browser_daemon.py`；Phase 11 协议第 1 条。
+
+### 🔴 Playwright driver 不能当 daemon 持有浏览器（v3.34.0 / 2026-09-17，坑 199）
+**问题**：`with sync_playwright() + launch_persistent_context + while True: sleep` 当 daemon。B站上传页弹窗触发 `Protocol error (Page.handleJavaScriptDialog): No dialog is showing` → driver Node 崩 → 浏览器陪葬 → 后续 `connect_over_cdp` `ECONNREFUSED`。0917 连崩两次。
+**解决**：裸启 Chrome 进程（无 Playwright driver）监听 9222；脚本只 `connect_over_cdp` 附着。driver 挂了浏览器还在。
+**Why:** Playwright driver 会接管 dialog 协议，异常时把 browser 一起杀掉，违背「常驻」目标。
+**How to apply:** `templates/browser_daemon.py` 已改为 `subprocess.Popen(CHROME ...)`。
+
+### 🔴 B站存草稿是 span.submit-draft 不是 button（v3.34.0 / 2026-09-17，坑 200）
+**问题**：`button:has-text("存草稿")` 恒 count=0；evaluate 点 `button` 文案匹配也 no-op。表单填完（标题/简介/标签/封面）点了 5 轮「存草稿」，草稿箱一直「当前无草稿」。DOM 实测：`{tag:SPAN, cls:submit-draft, 122×42}`。
+**解决**：`page.locator('span.submit-draft').click({force:true})`；force 仍 timeout 时 `scrollIntoView` + `mouse.click` 中心坐标。成功信号 = 新标签打开草稿箱能搜到当日标题，不是 URL 仍停在 frame。
+**How to apply:** Phase 11.9。
+
+### 🔴 存草稿失败禁止 goto 草稿箱（v3.34.0 / 2026-09-17，坑 201）
+**问题**：未确认保存就 `page.goto(.../article?group=draft)`，编辑页被冲掉。0917 表单填好 5 次，每次验证草稿把编辑页毁了，只能整段重传。
+**解决**：失败留在表单页截图诊断；验证草稿用 **新标签页** 打开草稿箱，不动编辑页。
+**How to apply:** Phase 11.9；任何「先跳走再验证」都先问会不会丢表单。
+
+### 🔴 公众号 clipboard.write 成功 ≠ 正文进去（v3.34.0 / 2026-09-17，坑 202）
+**问题**：`navigator.clipboard.write` 返回 wrote，evaluate 对 `.ProseMirror[1]` 派发 click/focus 再 Meta+V，`bodyLen=0`（空态 widget 15 字）。封面流程在空正文上点「从正文选择」弹出 `Select an image / No available images` 挡住编辑器。
+**解决**：坐标点击 `.ProseMirror[1]` 中心 → Meta+A → Meta+V → 放行 Structure Check → `bodyLen()>800` 才算粘上。封面弹窗先 Escape/`Cancel`。登录判据英文 UI 补 `New creation`。`log(url[:120])` 可能截掉 `appmsgid=`，验收读完整 URL。
+**How to apply:** Phase 12.5 / 12.1。
+
 ## 更新日志
+
+### v3.34.0（2026-09-17）
+基于 **2026-09-17 日报全流程**（linuxdo 362 帖 / 视频 98.2s / 公众号 `appmsgid=100001221` ✅；B站/抖音/视频号用户手动）实测，吸收坑 198–202：
+
+**上传 daemon**
+- 浏览器本体改日常 Chrome；禁止 Chrome for Testing（坑 198）
+- daemon 改为裸 Chrome 进程 + CDP 9222，禁止 Playwright driver 长驻（坑 199）
+- `templates/browser_daemon.py` 重写
+
+**B站**
+- 存草稿点击 `span.submit-draft`（坑 200）
+- 失败禁止 goto 草稿箱冲表单（坑 201）
+
+**公众号**
+- 英文 UI 登录判据 `New creation`
+- 粘贴必须坐标点击正文，`bodyLen>800` 验收（坑 202）
+- 空正文上禁止点封面
+
+**版本**：3.33.0 → 3.34.0
+
+### v3.33.0（2026-09-16）
+基于 **2026-09-16 日报实测** 吸收坑 193–197：浏览器常驻 daemon+CDP、B站级联分区、公众号登录判据「新的创作」、生图中文尾巴乱码、B站标题复核。详见文首 v3.33.0 核心改进。
 
 ### v3.31.1（2026-09-11）
 基于 **2026-09-11 日报全流程**（linuxdo 595 帖；视频 105.81s edge-tts 云扬 + atempo 1.4，mimo 白桦全挂；B站/视频号/抖音**用户人工上传**；公众号 `appmsgid=100001078` ✅；锚点 open_weights 79.73% ∈ [0.7,0.8] ✅）实测，吸收坑 185–190：

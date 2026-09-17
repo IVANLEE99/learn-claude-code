@@ -1,13 +1,14 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 15.8.0
+version: 15.9.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v15.9 核心改进（2026-09-17 日报实测）**：Playwright MCP 断连时改 **Node 直连 Playwright** 抓列表+正文（headed 过 Cloudflare；`page.evaluate` 只传单对象参数）；chromium 路径用本机最新 `chromium-NNNN`，勿写死 1223。全量 **26 批 / 382 帖 0 error**，二次过滤 **362**。
 > **v15.8 核心改进（2026-07-25 日报实测）**：`crawl_js`+`filename` 全量 **33 批 / 489 帖零 error**；中断后以磁盘 `batch_browser_0..N` 为准续跑合并；二次过滤 **455**；PDF 后接 ai-news-factory。
 > **v15.7 核心改进（2026-07-22 日报实测）**：冷启动 archive 用 **Python `shutil.move`**（复杂 bash `for/pkill` 可能被自动模式拦截）；Source B `browser_navigate` 可 60s 超时 → **重试一次**；`crawl_js`+`filename` 批抓全量 31 批零 `ERR_ABORTED`；列表 double-encoded 仍 `json.loads(json.load)`；实测 462 队列 → **440** 有效。
 > **v15.6 核心改进（2026-07-21 日报实测）**：冷启动禁 `rm` 旧 batch（改 **archive 挪移**）；预生成 `data/crawl_js/batch_N.js` + `filename` 批抓；`concepts.json` 是 `{concepts:[]}` 根对象；候选去重读 `data['concepts']`；实测 469 队列 → **447** 有效 / 32 批。
@@ -1363,6 +1364,12 @@ Typst 特殊字符转义规则与日报一致（`$` → `\$`、`#` → `\#`、�
 - **单 Playwright**：批抓阶段禁止并行独立 Chrome 抢 profile（v15.3）
 - **ERR_ABORTED / MCP 静默超时**：重置浏览器、缩小批次、retry 批号（v15.5）
 - **中断续跑（v15.8）**：用户 interrupt 后先盘点 `batch_browser_*.json` 是否已覆盖 queue；**已齐 → 只合并 Writer**，不要清 archive 重抓
+- **MCP 断连兜底（v15.9 / 2026-09-17）**：`claude mcp list` 显示 playwright `Failed to connect` 时，**不要空等 MCP**。用项目脚本 Node 直连 Playwright（参考 `data/_fetch_lists_0917.mjs` + `data/_crawl_0917.mjs`）：
+  1. **headed 默认**（`HEADLESS=1` 才无头）。0917 实测 headless 卡 Cloudflare，「Just a moment」滚 30 次仍 0 rows；headed 后 Source A 750 / B 321。
+  2. `page.evaluate` 在 playwright-core 里**只接受一个参数**。0831 脚本把 `(key, filterSrc)` 拆成两参 → `Too many arguments`，必须包成对象 `{ key, filterSrc }`。
+  3. Chromium 可执行文件**按本机缓存探测**，勿写死 `chromium-1223`（0917 已是 `chromium-1228`）。优先 `~/Library/Caches/ms-playwright/chromium-*/chrome-mac-arm64/.../Google Chrome for Testing` 最新目录。
+  4. 列表+正文共用 **mcp-chrome profile**；每批立即写 `data/batch_browser_N.json`；已存在批次跳过（续跑协议不变）。
+  5. 此兜底**只用于抓取**。上传阶段浏览器必须是日常 Chrome / MCP 会话，禁止把 Chrome for Testing 当上传 daemon（见 ai-news-factory v3.34 坑 198）。
 
 ### ⚠️ 反检测规则（必须遵守）
 1. **逐帖浏览间隔 1.5 秒**
@@ -1450,6 +1457,21 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v15.9.0 (2026-09-17)
+基于 **2026-09-17 全量日报**（过滤后全部抓取完 + 视频工厂联跑）实战：
+
+**MCP 断连兜底（核心）**
+- Playwright MCP `Failed to connect` 时改 Node 直连 Playwright，headed 过 Cloudflare
+- `page.evaluate` 多参会抛 `Too many arguments` → 传对象
+- Chromium 路径探测最新 `chromium-NNNN`，0917 为 1228（旧脚本写死 1223 找不到）
+
+**实测数据（2026-09-17）**
+- Source A 750 + Source B AI 321 → 合并 1043 → 历史去重（ID+近 3 日标题）809 → 公益站 739 → 32h **382** → 正文 26 批 0 error → 二次过滤 **362**
+- `data/daily/2026-09-17.json` total=362 / with_content=362
+- 报告 md + press + typ + pdf；PDF 后接 ai-news-factory（视频 98.2s / 公众号草稿 `appmsgid=100001221`）
+
+**版本**：15.8.0 → 15.9.0
 
 ### v15.8.0 (2026-07-25)
 基于 **2026-07-25 全量日报**（过滤后全部抓取完 + 视频工厂联跑）实战：
