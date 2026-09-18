@@ -1,15 +1,17 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.34.0
+version: 3.35.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.34.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.35.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
 > **🔴 v3.32.0 核心改进（2026-09-15 日报实测）**：**状态判定禁读隐藏节点**——原创声明的 `Undeclared` 是折叠面板内陈旧占位节点的假象，声明其实早已生效，为此空转 6 轮；状态一律以「可见设置行摘要 + 行高」为准，`element.click()` 对 `display:none` 元素照样有效是错觉根因（坑 191）。**正文粘贴必须放行「Content Structure Check」弹窗的 `Continue Inserting`**，并用剥离 `ProseMirror-widget` 的 `bodyLen()` 读长度（空态占位符 `Start text here` 15 字符会污染裸读）（坑 192）。英文 UI 标签集（`Save as draft`/`Confirm`/`image(s)`/`Collections`）与 `Page.captureScreenshot` 须用页面坐标 + `captureBeyondViewport`。
 
+> **🔴 v3.35.0 核心改进（2026-09-17 用户复盘）**：**封面文字源拆分（坑 203）**——封面画面只印「对应封面大字」短句（Hook 原词，1 句冲突 + 1 个数字，两行排版），**禁止**把 `publish.json.title` 整条发布标题（日期+多事件+「N条一次看完」+报刊名）印上画面；`publish.json.title` 仍作 B站/公众号列表标题与渲染文件名。0917 实测：整条标题上画面 = 信息堆叠、冲突稀释、与 Hook 原词脱钩，正是「封面有钩子、开头没用钩子」的反面结构倒过来犯。
+>
 > **🔴 v3.34.0 核心改进（2026-09-17 日报实测）**：**上传 daemon 必须用日常 Chrome，禁止 Chrome for Testing**（坑 198）。Playwright driver 不能当 daemon 持有浏览器——弹窗协议错误会把 driver+浏览器一起打死（坑 199）。B站「存草稿」是 `span.submit-draft` 不是 `button`，点错 5 次草稿箱一直空（坑 200）；失败禁止 `goto` 草稿箱，表单页会被冲掉（坑 201）。公众号英文 UI 登录判据补 `New creation`；`navigator.clipboard.write` 成功 ≠ 正文进去，必须坐标点击正文再 Meta+V，以 `bodyLen>800` 为准（坑 202）。
 >
 > **🔴 v3.33.0 核心改进（2026-09-16 日报实测）**：**上传阶段浏览器必须常驻**——脚本化 Playwright 严禁把 `launch_persistent_context` 放进 `with sync_playwright()`（脚本退出含异常即杀浏览器、表单状态全丢、整轮重传；0916 期连丢 3 次）；先用守护进程持有浏览器（CDP 9222），后续脚本 `connect_over_cdp` 只附着不断连（坑 193）。B站新版投稿页**分区是级联面板**：`人工智能` 是 `科技数码` 的子分区，老的「点开下拉→JS 点选项」不再命中（坑 194）。公众号登录判据 = **页面出现「新的创作」**（登录页文案是「微信扫一扫」，搜「扫码」会漏判）（坑 195）。生图 prompt 里的中文水印尾巴会诱发画面大面积乱码中文，须删掉并显式加 `no text`；主站欠费时 `_003` prism `gpt-image-2` 为实测可用兜底（坑 196）。
@@ -187,7 +189,7 @@ version: 3.34.0
 
 ### 周报封面提示词模板
 
-**🔴 v3.31.0**：周报横/竖封面与日报共用海报风模板，文字源 = `publish.json.title`（`【MM-DD~MM-DD】{核心标题}… | 羊报AI周刊`）。完整提示词见 `templates/cover-prompt.md`，水印品牌 `羊报AI周刊`，日期 `{YYYY-MM-DD} ~ {YYYY-MM-DD}`。禁止再用演播室空镜英文 prompt。
+**🔴 v3.35.0**：周报横/竖封面与日报共用海报风模板，**画面文字源 = 本周深聊大事件对应的「封面大字」短句**（Hook 原词，1 句冲突 + 1 个数字，两行；`publish.json.title` 仍作列表标题不进画面）。完整提示词见 `templates/cover-prompt.md`，水印品牌 `羊报AI周刊`，日期 `{YYYY-MM-DD} ~ {YYYY-MM-DD}`。禁止再用演播室空镜英文 prompt。
 
 ### 周报过滤规则
 
@@ -237,7 +239,7 @@ version: 3.34.0
 
 ### 月报封面提示词模板
 
-**🔴 v3.31.0**：月报横/竖封面与日报共用海报风模板，文字源 = `publish.json.title`（`【YYYY-MM】{核心标题}… | 羊报AI月报`）。完整提示词见 `templates/cover-prompt.md`，水印品牌 `羊报AI月报`，日期 `{YYYY-MM}`。禁止再用演播室空镜英文 prompt。场景图仍可用 `templates/image-prompt-monthly.md`（与封面分离）。
+**🔴 v3.35.0**：月报横/竖封面与日报共用海报风模板，**画面文字源 = 本月最大趋势对应的「封面大字」短句**（Hook 原词，两行；`publish.json.title` 仍作列表标题不进画面）。完整提示词见 `templates/cover-prompt.md`，水印品牌 `羊报AI月报`，日期 `{YYYY-MM}`。禁止再用演播室空镜英文 prompt。场景图仍可用 `templates/image-prompt-monthly.md`（与封面分离）。
 
 ### 月报选材规则（最关键，区别于周报）
 
@@ -1034,9 +1036,9 @@ curl -s --resolve api.luka77.cc:443:$REAL_IP ...
 
 **🔴 重要优化：封面生成耗时较长（每个约 30-60s），应与 TTS 配音并行执行！**
 
-**🔴 v3.31.0 封面主路径 = 极简中文科技资讯海报**（0910 用户确认可行）：横 `horizontal-4-3.png`、竖 `vertical-3-4.png` **都按** `templates/cover-prompt.md` 出图，文字源 = **发布标题** `publish.json.title`（与 B站/公众号标题同形）。禁止再用演播室空镜 / news desk 英文 prompt 当封面。
+**🔴 v3.35.0 封面主路径 = 极简中文科技资讯海报**（0910 用户确认可行）：横 `horizontal-4-3.png`、竖 `vertical-3-4.png` **都按** `templates/cover-prompt.md` 出图，**画面文字源 = 脚本「对应封面大字」字段**（Hook 原词短句，1 句冲突 + 1 个数字，两行排版）——**禁止**把 `publish.json.title` 整条发布标题印上画面（坑 203 / 0917 复盘：堆叠稀释冲突，与 Hook 脱钩）。`publish.json.title` 仍作 B站/公众号列表标题与渲染文件名。禁止再用演播室空镜 / news desk 英文 prompt 当封面。
 
-**🔴 v3.31.1 封面顺序铁律（坑 190 / 2026-09-11）**：封面文字源单一事实源是 `publish.json.title`，**标题定稿必须早于封面生成**——Phase 10 若改标题，封面文字源不一致，必须 `rm` 旧封面按新标题重出，**禁止沿用旧图**。Phase 5.5 开工前先确认 Phase 10 标题已冻结。
+**🔴 v3.35.0 封面顺序铁律（坑 190 升级）**：封面画面文字的单一事实源是脚本「对应封面大字」字段（= Hook 原词短句），**Hook/封面大字定稿必须早于封面生成**——Phase 2 若改 Hook，必须 `rm` 旧封面按新大字重出，**禁止沿用旧图**。Phase 10 若只改 `publish.json.title`（列表标题）而 Hook 未变，**不需要**重出封面（0917 决策：列表标题与封面文字解耦）。Phase 5.5 开工前先确认 Phase 2 Hook/封面大字已冻结。
 
 **🔴 v3.29.0 日期居中硬要求仍有效**：封面上的日期字段必须**水平居中**（海报风里日期单独一行居中，不是旧演播室中央大白字）。无论 API 出图还是本地 Pillow 叠字，生成后必须 `Read` 视觉校验；不居中即重生成。本地脚本基准：`dx = (tw - dw) // 2`，`dy ≈ int(th * 0.34)`。
 
@@ -1053,10 +1055,11 @@ API_URL = "用户提供的 API URL"  # 优先使用 eo.ioll.pp.ua
 API_KEY = "用户提供的 API Key"
 MODEL = "gpt-image-2"
 
-# 🔴 v3.31.0：完整中文海报模板在 templates/cover-prompt.md
-# 这里只放调用约定。PUBLISH_TITLE 必须 = publish.json.title（或与之同文的 video-script 标题）
+# 🔴 v3.35.0：完整中文海报模板在 templates/cover-prompt.md
+# 这里只放调用约定。COVER_TEXT 必须 = 脚本「对应封面大字」字段（Hook 原词短句，两行），
+# 禁止用 publish.json.title 整条发布标题当画面文字（坑 203）
 COVER_PROMPT_FILE = "templates/cover-prompt.md"
-PUBLISH_TITLE = "{publish.json.title}"   # 例：【2026-09-10】DeepSeek发新模型砍价又IPO，OpenAI算力告急限购Pro | 今日羊报AI
+COVER_TEXT = "OpenAI把降智取消了\n五分钟后直接不给你用"   # 例：Hook 原词，主文案一行 + 数字短句一行
 # 竖版 ratio=3:4 size 优先 1024x1536（接口不认再 1152x1536）
 # 横版 ratio=4:3 size 优先 1536x1152（接口不认再 1536x1024）
 # 端点：settings.json GEN_IMG_API_URL 起，失败走 _001/_002/_003；日志禁打印 key
@@ -1636,9 +1639,9 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 | B站/通用 | 4:3 | 1536x1152 | `horizontal-4-3.png` | B站投稿封面、公众号/视频号横版 |
 | 抖音/竖版 | 3:4 | 1152x1536 | `vertical-3-4.png` | 抖音封面、抖音个人主页卡片、公众号/视频号竖版 |
 
-**封面模板 Prompt**（**v3.31.0 单一事实源**：`templates/cover-prompt.md`）：
+**封面模板 Prompt**（**v3.35.0 单一事实源**：`templates/cover-prompt.md`）：
 
-- 横/竖封面都用海报风中文模板，**文字源 = `publish.json.title`**（禁止用 Hook 短句或「对应封面大字」顶替）
+- 横/竖封面都用海报风中文模板，**画面文字源 = 脚本「对应封面大字」字段**（Hook 原词短句，1 句冲突 + 1 个数字，两行；坑 203：`publish.json.title` 整条发布标题禁止印上画面，它只作列表标题）
 - 日报水印 `今日羊报AI`；周报 `羊报AI周刊`；月报 `羊报AI月报`
 - 日期字段按模式映射表；日期单独一行且水平居中
 - 生成后 `Read` PNG 对照 `cover-prompt.md` 验收清单，缺一项重出
@@ -5397,7 +5400,21 @@ async function continueInserting(page) {
 **解决**：坐标点击 `.ProseMirror[1]` 中心 → Meta+A → Meta+V → 放行 Structure Check → `bodyLen()>800` 才算粘上。封面弹窗先 Escape/`Cancel`。登录判据英文 UI 补 `New creation`。`log(url[:120])` 可能截掉 `appmsgid=`，验收读完整 URL。
 **How to apply:** Phase 12.5 / 12.1。
 
+### 🔴 封面文字源拆分：发布标题不进画面（v3.35.0 / 2026-09-17，坑 203）
+**问题**：v3.31.0 规定封面文字源 = `publish.json.title` 整条发布标题。0917 画面印的是「【2026-09-17】Gemini实时多模态上线,OpenAI风控改明着拦｜6条重磅AI新闻一次看完 | 今日羊报AI」——日期 + 两事件 + 条数 + 报刊名全堆上画面，与 Hook 原词（「OpenAI把降智取消了，现在直接不给你用」）脱钩，冲突被稀释。用户复盘判定不吸引人，违反「封面 = 1 句冲突 + 1 个数字」与「封面大字 = Hook 原词」两条自家规则。
+**解决**：封面画面文字源改为脚本「对应封面大字」字段（Hook 原词短句，两行，主文案 + 数字短句）；`publish.json.title` 仍作 B站/公众号列表标题与渲染文件名，**列表标题与封面文字解耦**——Phase 10 改列表标题不触发封面重出，改 Hook 才触发。
+**How to apply:** `templates/cover-prompt.md` v3.35.0；Phase 5.5 / 10.1；验收清单第一项改为「画面标题 = 对应封面大字（Hook 原词）」。
+
 ## 更新日志
+
+### v3.35.0（2026-09-17 用户复盘）
+**封面文字源拆分（坑 203）**：
+- 封面画面 = 「对应封面大字」Hook 原词短句（1 句冲突 + 1 个数字，两行）；`publish.json.title` 只作列表标题
+- 0917 实例：画面印「OpenAI把降智取消了 / 五分钟后直接不给你用」，发布标题仍是原长标题
+- `templates/cover-prompt.md` 重写文字源节 + 验收清单；Phase 5.5/10.1/周报/月报封面段同步
+- 时序铁律改写：Hook/封面大字定稿早于封面生成；改列表标题不重出封面，改 Hook 才重出
+
+**版本**：3.34.0 → 3.35.0
 
 ### v3.34.0（2026-09-17）
 基于 **2026-09-17 日报全流程**（linuxdo 362 帖 / 视频 98.2s / 公众号 `appmsgid=100001221` ✅；B站/抖音/视频号用户手动）实测，吸收坑 198–202：
