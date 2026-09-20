@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""字幕生成 v3.25.0 — 语义切行 + whisper 词级对齐
+"""字幕生成 v3.36.0 — 语义切行 + whisper 词级对齐
 
 内容 100% 来自脚本，时间 100% 来自音频。禁止按字数比例切时间轴。
 切行规则见同目录 captions.md。
@@ -300,7 +300,8 @@ def load_scenes(report_dir: Path):
                     items.append((sid, text))
             else:
                 items.append((i, item))
-        items.sort(key=lambda x: x[0])
+        # list 本身就是播放顺序，禁止按 sid 再排序；否则 [1,2,3,4,6,5,7]
+        # 这类锚点重排会被静默还原。dict 才按 key 排序（见上支）。
     vo_dir = report_dir / 'voiceover'
     pub_dir = ROOT / 'news-pipeline/video-project/public/voiceover'
     out = []

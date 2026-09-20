@@ -1,13 +1,14 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 15.9.0
+version: 16.0.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v16.0 核心改进（2026-09-18～09-20 三期全量日报实测）**：把 v15.9 的 Node 直连 Playwright 从临时兜底升级为**可复用全量抓取协议**：脚本必须按当期日期复制/参数化（禁止只改文件名却保留 0917 注释与固定 cutoff）；32h 窗口基准默认固定为当期 **00:05 CST**，禁止用脚本实际启动时间 `datetime.now()` 漂移；最近 3 日标题去重必须做**规范化比较**，不只精确字符串；每批结果写临时文件后原子替换，避免中断留下半截 JSON；冷启动归档目录已存在时不得 `shutil.rmtree` 覆盖，须生成唯一目录。0918：422→400；0919：414（413 valid/1 error）→400；0920：326→316。安全分类器不可用时只读命令仍可过，非只读任务暂停并改用 Write/Edit 落盘，恢复后从磁盘 batch 续跑。
 > **v15.9 核心改进（2026-09-17 日报实测）**：Playwright MCP 断连时改 **Node 直连 Playwright** 抓列表+正文（headed 过 Cloudflare；`page.evaluate` 只传单对象参数）；chromium 路径用本机最新 `chromium-NNNN`，勿写死 1223。全量 **26 批 / 382 帖 0 error**，二次过滤 **362**。
 > **v15.8 核心改进（2026-07-25 日报实测）**：`crawl_js`+`filename` 全量 **33 批 / 489 帖零 error**；中断后以磁盘 `batch_browser_0..N` 为准续跑合并；二次过滤 **455**；PDF 后接 ai-news-factory。
 > **v15.7 核心改进（2026-07-22 日报实测）**：冷启动 archive 用 **Python `shutil.move`**（复杂 bash `for/pkill` 可能被自动模式拦截）；Source B `browser_navigate` 可 60s 超时 → **重试一次**；`crawl_js`+`filename` 批抓全量 31 批零 `ERR_ABORTED`；列表 double-encoded 仍 `json.loads(json.load)`；实测 462 队列 → **440** 有效。
@@ -1370,6 +1371,12 @@ Typst 特殊字符转义规则与日报一致（`$` → `\$`、`#` → `\#`、�
   3. Chromium 可执行文件**按本机缓存探测**，勿写死 `chromium-1223`（0917 已是 `chromium-1228`）。优先 `~/Library/Caches/ms-playwright/chromium-*/chrome-mac-arm64/.../Google Chrome for Testing` 最新目录。
   4. 列表+正文共用 **mcp-chrome profile**；每批立即写 `data/batch_browser_N.json`；已存在批次跳过（续跑协议不变）。
   5. 此兜底**只用于抓取**。上传阶段浏览器必须是日常 Chrome / MCP 会话，禁止把 Chrome for Testing 当上传 daemon（见 ai-news-factory v3.34 坑 198）。
+- **Node 直连全量协议（v16.0 / 2026-09-18～09-20）**：连续三期使用后，Node 路径从临时兜底升级为可复用方案，但必须满足以下约束：
+  1. **当期日期是显式参数/常量**：文件名、头部注释、Usage、queue 的 `date/base/cutoff`、batch 元数据必须同源；复制 `_0917` 脚本后要全量搜索旧日期，禁止只改文件名。
+  2. **32h 窗口固定按当期 00:05 CST**：`base = datetime(Y, M, D, 0, 5, tzinfo=CST)`，`cutoff = base - timedelta(hours=32)`；禁止用脚本实际启动时的 `datetime.now()`，否则 00:05 之后恢复任务会无意缩短窗口（0920 实测启动较晚，cutoff 漂到 16:34）。
+  3. **正文批次原子保存**：先写同目录 `batch_browser_N.json.tmp`，写完并 `JSON.parse` 自检后 `renameSync(tmp, outfile)`；中断不得留下可被续跑误认成完整批次的半截 JSON。
+  4. **跳过已有批次前验完整性**：至少校验 `date`、`batch`、`complete=true`、`ids` 与本批期望 ID 完全一致、`results.length === ids.length`；旧格式缺元数据时只能经人工盘点确认，不得见文件就跳过。
+  5. **进程结束前补抓 error**：单帖 error 不计入 valid/with_content；先生成 retry 批并立即保存，再合并。0919 的 414 帖中 valid=413/error=1，日报最终 400，不可把 error 当正文成功。
 
 ### ⚠️ 反检测规则（必须遵守）
 1. **逐帖浏览间隔 1.5 秒**
@@ -1389,10 +1396,14 @@ Typst 特殊字符转义规则与日报一致（`$` → `\$`、`#` → `\#`、�
 > **正确做法：挪移归档，不要删；优先 Python `shutil.move`。**
 
 ```python
-# 推荐（v15.7）：Python 归档，避免 bash 复杂清理被拒
+# 推荐（v16.0）：只增不删的唯一归档目录；禁止覆盖已有归档
 import os, glob, shutil
-dst = 'data/archive/YYYY-MM-DD-prev'  # 换成当日日期
-os.makedirs(dst, exist_ok=True)
+base = 'data/archive/YYYY-MM-DD-prev'  # 换成当日日期
+idx, dst = 1, base
+while os.path.exists(dst):
+    dst = f'{base}-{idx:02d}'
+    idx += 1
+os.makedirs(dst)  # 唯一路径，不用 exist_ok=True 掩盖冲突
 patterns = [
     'data/batch_browser_*.json', 'data/batch_ids_*.json', 'data/rem_batch_*.json',
     'data/crawl_queue*.json', 'data/remaining_todo.json',
@@ -1403,12 +1414,12 @@ for pat in patterns:
         if os.path.isfile(f):
             shutil.move(f, os.path.join(dst, os.path.basename(f)))
 if os.path.isdir('data/crawl_js'):
-    target = os.path.join(dst, 'crawl_js')
-    if os.path.exists(target):
-        shutil.rmtree(target)
-    shutil.move('data/crawl_js', target)
+    shutil.move('data/crawl_js', os.path.join(dst, 'crawl_js'))
+print('archive:', dst)
 print('remaining batch_browser:', len(glob.glob('data/batch_browser_*.json')))  # 期望 0
 ```
+
+> **🔴 v16.0 归档铁律**：`data/archive/YYYY-MM-DD-prev` 已存在时，创建 `-01`、`-02`……唯一目录。禁止 `shutil.rmtree(target)`、禁止把同名文件覆盖进旧归档；先前 `_archive_prev.py` 的「target 存在就删掉」写法会破坏历史断点。
 
 ```bash
 # 浏览器重置与归档拆开（减少权限连坐）
@@ -1457,6 +1468,32 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.0.0 (2026-09-18～2026-09-20)
+基于 **连续三期全量日报**（过滤后全部抓取完 + 视频工厂联跑）实战，将 v15.9 的 Node 直连 Playwright 从临时兜底固化为可复用协议：
+
+**日期与去重（核心）**
+- 32h 窗口统一以当期 **00:05 CST** 为基准：`base = YYYY-MM-DD 00:05+08:00`，禁止用脚本实际启动时间 `datetime.now()`；0920 恢复较晚导致旧脚本 cutoff 漂到 16:34，是明确反例
+- 最近 3 日标题先规范化再比对：去空白、标点、大小写与全/半角差异；禁止只做原始字符串精确相等
+- `_fetch_lists_YYYY.mjs` / `_build_queue_YYYY.py` / `_crawl_YYYY.mjs` 的日期、Usage、queue 元数据必须同源；复制旧脚本后全量搜索旧日期
+
+**批次持久化与续跑**
+- 每批先写 `.tmp`，JSON 自检通过后原子 `rename` 为 `batch_browser_N.json`
+- 已有批次只有在 `date`、`batch`、`complete=true`、`ids`、`results.length` 全部匹配时才可跳过；不能再以“文件存在”为唯一判据
+- error 帖先生成 retry 批并立即保存，再合并；error 不计入 `valid` / `with_content`
+- 冷启动归档目录冲突时创建 `-01/-02` 唯一路径，禁止 `shutil.rmtree` 覆盖既有归档
+
+**环境降级**
+- 安全分类器不可用时，只读命令可继续；`python3`、Node 抓取、Cron 等非只读动作暂停并间隔重试
+- 等待期间用 Write/Edit 更新状态和文档；恢复后先盘点磁盘 batch，再从缺口续跑，禁止重抓已完整批次
+
+**实测数据**
+- 2026-09-18：双源合并 993 → 历史去重 894 → 公益站过滤 833 → 32h **422** → 29 批 0 error → 二次过滤 **400**
+- 2026-09-19：双源合并 951 → 历史去重 768 → 公益站过滤 713 → 32h **414** → 28 批（valid 413 / error 1）→ 二次过滤 **400**
+- 2026-09-20：双源合并 995 → 历史 ID/标题去重 887/707 → 公益站过滤 652 → 32h **326** → 22 批 0 error → 二次过滤 **316**
+- 三期均完成 daily + report + press + typ + PDF，并在 PDF 落盘后交给 ai-news-factory
+
+**版本**：15.9.0 → 16.0.0
 
 ### v15.9.0 (2026-09-17)
 基于 **2026-09-17 全量日报**（过滤后全部抓取完 + 视频工厂联跑）实战：

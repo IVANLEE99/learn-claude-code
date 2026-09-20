@@ -1397,7 +1397,7 @@ ffmpeg -y -i /tmp/sceneN_edge.mp3 -filter:a atempo=1.4 \
 > **可运行脚本**：`templates/gen_captions.py`（`--report-dir` / `--dry-run` / `--extra-word`）
 
 > **🔴 v3.36.0 输入契约（坑 208，2026-09-18/19 实测）**：
-> - `load_scenes` 已兼容三种 `scenes` 写法：`{"scenes":{1:"text"}}` / `{"scenes":["text"]}` / `{"scenes":[{"num":1,"text":"..."}]}`。0918 在第三种上直接崩（`AttributeError: 'dict' object has no attribute 'decode'`），**不要再手工造 `scenes-meta.json` 绕过**，直接跑即可。
+> - `load_scenes` 已兼容三种 `scenes` 写法：`{"scenes":{1:"text"}}` / `{"scenes":["text"]}` / `{"scenes":[{"num":1,"text":"..."}]}`。dict 按 sid 排序；**list 保留声明顺序**，因此 `[1,2,3,4,6,5,7]` 这类锚点重排不会被还原。0918 在第三种上直接崩（`AttributeError: 'dict' object has no attribute 'decode'`），标准顺序无需再手工造 `scenes-meta.json`；需要额外 duration 元数据时仍可保留该文件。
 > - 场景偏移按 **wav 文件实际时长**累加（含片尾 pad 静音），**不用** whisper 的 `info.duration`——VAD 会裁掉尾部静音，用它推偏移会让后面每个场景的字幕整体提前，越往后越明显。脚本会打印 `offset += file_dur=X (whisper Y)` 供对账。
 > - 该偏移必须与 `Composition.tsx` 的 `sceneConfig.duration`（ffprobe 实测）**同一批音频**，重跑 TTS 后两者一起刷。
 
@@ -5423,7 +5423,7 @@ async function continueInserting(page) {
 
 ### 🔴 gen_captions 的 scenes 结构兼容 + 偏移按 wav 时长（v3.36.0 / 2026-09-18、09-19 实测，坑 208）
 **问题**：① 0918 跑 Phase 7 时 `templates/gen_captions.py` 直接崩：`AttributeError: 'dict' object has no attribute 'decode'`——`load_scenes` 读 `scripts/voiceover-texts.json` 时，`scenes` 是 `[{"num":1,"text":"..."}]` 字典列表，代码 `for i, text in enumerate(raw, 1)` 把 dict 当字符串迭代传进 `normalize()`，整段字幕阶段卡死。② 0919 发现字幕逐场景累计提前：`scene_offset += dur`（whisper 的 `info.duration`）而 whisper VAD 会裁掉片尾 pad 静音，返回时长比 wav 短 0.3–3s，偏移越往后欠得越多。
-**解决**：① `load_scenes` 兼容三种写法——`{"scenes":{1:"text"}}`、`{"scenes":["text"]}`、`{"scenes":[{"num"/"id","text"/"content"}]}`，统一归一到 `(sid, text)` 并按 sid 排序。② 偏移改用 **wav 文件头时长**：`with wave.open(str(audio)) as wf: file_dur = wf.getnframes()/wf.getframerate()`，失败才回落 `sc['duration']` 或 whisper `dur`；打印 `offset += file_dur=X (whisper Y)` 便于对账。
+**解决**：① `load_scenes` 兼容三种写法——`{"scenes":{1:"text"}}`、`{"scenes":["text"]}`、`{"scenes":[{"num"/"id","text"/"content"}]}`，统一归一到 `(sid, text)`；**dict 按 sid 排序，list 保留声明的播放顺序**（禁止把 `[1,2,3,4,6,5,7]` 静默还原）。② 偏移改用 **wav 文件头时长**：`with wave.open(str(audio)) as wf: file_dur = wf.getnframes()/wf.getframerate()`，失败才回落 `sc['duration']` 或 whisper `dur`；打印 `offset += file_dur=X (whisper Y)` 便于对账。
 **Why:** 字幕偏移必须与 `Composition.tsx` 的 `sceneConfig.duration`（ffprobe 实测）同源；whisper 的 duration 是「语音结束时刻」，不是「场景结束时刻」，两者差一个 pad 静音。
 **How to apply:** `templates/gen_captions.py`（v3.36.0 已双向同步）；Phase 7。当 `scenes-meta.json` 缺失时**不再需要手工补文件**——`voiceover-texts.json` 直读即可。
 
@@ -5433,7 +5433,7 @@ async function continueInserting(page) {
 **Why:** 锚点占比只取决于「锚点场景的起始时刻 / 总时长」，与场景编号无关；交换相邻位置即可，成本远低于重写。
 **How to apply:** Phase 8 核算后、Phase 9 渲染前。重排后必须重新生成 captions（内容不变，时间轴按新顺序重算）。
 
-###  TTS 端点 key 全失效时直接走 edge-tts，不要逐个试（v3.36.0 / 2026-09-18 实测，坑 210）
+### 🔴 TTS 端点 key 全失效时直接走 edge-tts，不要逐个试（v3.36.0 / 2026-09-18 实测，坑 210）
 **问题**：0918 期 mimo-tts 全部端点返回 `Invalid API Key`（`settings.json` 里的 MIMO key 整体失效）。逐个端点重试纯属浪费——0916 / 0917 / 0918 连续三期都是同一结果。
 **解决**：`scripts/gen_tts.py`（mimo 路径）**先探一次**，任一端点返回鉴权类错误（`Invalid API Key` / 401 / 403）就立即切 `gen_tts_edge.py`（`zh-CN-YunyangNeural` + ffmpeg `atempo=1.4` → 24kHz PCM16LE 单声道 WAV），不要循环重试。
 **Why:** 三期连续同一现象说明是账号侧 key 失效而非端点抖动；edge-tts 已验证连续可用且音色稳定（云扬），时长由 atempo 统一缩放。
