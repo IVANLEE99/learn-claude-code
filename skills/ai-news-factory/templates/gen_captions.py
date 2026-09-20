@@ -286,8 +286,21 @@ def load_scenes(report_dir: Path):
                 items.append((int(k), text))
         items.sort()
     else:
-        for i, text in enumerate(raw, 1):
-            items.append((i, text))
+        # 0918 实测：scenes 也可能是 [{"num": 1, "text": "..."}]（步进脚本常见写法）。
+        # 直接当文本迭代会抛 AttributeError: 'dict' object has no attribute 'decode'，
+        # 整个字幕阶段卡死。这里统一兼容 dict-item / 纯文本两种元素。
+        for i, item in enumerate(raw, 1):
+            if isinstance(item, dict):
+                try:
+                    sid = int(item.get('num', item.get('id', i)))
+                except (TypeError, ValueError):
+                    sid = i
+                text = item.get('text') or item.get('content') or ''
+                if text:
+                    items.append((sid, text))
+            else:
+                items.append((i, item))
+        items.sort(key=lambda x: x[0])
     vo_dir = report_dir / 'voiceover'
     pub_dir = ROOT / 'news-pipeline/video-project/public/voiceover'
     out = []
@@ -361,7 +374,19 @@ def main():
             c['endMs'] = int((c['end'] + scene_offset) * 1000)
             c['timestampMs'] = c['startMs']
             all_caps.append(c)
-        scene_offset += dur if dur else sc['duration']
+        # 0919 实测：偏移必须用 **wav 文件实际时长**（含片尾 pad 静音）累加。
+        # whisper 的 VAD 会把尾部静音裁掉，返回的 dur 偏小 → 后续所有场景字幕整体提前，
+        # 越往后越明显。ffprobe 记进 scenes-meta.json 的 duration 与 wav 时长一致，
+        # 故以 wav 文件头为准最稳。
+        file_dur = sc['duration'] or dur
+        try:
+            import wave as _wave
+            with _wave.open(str(audio), 'rb') as wf:
+                file_dur = wf.getnframes() / float(wf.getframerate())
+        except Exception:
+            pass
+        print(f'  offset += file_dur={file_dur:.2f}s (whisper {adur:.2f}s)')
+        scene_offset += file_dur
 
     out_path = report_dir / 'captions' / 'captions.json'
     out_path.parent.mkdir(parents=True, exist_ok=True)
