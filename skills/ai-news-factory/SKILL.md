@@ -1,13 +1,15 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.37.0
+version: 3.38.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.37.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.38.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.38.0 核心改进（2026-09-21 日报实测）**：**B站封面编辑器已改版为「封面制作」全屏弹窗（坑 218）**——点「添加封面」**不再触发原生 file chooser**（`expect_file_chooser` 必超时），而是打开带「智能生成封面/模板/文字/贴纸/滤镜」的封面编辑器；自制图路径 = 弹窗内点「上传封面」→ `input[accept="image/png, image/jpeg"]` → `set_input_files` → 点 `.cover-editor-button .button.submit`（文案「完成」）关弹窗。⚠️ 此刻页面上有 5 个 `input[type=file]`（`.mp4`×2 / `.txt` / `.zip` / 封面 image），**只有 accept 含 `image` 的那个是封面**；按索引 `inputs[1]`/`inputs[-1]` 会喂给视频或 zip input 且**全程静默无报错**（0921 连错两次，表单纹丝不动）。**B站标签区上限 10 且会被推荐标签污染（坑 219）**——新版投稿页自动预置「学习/生活记录/记录」等 chips，必须清理；关闭符 `×` 在 `label-item-v2-container` 容器**最右侧**（点文字元素无效，0921 空转三轮），清理与新增后都要回读 `.label-item-v2-container` 文本列表断言，不能只信脚本打印的 "added"。**mp 上传脚本 `open` 步骤必须 settle()（坑 217）**——`goto('https://mp.weixin.qq.com/')` 在已登录时 302 到 `cgi-bin/home?...token=`，紧接的 `page.evaluate` 抛 `Execution context was destroyed` 直接崩掉整步；正确做法：若当前页已在带 `token=` 的 mp 页就**跳过 goto**，否则 goto 后先 `settle()`（轮询 body 直到可读）再判「新的创作」。**上传脚本读封面一律读日期目录根**（`gen_images.py` 写的是 `images/` 子目录，Phase 11 前必须 `cp images/horizontal-4-3.png images/vertical-3-4.png` 到 `news-pipeline/YYYY-MM-DD/`）。
+>
 > **🔴 v3.37.0 核心改进（2026-09-20 日报实测）**：**公众号验收必须同时查「草稿箱」与「发表记录」**——用户会在流水线存完草稿后**自行发表**，此时草稿箱里当日条目消失、发表记录里出现「今天 HH:MM 已发表」。只查草稿箱会误判「草稿丢了」并触发重建，正好撞上「`appmsgid` 出现即禁止重建」铁律，产出重复稿（坑 212）。**mp 页面 `page.goto` 会 302 到带 `token=` 的 home 并销毁 execution context**，`page.evaluate` 抛 `Execution context was destroyed`；草稿箱/发表记录都有稳定 URL，**用 URL 导航而非点击侧栏**（坑 213）。**Chrome 窗口被用户关掉后进程仍在**，CDP `/json/list` 返回 `[]`，Playwright `connect_over_cdp` 报 `Browser context management is not supported`——用 `curl -X PUT http://localhost:9222/json/new?about:blank` 建标签页即可恢复，**不必重启 daemon**（坑 214）。**用户声明「某平台我已手动上传」时，该平台一律不打开上传页、不开草稿箱核验**（Phase 14.0-pre 从抖音扩展到全部平台，坑 215）。**安全分类器不可用会阻塞全部非只读 Bash（含 `python3`、`CronCreate`）**，只读命令仍可过；对策是拆单命令 + 间隔重试，同时用不受影响的 `Write` 工具落盘状态（坑 216）。
 >
 > **🔴 v3.36.0 核心改进（2026-09-18 / 09-19 日报实测）**：**字幕偏移必须按 wav 文件实际时长累加**——whisper 的 VAD 会裁掉片尾 pad 静音，返回的 `dur` 偏小，用它推 `scene_offset` 会让后面所有场景字幕整体提前、越往后越明显；改用 `wave.open(...).getnframes()/framerate()`，与 `sceneConfig.duration` 同源（坑 208）。`gen_captions.py` 的 `load_scenes` 已兼容 `{scenes:[{num,text}]}` 字典列表写法——0918 直接按文本迭代该结构抛 `AttributeError: 'dict' object has no attribute 'decode'`，整段字幕卡死（坑 208）。**锚点位置是事后可调参数**：若锚点场景起始占比 >80%，重排播放顺序（如 `[1,2,3,4,6,5,7]`）即可拉回 70–80%，不必重写脚本（坑 209）。**TTS 端点在 key 全失效时不要逐个试**：`settings.json` 里 MIMO key 全部 `Invalid API Key` 时直接走 `gen_tts_edge.py`（edge-tts 云扬 + atempo 1.4），0916/0917/0918 连续三期一致（坑 210）。
@@ -1867,6 +1869,9 @@ MCP 不可用时由脚本接管，**严禁**每轮把 `launch_persistent_context
 7. **B站上传完成信号**：等标题输入框出现（`textarea, input[placeholder*=标题]`）即为表单就绪，勿用「上传成功」文案轮询（0916 轮了 5 分钟没命中）
 8. **🔴 B站存草稿按钮是 `span.submit-draft`（坑 200 / 0917）**：文案「存草稿」，tag=`SPAN` class=`submit-draft`，**不是** `button`。`button:has-text("存草稿")` 恒 count=0；evaluate 点 `button` 也是 no-op。必须 `page.locator('span.submit-draft').click({force:true})` 或坐标点中心。存草稿成功信号仍是草稿箱出现当日标题，**不是** URL 仍停在 `upload/video/frame`。
 9. **🔴 存草稿失败禁止 `goto` 草稿箱（坑 201 / 0917）**：表单未保存时跳去 `upload-manager/article?group=draft` 会把编辑页冲掉（0917 连丢 5 次表单）。失败时**留在表单页**截图诊断；验证草稿用**新标签页**打开草稿箱，不动编辑页。
+10. **🔴 B站封面已改版为「封面制作」全屏弹窗（坑 218 / 0921）**：点「添加封面」**不再触发原生 file chooser**（`expect_file_chooser` 必超时，0921 白等两轮）；路径 = 弹窗内点「上传封面」→ 取 **`accept` 含 `image` 的 input** `set_input_files` → 点 `.cover-editor-button .button.submit`（文案「完成」）。**此刻页面共 5 个 `input[type=file]`（`.mp4`×2 / `.txt` / `.zip` / 封面 image），按索引 `inputs[1]`/`inputs[-1]` 会把 png 喂给视频或 zip input——不报错、表单纹丝不动**（0921 连错两次）。可复用 `templates/bili_cover.py`；三步顺序铁律：**先上传封面 + set_files，再点「完成」**（先点完成只关空弹窗）。
+11. **🔴 B站标签上限 10 且会被推荐标签污染（坑 219 / 0921）**：投稿页自动预置「学习 / 生活记录 / 记录」等无关 chips，占满额度后新增**静默丢弃**（弹出「允许添加的标签已经达到上限了」）。先删预置再补自己的；删除 `×` 在 `label-item-v2-container` 容器**最右缘**（点文字元素或容器中心无效，0921 空转三轮）。每次增删后**回读 `.label-item-v2-container` 文本列表断言**，不要只信脚本打印的 "added"。
+12. **🔴 上传前把封面拷到日期目录根（v3.38.0）**：`gen_images.py` 把横/竖封面写进 `news-pipeline/{date}/images/`，而上传脚本读的是**日期目录根**：`cp news-pipeline/{date}/images/horizontal-4-3.png news-pipeline/{date}/images/vertical-3-4.png news-pipeline/{date}/`。漏拷即 `set_input_files` 找不到文件。
 
 #### 11.0 处理浏览器锁（自动处理，不询问用户）
 
@@ -1900,22 +1905,40 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/video/【YYYY-MM-DD】*.mp4")
 
 **🔴 重要**：`browser_click` 使用 `target` 参数（ref 编号）比 `element` 文本描述更可靠。
 
-#### 11.3 上传封面（两步流程）
+#### 11.3 上传封面（🔴 v3.38.0 / 0921 改版：封面制作弹窗）
 
-```
-browser_click(target=e328)  # 点击「封面设置」→ 打开封面编辑弹窗
-browser_click(target=e656)  # 点击「上传封面」→ 触发 file chooser
-browser_file_upload("news-pipeline/YYYY-MM-DD/horizontal-4-3.png")
-browser_click(target=e715)  # 点击「完成」→ 确认封面
+**🔴 坑 218：B站封面编辑器已改版，旧「封面设置 → 原生 file chooser」路径不再成立。**
+
+**前置**：`gen_images.py` 把封面写进 `images/` 子目录，上传脚本读的是日期目录根，先拷平——
+```bash
+cp news-pipeline/YYYY-MM-DD/images/horizontal-4-3.png news-pipeline/YYYY-MM-DD/images/vertical-3-4.png news-pipeline/YYYY-MM-DD/
 ```
 
-**🔴 B站封面 file input 无 image accept（v3.3.0 更新）**：B站的 file input 不包含 image accept 属性，用 `input[accept*="image"]` 找不到。用位置索引：
+**新版流程（脚本化 / CDP 附着，0921 实测通过）**：
+
+1. 滚到封面区，点「添加封面」→ 打开**「封面制作」全屏弹窗**。
+   ⚠️ **不要等 `expect_file_chooser`**：它不是原生 chooser，等 8s 必超时（0921 白等两轮），点完直接进下一步。
+2. 弹窗内点「上传封面」（`span.upload-text`，位于弹窗底部「封面制作」面板）→ 出现封面专用 input。
+3. **按 accept 过滤取 input，禁止按索引**（坑 218 核心）：
 ```javascript
 const inputs = await page.$$('input[type="file"]');
-// inputs[0]: 视频 (.mp4)
-// inputs[1]: 封面 (通过封面设置弹窗触发)
-await inputs[1].setInputFiles('horizontal-4-3.png');
+// 此刻页面上 5 个 file input：视频 .mp4 ×2 / .txt / .zip / 封面 image/png,image/jpeg
+// 按 inputs[1] 或 inputs[-1] 会把 png 喂给视频或 zip input —— 不报错、表单无变化（0921 连错两次）
+let cover = null;
+for (const i of inputs) {
+  const acc = (await i.getAttribute('accept')) || '';
+  if (acc.includes('image')) { cover = i; break; }
+}
+await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 ```
+4. 上传后 4:3（首页推荐）与 16:9（个人空间）两栏**同时预览**（默认勾选「双比例同步改动」）。断言两栏都出现自制图。
+5. 点 `.cover-editor-button .button.submit`（文案「完成」）关弹窗。
+   **顺序铁律**：先「上传封面 + set_files」**再**点「完成」；先点「完成」只会关掉空弹窗，封面不会进表单（0921 实测）。
+6. **关弹窗后必须回表单截图目检**：封面区缩略图 = 自制图（不是系统推荐封面），且「封面制作」标题不再可见。
+
+**可复用脚本**：`templates/bili_cover.py`（CDP 附着，`python3 bili_cover.py YYYY-MM-DD`，自动断言）。
+
+**⚠️ 历史路径（v3.3.0，仅当后台回退旧版时才适用）**：点「封面设置」→「上传封面」→ `file_upload` → 「完成」；旧版封面 file input 无 image accept，只能按位置取 `inputs[1]`。
 
 **⚠️ 实测经验（v3.3.0 / 被 v3.12.0 覆盖）**：旧文档建议「封面不稳就跳过」。**2026-07-25 实测可自动补封面**，见下方 v3.12 草稿编辑页流程；首次投稿若封面失败，可**打开草稿再补**，不要默认放弃。
 
@@ -2004,7 +2027,7 @@ browser_evaluate("""() => {
 }""")
 ```
 
-#### 11.7 填写标签
+#### 11.7 填写标签（🔴 v3.38.0 / 0921 上限与推荐标签污染）
 
 ```
 # 标签输入框: textbox "按回车键Enter创建标签"
@@ -2014,6 +2037,23 @@ for tag in tags:
     browser_type(target=e399, text=tag)
     browser_press_key("Enter")
 ```
+
+**🔴 坑 219：新版投稿页会自动预置推荐标签，且超限静默失败。**
+
+- **上限 10 个**：底部显示「还可以添加 N 个标签」；超限时右上角弹出「允许添加的标签已经达到上限了」，**新增请求被静默丢弃**（脚本里 `Enter` 照常发，标签就是不进）。加标签前先数当前 chips。
+- **推荐标签污染**：页面会预置「学习 / 生活记录 / 记录」等与内容无关的 chips（0921 实测混入 3 个）。发布前必须清理，否则列表页标签不干净。
+- **删除要点**：关闭符 `×` 在 `label-item-v2-container` 容器**最右侧**——点 `label-item-v2-content`（文字元素）或容器中心都**无效**（0921 空转三轮），必须点容器右缘：
+```javascript
+const chips = await page.$$('.label-item-v2-container');
+for (const c of chips) {
+  const name = (await c.innerText()).replace('×','').trim();
+  if (DROP.includes(name)) {
+    const b = await c.boundingBox();
+    await page.mouse.click(b.x + b.width - 10, b.y + b.height / 2);  // 容器右缘，不是中心
+  }
+}
+```
+- **验收铁律**：每次增删后回读 `.label-item-v2-container` 的文本列表断言，**不能只信脚本打印的 "added"**（0921 打印 added 但列表里没进）。最终 chips 列表必须等于 publish.json 的 tags（允许少、不允许脏）。
 
 #### 11.8 加入合集（自定义下拉框）
 
@@ -2051,15 +2091,15 @@ page.locator('span.submit-draft').click({force: true})
 # 禁止在未确认保存前 page.goto 草稿箱（会冲掉表单，坑 201）
 ```
 
-#### B站上传组件操作总结（v1.4.0 实测）
+#### B站上传组件操作总结（v1.4.0 实测；🔴 v3.38.0 / 0921 更新封面行与标签行）
 
 | 组件 | 类型 | 操作方式 | 可靠性 |
 |------|------|----------|--------|
 | 视频上传 | file chooser | `browser_click(ref)` → `file_upload` | ✅ 高 |
-| 封面设置 | 弹窗 | 点击封面设置 → 上传封面 → file_upload → 完成 | ✅ 高 |
+| 封面制作 | **全屏弹窗** | 点「添加封面」→ 弹窗内点「上传封面」→ **按 `accept` 取 image input** `set_input_files` → `.cover-editor-button .button.submit`（「完成」）；**禁 `expect_file_chooser`、禁按索引取 input**（坑 218） | ✅ 高（v3.38.0） |
 | 分区「人工智能」 | **自定义下拉框** | 点击展开 → **JS evaluate 点击「人工智能」**（v3.17 新增，见 11.4）；存草稿前跑结构化验收（heading「分区」相邻 paragraph，禁 body 全文 includes） | ⚠️ 必须用 JS + 验收 |
 | 创作声明 | **自定义下拉框** | 点击 textbox → **JS evaluate 点击选项** | ⚠️ 必须用 JS |
-| 标签 | 输入框 | `type` + `Enter`，最多 10 个 | ✅ 高 |
+| 标签 | 输入框 + chips | `type` + `Enter`；**上限 10**；先清预置推荐 chips（`×` 在 `label-item-v2-container` 右缘）再补；增删后**回读 chips 文本列表断言**（坑 219） | ⚠️ 必须断言 |
 | 简介 | **Quill 编辑器** | **JS 注入 `.ql-editor`** | ⚠️ 必须用 JS |
 | 合集 | **自定义下拉框** | 点击展开 → **JS evaluate 点击选项** | ⚠️ 必须用 JS |
 | 投稿按钮 | 按钮 | `browser_click(ref)` | ✅ 高 |
@@ -2068,8 +2108,9 @@ page.locator('span.submit-draft').click({force: true})
 1. **`browser_click(target=ref编号)` 比 `browser_click(element=文本描述)` 更可靠**
 2. **所有自定义下拉框（分区、创作声明、合集）必须用 `browser_evaluate` + JS 点击**
 3. **Quill 编辑器必须用 JS 注入 `innerHTML` + dispatch `input` 事件**
-4. **`browser_file_upload` 必须在 file chooser 对话框打开后才能调用**
-5. **封面上传是两步流程：先点「封面设置」打开弹窗，再点「上传封面」触发 file chooser**
+4. **`browser_file_upload` 必须在 file chooser 对话框打开后才能调用**（🔴 v3.38.0：**B站封面已不走原生 chooser**，本条只剩视频输入适用）
+5. **🔴 封面上传（v3.38.0 改版）：点「添加封面」→ 打开「封面制作」全屏弹窗 → 弹窗内点「上传封面」→ 按 `accept` 取 image input `set_files` → 点「完成」关弹窗**。顺序不可换（先点完成只关空弹窗）；**禁 `expect_file_chooser`（必超时）、禁按索引取 input（会喂给 .mp4/.zip 且静默无报错）**。详见 11.3 与 `templates/bili_cover.py`
+6. **🔴 标签（坑 219）：先清预置推荐 chips（学习/生活记录/记录）再补自己的；`×` 在 `label-item-v2-container` 右缘；每次增删后回读 chips 文本列表断言，不信脚本打印**
 
 ### Phase 12: 微信公众号自动上传（Playwright MCP）
 
@@ -2086,6 +2127,16 @@ page.locator('span.submit-draft').click({force: true})
 7. **🔴 剪贴板 write 成功 ≠ 正文进去（坑 202 / 0917）**：`navigator.clipboard.write` 返回 wrote 后，evaluate 派发 click/focus 再 Meta+V 可能 `bodyLen=0`（空态 widget 15 字）。必须 **坐标点击** `.ProseMirror[1]` 中心 → Meta+A → Meta+V → 放行 Structure Check → `bodyLen()>800` 才算粘上。0917 第一轮脚本粘贴失败就是因为没点到正文。
 8. **封面弹窗会挡住编辑器**：从正文选择若正文还没图，会弹出 `Select an image / No available images`。先 Escape/`Cancel` 关掉，再插图；不要在空正文上点封面。
 9. **`appmsgid=` 截断误判**：`log(url[:120])` 可能把 `appmsgid=` 截掉，看起来像 NO_APPMSGID。验收读完整 URL 或 `'appmsgid=' in url`。草稿列表不要用老接口 `appmsg?action=list_ex`（会返回 2019 年稿）。
+10. **🔴 `open` 步骤必须先 `settle()`，且已在带 `token=` 的 mp 页时跳过 `goto`（坑 217 / 0921）**：`page.goto('https://mp.weixin.qq.com/')` 在已登录状态下 302 到 `cgi-bin/home?...&token=`，紧接着的 `page.evaluate` 抛 `Execution context was destroyed, most likely because of a navigation` —— **整步崩掉，登录都判不了**。正确写法：
+```python
+page = mp_page(ctx) or ctx.new_page()
+if 'token=' not in (page.url or ''):          # 已在 mp 页就别再 goto
+    page.goto('https://mp.weixin.qq.com/', wait_until='domcontentloaded', timeout=60000)
+home = settle(page)                            # 轮询 body 直到可读（重定向期间 evaluate 会抛）
+if ('新的创作' not in home) and ('New creation' not in home):
+    show_login_and_stop()                      # 判据见坑 195
+```
+`settle(page)` = `for _ in range(20): try: body=page.evaluate('() => document.body.innerText'); if body: return body; except: pass; page.wait_for_timeout(2000)`。点击 `.new-creation__menu-item` 同样要用 try/except + `settle()` 重试（≤3 次），再按 URL 找 `cgi-bin/appmsg` 新标签页。
 
 **🔴 2026-08-13 日报视频实测流程优化（v3.17.0）**——公众号上传建议按以下**已验证顺序**执行，避免踩坑：
 
@@ -3293,6 +3344,9 @@ news-pipeline/
 │   │   └── 【YYYY-MM-DD】*.mp4
 │   ├── horizontal-4-3.png        # 4:3 横版封面（B站/通用）
 │   ├── vertical-3-4.png # 3:4 竖版封面（抖音/视频号/公众号）
+│   │                    # 🔴 v3.38.0: gen_images.py 出图落在 images/ 子目录，
+│   │                    # 上传脚本读的是本层根目录 —— Phase 11 前必须
+│   │                    # cp images/horizontal-4-3.png images/vertical-3-4.png 到此
 │   ├── publish.json            # 多平台发布信息
 │   ├── wechat-article-*.md     # 公众号图文
 │   └── wechat-images/          # 公众号配图
@@ -3715,17 +3769,17 @@ if (checkbox) checkbox.click();
 
 **解决**：`hasWujie=true` 时 `page.locator('wujie-app .single-cover-uploader-wrap input[type=file]')` 直接 `setInputFiles`；弹窗点 `button.weui-desktop-btn_primary`「确认」。未关「编辑个人主页卡片」弹窗会吞掉保存。仅旧 iframe UI 才用 `.edit-btn` + filechooser。
 
-### 🟡 B站封面隐藏 file input（v1.7.0 新增）
-**问题**：B站封面上传的 file input 是隐藏的（`accept: "image/png, image/jpeg"`），且有多个 file input（视频、封面、字幕等）。
+### ⚠️ 已废弃：B站封面隐藏 file input 按索引取（v1.7.0）→ 被坑 218 取代
 
-**解决**：
+> **🔴 v3.38.0 / 0921 作废**：改版后页面上有 **5 个** `input[type=file]`（`.mp4`×2 / `.txt` / `.zip` / 封面 image），按 `inputs[1]` 取会把 png 喂给视频 input 且静默无报错。现行路径见 §11.3 / `templates/bili_cover.py`：**弹窗内点「上传封面」→ 按 `accept` 含 `image` 过滤取 input**。
+
+**问题（v1.7.0 语境）**：B站封面 file input 是隐藏的，且页面上同时存在视频/封面/字幕/素材多个 input。
+
+**解决（已废弃）**：
 ```javascript
+// ⛔ 禁止再用：改版后 inputs 数变 5，inputs[1] 指向视频 input
 const inputs = await page.$$('input[type="file"]');
-// inputs[0]: 视频 (.mp4)
-// inputs[1]: 封面 (image/png, image/jpeg)
-// inputs[2]: 字幕 (.txt)
-// inputs[3]: 素材 (.zip)
-await inputs[1].setInputFiles('horizontal-4-3.png');  // 设置封面
+await inputs[1].setInputFiles('horizontal-4-3.png');   // ⛔ v3.38.0 起禁用
 ```
 
 ### 周报多平台上传流程（v1.9.2 新增）
@@ -3736,7 +3790,7 @@ await inputs[1].setInputFiles('horizontal-4-3.png');  // 设置封面
 1. 导航到 `https://member.bilibili.com/platform/upload/video/frame`
 2. 上传周报视频：`news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/video/【羊报AI周刊】*.mp4`
 3. 标题自动填充：`【羊报AI周刊】... | YYYY-MM-DD~YYYY-MM-DD`
-4. 上传封面：`news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/horizontal-4-3.png`
+4. 上传封面：`news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/horizontal-4-3.png`（🔴 v3.38.0：走 §11.3 / `templates/bili_cover.py`，**禁按索引取 input**）
 5. 设置创作声明：个人观点，仅供参考
 6. 添加标签：羊报AI周刊, AI周报, OpenAI, Anthropic, DeepSeek
 7. 填写简介：本期热点...
@@ -3927,7 +3981,7 @@ browser_run_code_unsafe("""async (page) => {
 
 **🔴 封面上传图标被 SVG 拦截（v3.23.0 / 2026-08-29 实测）**：点封面上传图标时 click 被 SVG 子元素截获（"element intercepts pointer events"）→ 改点上传容器本体 `.semi-upload.upload-BvM5FF`（+ waitForEvent('filechooser') + setFiles）。
 
-**🔴 封面文件落盘位置（v3.23.0 / 2026-08-29 实测）**：封面图实际生成在**日期目录根**（如 `news-pipeline/2026-08-29/horizontal-4-3.png`），**没有 `covers/` 子目录**——脚本传路径时勿假设子目录结构，先 `ls` 确认实际路径再 setFiles。
+**🔴 封面文件落盘位置（v3.23.0 / 2026-08-29 实测；v3.38.0 补充）**：上传脚本读的是**日期目录根**（如 `news-pipeline/2026-08-29/horizontal-4-3.png`），**没有 `covers/` 子目录**。但 `gen_images.py` 出图落在 `images/` 子目录——Phase 11 前必须 `cp images/horizontal-4-3.png images/vertical-3-4.png` 到日期根，先 `ls` 确认实际路径再 setFiles。
 
 **🔴 完成按钮坑（v3.6.0 / 2026-07-17 实测）**：
 - `getByRole('button', { name: '完成' })` **经常 count=0**（弹窗粉按钮不是标准 button role）
@@ -4869,22 +4923,22 @@ try {
 **Why:** 合集选择器是自定义 Vue 组件，匹配规则不稳定
 **How to apply:** Phase 12 公众号合集选择用 try-catch 包裹，失败时 Escape 跳过
 
-### 🔴 B站封面上传 file input 无 image accept（v3.3.0 新增，2026-07-05）
+### ⚠️ 已废弃：B站封面上传 file input 无 image accept（v3.3.0，2026-07-05）→ 被坑 218 取代
 
-**问题**：B站上传页面有 4 个 file input，但没有任何一个的 accept 属性包含 image 类型。之前用 `input[accept*="image"]` 找不到封面 input。
+> **🔴 v3.38.0 / 0921 作废**：新版「封面制作」弹窗打开后**确实存在** `accept="image/png, image/jpeg"` 的封面 input；下面「按 `inputs[1]` 索引取」的做法在改版后**会把 png 喂给 `.mp4`/`.zip` input 且静默无报错**（0921 连错两次），已改为**按 accept 过滤**。正文见 §11.3 与 `templates/bili_cover.py`。仅当后台回退到旧版（无「封面制作」弹窗）时才回到本条。
 
-**解决**：封面 file input 通常在 inputs 数组的第 2 个位置（index 1）。按位置索引设置文件：
+**问题（v3.3.0 语境）**：B站上传页面有 4 个 file input，当时没有任何一个的 accept 属性包含 image 类型。
+
+**解决（已废弃）**：按位置索引取 `inputs[1]`：
 ```javascript
+// ⛔ 禁止再用：改版后 inputs 数变 5，inputs[1] 指向视频 input
 const inputs = await page.$$('input[type="file"]');
-// inputs[0]: 视频 (.mp4)
-// inputs[1]: 封面 (通过封面设置弹窗触发)
-await inputs[1].setInputFiles('horizontal-4-3.png');
+// inputs[0]: 视频 (.mp4)   inputs[1]: ??? 取决于弹窗是否打开
+await inputs[1].setInputFiles('horizontal-4-3.png');   // ⛔ v3.38.0 起禁用
 ```
 
-或者跳过自动封面上传，提示用户手动上传。
-
-**Why:** B站的 file input 使用动态 accept 属性，不包含 image
-**How to apply:** Phase 11 B站封面上传时，用 inputs[1] 或提示手动上传
+**Why（作废原因）:** 索引随页面状态漂移，且失败是静默的——只有改成「按 accept 过滤 + 断言 `.cover-empty` 消失」才能自证。
+**How to apply:** Phase 11 一律走 §11.3 弹窗协议 / `templates/bili_cover.py`，**任何情况下不要再按索引取封面 input**。
 
 ### 🔴 精简模式脚本审核必须前置（v3.3.0 新增，2026-07-05）
 
@@ -5115,7 +5169,7 @@ await inputs[1].setInputFiles('horizontal-4-3.png');
 **解决（草稿编辑页）**：
 1. 打开 `upload-manager/article?group=draft` → 找当日标题 → `frame?type=draft&draftId=...`
 2. 点 **「封面设置」**（`.cover-empty` / 坐标点封面框）→ 弹窗 **「封面制作」**
-3. 弹窗内出现 `input[accept="image/png, image/jpeg"]`（可有多个：4:3 / 16:9）→ **`setInputFiles(horizontal-4-3.png)`**
+3. 弹窗内出现 `input[accept="image/png, image/jpeg"]`（可有多个：4:3 / 16:9）→ **`setInputFiles(horizontal-4-3.png)`**（🔴 v3.38.0：这就是**坑 218** 的同一弹窗；首次投稿走 §11.3 / `templates/bili_cover.py`，本条是草稿补传路径）
 4. 点底部 **「完成」**（y 较大的主按钮）
 5. 验收：`.cover-empty` / `.cover-empty.failed` **消失**；`.cover-img` 的 `background-image` 含 `archive.biliimg.com` 或 `bfs/archive`
 6. 再点 **「存草稿」**；成功信号仍是 URL `group=draft`
@@ -5489,7 +5543,51 @@ async function continueInserting(page) {
 **解决**：① 声明 —— `page.locator('.creation-statement-container .bcc-select').click(force=True)` → `page.locator('text="个人观点，仅供参考"').first.click()`；② 分区核验**以 `document.body.innerText` 里出现 `分区\n\n人工智能` 为准**，不要用「heading 的兄弟节点」这类脆弱探针。
 **How to apply:** Phase 11 表单步。
 
+### 🔴 B站封面改版为「封面制作」全屏弹窗（v3.38.0 / 2026-09-21 实测，坑 218）
+**问题**：B站投稿页封面区改版。点「添加封面」**不再触发原生 file chooser**——`page.expect_file_chooser()` 必超时（0921 白等两轮 8s）；改为打开带「智能生成封面 / 模板 / 文字 / 贴纸 / 滤镜」的**全屏弹窗**。更隐蔽的是：此刻页面上共有 **5 个 `input[type=file]`**（`.mp4`×2 / `.txt` / `.zip` / 封面 `accept="image/png, image/jpeg"`），按位置索引 `inputs[1]` / `inputs[-1]`（旧 v3.3.0 协议）会把 png **喂给视频或 zip input**——**不抛错、无提示、表单纹丝不动**，看起来像「点了没反应」（0921 连错两次）。
+**解决**：① 点「添加封面」→ 直接进弹窗，**不要等 file chooser**；② 弹窗内点「上传封面」（`span.upload-text`）；③ **按 `accept` 过滤**取 input（唯一判据），`set_input_files(horizontal-4-3.png)`；④ 点 `.cover-editor-button .button.submit`（文案「完成」）关弹窗；⑤ 关弹窗后**回表单截图目检**封面缩略图 = 自制图（4:3 首页推荐 + 16:9 个人空间两栏同步预览）。
+```javascript
+let cover = null;
+for (const i of await page.$$('input[type="file"]')) {
+  const acc = (await i.getAttribute('accept')) || '';
+  if (acc.includes('image')) { cover = i; break; }   // ✅ 唯一可靠判据
+}                                                     // ⛔ 禁用 inputs[1] / inputs[-1]
+await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
+```
+**Why:** 索引取 input 的失败是静默的——只有 accept 判据 + `.cover-empty` 消失断言才能自证；顺序也不能换，先点「完成」只会关掉一个空弹窗。
+**How to apply:** Phase 11 封面步；脚本模板 `templates/bili_cover.py`（CDP 附着、日期参数化、结束断言弹窗已关）。**前置**：封面必须先 `cp` 到日期目录根（见 11 号协议第 12 条）。
+
+### 🔴 B站标签上限 10 且会被推荐标签污染（v3.38.0 / 2026-09-21 实测，坑 219）
+**问题**：新版投稿页标签区**自动预置推荐 chips**（0921 实测混入「学习 / 生活记录 / 记录」），且**上限 10 个**。额度被预置项占满后，后续 `type` + `Enter` 全被**静默丢弃**（仅右上角弹提示「允许添加的标签已经达到上限了」）——脚本照常打印 "added"，标签列表里却没有。另：删除时点 `label-item-v2-content`（文字元素）或容器中心**都无效**（0921 空转三轮），关闭符 `×` 实际位于 `label-item-v2-container` 容器**最右侧**。
+**解决**：① 先读 `.label-item-v2-container` 现有 chips，删掉不想要的（`page.mouse.click(b.x + b.width - 10, b.y + b.height/2)`，容器右缘）；② 再补自己的 tags（`input[placeholder*="回车键Enter创建标签"]` native setter + Enter）；③ **每次增删后回读 chips 文本列表断言**，终态 = publish.json 的 tags（允许少、不允许脏）。
+**Why:** 「脚本打印 added」与「chips 里真的有」是两回事；列表页标签是可见产物，脏标签比缺标签更糟。
+**How to apply:** Phase 11 标签步；`upload-status.md` 记最终 chips 列表。
+
+### 🔴 mp `open` 必须 settle()，已在 mp 页则跳过 goto（v3.38.0 / 2026-09-21 实测，坑 217）
+**问题**：`wechat_upload.py open` 步骤 `page.goto('https://mp.weixin.qq.com/')` 在已登录状态下 302 到 `cgi-bin/home?...&token=`，紧跟的 `page.evaluate` 抛 `Execution context was destroyed, most likely because of a navigation`——**整步崩溃**，既判不了登录也开不了编辑器（同源坑 213 的脚本侧复现）。
+**解决**：① 若当前页 URL 已含 `token=`，**直接跳过 goto**；② 必须 goto 时，之后一律走 `settle(page)`（轮询 `document.body.innerText`，捕获异常 + 2s 间隔，≤20 次）再读登录判据；③ `.new-creation__menu-item` 点击也用 try/except + `settle()` 重试 ≤3 次，再按 URL 找 `cgi-bin/appmsg`。
+**Why:** 302 期间 execution context 被销毁是**时序问题不是选择器问题**，任何"点之前串一个 evaluate"的写法都会随机崩。
+**How to apply:** Phase 12 `open` 步；`templates/` 内步进脚本通用（`settle()` 已是 `wechat_upload.py` 的固定件）。
+
 ## 更新日志
+
+### v3.38.0（2026-09-21 日报实测）
+基于 **2026-09-21 日报全流程**（linuxdo 374 帖 / 25 批 err=0；日报 353 帖；视频 98.41s；B站 `draftId=3898633` 10:37:50 草稿；公众号流水线建稿后由用户接管）实测，吸收坑 217–219：
+
+**B站封面（坑 218）**
+- 「添加封面」改开**「封面制作」全屏弹窗**，不再是原生 file chooser（`expect_file_chooser` 必超时）
+- 页面上 5 个 file input，**按 `accept` 含 `image` 过滤**取封面；按索引 `inputs[1]`/`inputs[-1]` 会把 png 喂给 `.mp4`/`.zip` 且**静默无报错**
+- 顺序铁律：上传封面 + set_files **之后**才点「完成」；新增可复用脚本 `templates/bili_cover.py`
+- 新增 §11 协议第 12 条：上传前把 `images/horizontal-4-3.png`、`images/vertical-3-4.png` **拷到日期目录根**
+
+**B站标签（坑 219）**
+- 标签上限 **10**，且会被自动预置的推荐 chips（学习/生活记录/记录）占满 → 超限静默丢弃
+- 删除 `×` 在 `label-item-v2-container` 容器**右缘**（点文字元素无效）；增删后必须回读 chips 列表断言
+
+**公众号（坑 217）**
+- `open` 步骤：URL 已含 `token=` 时**跳过 goto**；否则 goto 后必须 `settle()` 轮询，避免 `Execution context was destroyed` 崩步
+
+**版本**：3.37.0 → 3.38.0
 
 ### v3.37.0（2026-09-20 日报实测）
 基于 **2026-09-20 日报全流程**（linuxdo 326 帖 / 22 批 err=0；日报 316 帖；视频 104.73s edge-tts 云扬 + atempo 1.4；公众号 02:11 `appmsgid=100001273` → 用户 10:44 手动发表；B站/抖音/视频号用户手动）实测，吸收坑 212–216：
@@ -6073,7 +6171,7 @@ async function continueInserting(page) {
 ### v3.3.0（2026-07-05）
 - **公众号上传修复**：新增弹窗阻挡「保存为草稿」的处理方案（等待上传完成+Escape关闭弹窗+验证已保存）
 - **公众号合集选择**：新增 try-catch 超时保护，失败时自动跳过不阻塞
-- **B站封面上传**：更新 file input 查找方案（按位置索引 inputs[1] 而非 accept 属性匹配）
+- **B站封面上传**：更新 file input 查找方案（按位置索引 inputs[1] 而非 accept 属性匹配）——**已被 v3.38.0 坑 218 作废**，现行按 accept 过滤，见 §11.3
 - **精简模式审核强化**：脚本审核检查必须在展示前执行，审核结果与脚本一起展示
 - **周报去重优化**：新增上周周报文件不存在时的跳过逻辑
 - **精简周报验证**：v3.3.0 实测精简+周报叠加模式可用（4条事件，125s，B站+公众号均存草稿成功）
