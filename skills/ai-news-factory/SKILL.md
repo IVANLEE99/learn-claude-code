@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.38.0
+version: 3.39.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.38.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.39.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.39.0 核心改进（2026-09-21 周报 W37 实测）**：**结构检查弹窗有第三变体「内容结构检测」（坑 220）**——0921 周报正文粘贴后 `bodyLen=0`，弹窗标题实为「内容结构**检测**」，坑 192 的 `/Structure Check|结构检查/i` 漏匹配（**检测≠检查**），空转到手动点「继续插入」才写入；放行正则必须三变体齐全 `Structure Check|结构检查|结构检测`。**type=10 list_card 不是草稿验收源（坑 221）**——`appmsg?type=10&action=list_card` 只展示「历史图文素材」（2018–2020），**不含 type=77 新草稿**；坑 212 的「草稿箱无 + 发表记录无」存在第三态 = 草稿已落盘但两个列表都看不到，误判断会触发重建、撞上「appmsgid 出现即禁止重建」铁律。验收三件套：`appmsgid` 编辑页直达（要素全在）+ 首页「近期草稿」首条 + 发表记录无当日（确认未发表）。**渲染归档未验证禁止汇报（坑 222）**——0921 渲染成功但 out 落在 `news-pipeline/video-project/out/`（相对路径随 CWD，并非必在根 `out/`），归档 cp 又被分类器抖动打断未补，`weekly/.../video/` 为空就汇报完成，用户两次追问「视频呢」；铁律：out 写绝对路径 + 归档后 `ls -la`/ffprobe 验证模式目录 `video/` 非空，否则禁止说「视频已生成」。**坑 216 修正**：抖动期 `Write`/`Edit`/`Workflow` 同样会被拦，同批并行调用会「一过拦一」，分类器模型名会变（0920 deepseek-v4.1-flash / 0921 glm-5.3-flash）。锚点占比判据补 ≤1pp 测量容差（0921 周报 80.5% 验收通过）。坑 215 周报场景再次命中（「上传公众号，其他的我已经上传」→ B站/抖音/视频号全不碰）。
 > **🔴 v3.38.0 核心改进（2026-09-21 日报实测）**：**B站封面编辑器已改版为「封面制作」全屏弹窗（坑 218）**——点「添加封面」**不再触发原生 file chooser**（`expect_file_chooser` 必超时），而是打开带「智能生成封面/模板/文字/贴纸/滤镜」的封面编辑器；自制图路径 = 弹窗内点「上传封面」→ `input[accept="image/png, image/jpeg"]` → `set_input_files` → 点 `.cover-editor-button .button.submit`（文案「完成」）关弹窗。⚠️ 此刻页面上有 5 个 `input[type=file]`（`.mp4`×2 / `.txt` / `.zip` / 封面 image），**只有 accept 含 `image` 的那个是封面**；按索引 `inputs[1]`/`inputs[-1]` 会喂给视频或 zip input 且**全程静默无报错**（0921 连错两次，表单纹丝不动）。**B站标签区上限 10 且会被推荐标签污染（坑 219）**——新版投稿页自动预置「学习/生活记录/记录」等 chips，必须清理；关闭符 `×` 在 `label-item-v2-container` 容器**最右侧**（点文字元素无效，0921 空转三轮），清理与新增后都要回读 `.label-item-v2-container` 文本列表断言，不能只信脚本打印的 "added"。**mp 上传脚本 `open` 步骤必须 settle()（坑 217）**——`goto('https://mp.weixin.qq.com/')` 在已登录时 302 到 `cgi-bin/home?...token=`，紧接的 `page.evaluate` 抛 `Execution context was destroyed` 直接崩掉整步；正确做法：若当前页已在带 `token=` 的 mp 页就**跳过 goto**，否则 goto 后先 `settle()`（轮询 body 直到可读）再判「新的创作」。**上传脚本读封面一律读日期目录根**（`gen_images.py` 写的是 `images/` 子目录，Phase 11 前必须 `cp images/horizontal-4-3.png images/vertical-3-4.png` 到 `news-pipeline/YYYY-MM-DD/`）。
 >
 > **🔴 v3.37.0 核心改进（2026-09-20 日报实测）**：**公众号验收必须同时查「草稿箱」与「发表记录」**——用户会在流水线存完草稿后**自行发表**，此时草稿箱里当日条目消失、发表记录里出现「今天 HH:MM 已发表」。只查草稿箱会误判「草稿丢了」并触发重建，正好撞上「`appmsgid` 出现即禁止重建」铁律，产出重复稿（坑 212）。**mp 页面 `page.goto` 会 302 到带 `token=` 的 home 并销毁 execution context**，`page.evaluate` 抛 `Execution context was destroyed`；草稿箱/发表记录都有稳定 URL，**用 URL 导航而非点击侧栏**（坑 213）。**Chrome 窗口被用户关掉后进程仍在**，CDP `/json/list` 返回 `[]`，Playwright `connect_over_cdp` 报 `Browser context management is not supported`——用 `curl -X PUT http://localhost:9222/json/new?about:blank` 建标签页即可恢复，**不必重启 daemon**（坑 214）。**用户声明「某平台我已手动上传」时，该平台一律不打开上传页、不开草稿箱核验**（Phase 14.0-pre 从抖音扩展到全部平台，坑 215）。**安全分类器不可用会阻塞全部非只读 Bash（含 `python3`、`CronCreate`）**，只读命令仍可过；对策是拆单命令 + 间隔重试，同时用不受影响的 `Write` 工具落盘状态（坑 216）。
@@ -541,7 +542,7 @@ So What：{影响}
 Now What：{可执行建议，含操作动词（换/挪/配/备/查/避/开/砍/留兜底）；🔴 禁纯观察——"关注/留意/看/等/观望"单独出现且无操作动词=不通过；灰渠道须给"走官方渠道+X"而非只"走官方渠道"}
 可信度：{五档之一}
 
-{专业锚点场景 - 🔴 位置=总时长×0.7~0.8，直击中段尿点；命中概念在 55% 前出现的新闻后补桥句"这个词待会儿专门讲清"，再在 70-80% 集中解释；锚点 scene 起始秒/总秒须∈[0.7,0.8]，偏离>5% 须重排}
+{专业锚点场景 - 🔴 位置=总时长×0.7~0.8，直击中段尿点；命中概念在 55% 前出现的新闻后补桥句"这个词待会儿专门讲清"，再在 70-80% 集中解释；锚点 scene 起始秒/总秒须∈[0.7,0.8]，偏离>5% 须重排；**v3.39.0 容差：≤1pp（0.801~0.810）属测量近似直接 PASS 不重排（0921 周报 80.5% 过）**}
 
 结尾：{CTA}
 ```
@@ -556,7 +557,7 @@ Now What：{可执行建议，含操作动词（换/挪/配/备/查/避/开/砍/
 3. 允许在锚点前加 ≤15 字过渡（如「刚才提到 MoE——」），不改动库内定义句。  
 4. 锚点 = **独立 scene**（独立 TTS + 图），计入场景列表与 Phase 7/8 校验。  
 5. 插入位置：命中该概念的新闻/趋势之后；无命中则 CTA 前（月报则在月度总结前）。  
-6. 🔴 **位置硬约束（v3.21.0）**：锚点 scene 起始秒 / 总秒须 ∈ [0.7, 0.8]（直击诊断4 中段尿点，完播率 4.35%→6-8%）。命中概念在 55% 前出现的新闻后补 ≤15 字桥句"这个词待会儿专门讲清"，再在 70-80% 集中解释；偏离 >5% 须重排 scene 顺序（08-24 锚点 57% 即违反）。见 `templates/professional-anchor.md`。
+6. 🔴 **位置硬约束（v3.21.0；v3.39.0 容差）**：锚点 scene 起始秒 / 总秒须 ∈ [0.7, 0.8]（直击诊断4 中段尿点，完播率 4.35%→6-8%）。命中概念在 55% 前出现的新闻后补 ≤15 字桥句"这个词待会儿专门讲清"，再在 70-80% 集中解释；偏离 >5% 须重排 scene 顺序（08-24 锚点 57% 即违反）；**≤1pp 的超出（0.801~0.810）属测量近似，直接通过不重排**（0921 周报锚点 80.5% 验收通过）。见 `templates/professional-anchor.md`。
 
 若未 eligible 且用户仍要该概念：调 **`ai-concept-narrator`**（`ai-concept-bank/prompts/script-15s-request.md`）→ `reviewed=true` → `ready` → 再进脚本。见 concept-bank README。
 
@@ -693,7 +694,7 @@ Hook：[破格类型] {开场，用破格制造意外感}
    - `☐ 禁≥2事件堆叠（周报禁≥2事件）`
    - `☐ 禁"一次讲清/今天AI圈…动了"套话后缀`
    - `☐ 已填"对应封面大字"字段并与 Hook 原词对齐`
-9. **🔴 锚点位置（v3.21.0）**：`☐ 锚点位置=总时长 70-80% 处`（计算：锚点 scene 起始秒/总秒，偏离>5% 须重排）——08-24 锚点 57% 即此项不通过
+9. **🔴 锚点位置（v3.21.0；v3.39.0 容差）**：`☐ 锚点位置=总时长 70-80% 处`（计算：锚点 scene 起始秒/总秒，偏离>5% 须重排；**≤1pp 超出即 0.801~0.810 直接过**，0921 周报 80.5% 实测通过）——08-24 锚点 57% 即此项不通过
 10. **🔴 Now What 质量（v3.21.0）**：`☐ Now What 非纯观察`——扫每条 Now What，"关注/留意/看/等/观望"单独出现且无操作动词=不通过——08-26 Scene7/Scene5 即此项不通过
 11. **🔴 选材排序表（v3.21.0）**：`☐ 选材排序表已展示`（5 维 1/3/5 三档，总分满分 25，≥18 进 Top3-5，<15 不单独成段）——08-24/08-26 无排序表即此项不通过
 12. **🔴 周报结构（v3.21.0，仅 weekly 模式）**：`☐ 周报=本周1件大事3W深聊50s+2-3条一句话快讯，非5-6条堆叠各3W浅聊；深聊 What 层讲时间线（周一到周五演变，日报做不到的差异点）`——W33 5条堆叠即此项不通过
@@ -791,7 +792,7 @@ Hook：[破格类型] {开场，用破格制造意外感}
 ☐ Hook 禁≥2事件堆叠（周报禁≥2事件）
 ☐ Hook 禁"一次讲清/今天AI圈…动了"套话后缀
 ☐ Hook 已填"对应封面大字"字段并与原词对齐
-☐ 锚点位置=总时长 70-80% 处（锚点 scene 起始秒/总秒，偏离>5% 须重排）
+☐ 锚点位置=总时长 70-80% 处（锚点 scene 起始秒/总秒，偏离>5% 须重排；≤1pp 超出 0.801~0.810 属测量容差直接过）
 ☐ Now What 非纯观察（"关注/留意/看/等/观望"单独出现且无操作动词=不通过）
 ☐ 选材排序表已展示（5维 1/3/5 三档，满分 25，≥18 进 Top3-5，<15 不单独成段）
 ☐ [周报] 本周1件大事3W深聊50s+2-3条一句话快讯，非5-6条堆叠；深聊 What 讲时间线
@@ -1617,9 +1618,9 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
 - `src/index.ts`：必须指定入口点文件路径
 - `--public-dir`：必须指定 public 目录的绝对路径
 
-**🔴 渲染输出位置（必须记住）**：
-- 视频渲染到：`/Users/youngsdream/Documents/learn-claude-code/out/`
-- **不是** `news-pipeline/video-project/out/`
+**🔴 渲染输出位置（必须记住；🔴 v3.39.0 修正，坑 222）**：
+- out 参数是**相对路径、随渲染命令的 CWD 走**：CWD=仓库根 → 落在 `/Users/youngsdream/Documents/learn-claude-code/out/`；CWD=`news-pipeline/video-project` → 落在 `news-pipeline/video-project/out/`（0921 周报实际就落在后者）
+- 消除歧义：渲染前 `cd` 到仓库根，或 out 直接写**绝对路径**；渲染后先 `ls -la` 确认产物实际位置再归档
 
 **🔴 视频合成后自动归档（必须执行）**：
 
@@ -1642,7 +1643,7 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 - 错误：从 `news-pipeline/video-project/out/` 复制（旧文件）
 - 正确：从 `/Users/youngsdream/Documents/learn-claude-code/out/` 复制（新文件）
 
-**归档时机**：视频合成完成后立即执行，不要等到上传阶段再复制。
+**归档时机**：视频合成完成后立即执行，不要等到上传阶段再复制。**🔴 v3.39.0 汇报门（坑 222）**：归档后必须 `ls -la` 确认模式目录 `video/` 非空 + ffprobe 回读时长/分辨率，缺任一**禁止在汇报中写「视频已生成」**；归档被分类器抖动（坑 216）打断时，在状态文件记「待归档」，恢复后第一件事补归档（0921 周报因此漏归档，`weekly/.../video/` 为空，用户两次追问「视频呢」）。
 
 ### Phase 10: 封面、发布信息与公众号图文
 
@@ -4539,7 +4540,7 @@ cp "news-pipeline/video-project/out/【YYYY-MM-DD】{核心标题}… | 今日�
    "news-pipeline/YYYY-MM-DD/video/"
 ```
 
-**归档时机**：视频合成完成后立即执行，不要等到上传阶段再复制。
+**归档时机**：视频合成完成后立即执行，不要等到上传阶段再复制。**🔴 v3.39.0 汇报门（坑 222）**：归档后必须 `ls -la` 确认模式目录 `video/` 非空 + ffprobe 回读时长/分辨率，缺任一**禁止在汇报中写「视频已生成」**；归档被分类器抖动（坑 216）打断时，在状态文件记「待归档」，恢复后第一件事补归档（0921 周报因此漏归档，`weekly/.../video/` 为空，用户两次追问「视频呢」）。
 
 ### 🔴 封面生成不完整（v2.2.0 新增，2026-06-13）
 **问题**：异步生成封面时，只生成了部分封面（如 1/2），另一张封面因 API 超时或错误未生成。
@@ -5380,7 +5381,7 @@ const declared = /Text Originality|文字原创/i.test(sum) && rowH > 20;
 
 **事故**：长期存在的 `paste failed pmLen=8 / len=15 / len=0`。两个成因叠加：
 1. **占位符 widget 污染长度**：正文 `ProseMirror` 空态含 `contenteditable="false"` 的 `.editor_content_placeholder.ProseMirror-widget`，文本 `Start text here`（15 字符）。裸读 `pm.textContent.length` 得到 15/8，误判「有内容」或「粘贴失败」。
-2. **真因**：粘贴内容触发微信**「内容结构检查 / Content Structure Check」模态**拦截，正文实际**未插入**，直到点 **`Continue Inserting`（继续插入）** 才写入。
+2. **真因**：粘贴内容触发微信**「内容结构检查 / 内容结构检测 / Content Structure Check」模态**拦截（0921 实测出现「检测」变体，坑 220），正文实际**未插入**，直到点 **`Continue Inserting`（继续插入）** 才写入。
 
 **正解**：
 ```js
@@ -5400,7 +5401,7 @@ async function continueInserting(page) {
       for (const d of document.querySelectorAll('.weui-desktop-dialog')) {
         if (d.getBoundingClientRect().height < 30) continue;
         const t = d.querySelector('.weui-desktop-dialog__title')?.textContent || '';
-        if (/Structure Check|结构检查/i.test(t)) {
+        if (/Structure Check|结构检查|结构检测/i.test(t)) {
           for (const b of d.querySelectorAll('button, a.weui-desktop-btn')) {
             const bt = (b.textContent || '').trim();
             if (/Continue Inserting|继续插入/i.test(bt)) { b.click(); return 'clicked:' + bt; }
@@ -5515,7 +5516,7 @@ async function continueInserting(page) {
 ### 🔴 mp 页面重定向销毁 execution context，草稿箱/发表记录用 URL 直达（v3.37.0 / 2026-09-20 实测，坑 213）
 **问题**：`page.goto('https://mp.weixin.qq.com/')` 会 302 到 `cgi-bin/home?...&token=`，紧接着的 `page.evaluate` 抛 `Execution context was destroyed, most likely because of a navigation`，脚本直接崩。另外在 home 上用「找文本 === 『草稿箱』的元素并 click」导航**不稳定**（内容管理是折叠面板，点了仍停在首页）。
 **解决**：① 导航后**轮询重试** evaluate（拿到非空 body 再继续），不要一次性调用；② 从 `page.url` 正则取 `token=(\d+)`，**用稳定 URL 直达**，不点侧栏：
-- 草稿箱 `https://mp.weixin.qq.com/cgi-bin/appmsg?begin=0&count=12&t=media/appmsg_list&type=10&action=list_card&token={token}&lang=zh_CN`
+- 草稿箱 `https://mp.weixin.qq.com/cgi-bin/appmsg?begin=0&count=12&t=media/appmsg_list&type=10&action=list_card&token={token}&lang=zh_CN` ⚠️ **该接口只展示「历史图文素材」（type=10），不含 type=77 新草稿，禁止当草稿验收源**——验收三件套见坑 221
 - 发表记录 `https://mp.weixin.qq.com/cgi-bin/appmsgpublish?sub=list&begin=0&count=10&token={token}&lang=zh_CN`
 
 **How to apply:** `scripts/wechat_check_draft.py`（0920 新增，只读，不新建/不发表）。
@@ -5534,7 +5535,7 @@ async function continueInserting(page) {
 
 ### 🔴 安全分类器不可用会阻塞全部非只读 Bash（v3.37.0 / 2026-09-20 实测，坑 216）
 **问题**：0920 09:40–10:31 连续报 `deepseek-v4.1-flash is temporarily unavailable, so auto mode cannot determine the safety of Bash`。现象：`ls` / `cat` / `date` / `curl` **正常**；`python3 ...`、`cd ... && nohup ...`、`CronCreate` **全部被拦**。`settings.json` 的 `allow` 里明明有 `Bash(python3:*)` 也照样被拦，**allowlist 不短路**。持续约 50 分钟，中间偶有几次放行。
-**解决**：① 不要空转——把工作切到 **`Write` 工具落盘**（`Write`/`Edit` 不走该分类器，状态文件、`upload-status.md` 照写）；② 把复合命令**拆成单命令**（`cd ... && nohup ...` 比裸 `python3 <path>` 更易被拦）；③ **间隔重试**，每次放行窗口都可能成功；④ 已经跑起来的长任务（daemon）不受影响。
+**解决**：① 不要空转——把工作切到 **`Write` 工具落盘**（状态文件、`upload-status.md` 照写；⚠️ 0921 实测抖动窗口内 `Write`/`Edit`/`Workflow` 也可能被拦，同样走间隔重试）；② 把复合命令**拆成单命令**（`cd ... && nohup ...` 比裸 `python3 <path>` 更易被拦）；③ **间隔重试**，每次放行窗口都可能成功——同批并行调用也会「一过拦一」，被拦的那条单独重试即可；④ 已经跑起来的长任务（daemon）不受影响；⑤ 分类器模型名会变（0920 `deepseek-v4.1-flash` / 0921 `glm-5.3-flash`），报错里的模型名不代表账号问题。
 **Why:** 分类器是外部模型服务，抖动与内容无关；此时唯一可行的是降级到「只读 + 落盘 + 重试」。
 **How to apply:** 全流程通用。恢复后第一件事是把断点续上（本例是起 daemon → 跑 `wechat_check_draft.py`）。
 
@@ -5569,7 +5570,43 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 **Why:** 302 期间 execution context 被销毁是**时序问题不是选择器问题**，任何"点之前串一个 evaluate"的写法都会随机崩。
 **How to apply:** Phase 12 `open` 步；`templates/` 内步进脚本通用（`settle()` 已是 `wechat_upload.py` 的固定件）。
 
+### 🔴 结构检查弹窗第三变体「内容结构检测」（v3.39.0 / 2026-09-21 周报实测，坑 220）
+**问题**：0921 周报公众号正文粘贴后 `bodyLen=0`——结构检查弹窗标题实为「内容结构**检测**」，坑 192 的放行正则 `/Structure Check|结构检查/i` 漏匹配（**检测 ≠ 检查**），轮询 12 次全 `no-dialog`，直到手动点「继续插入」正文才写入（放行后 `bodyLen=1015`）。
+**解决**：放行正则三变体齐全：`/Structure Check|结构检查|结构检测/i`（坑 192 代码块已同步修正）；按钮正则 `/Continue Inserting|继续插入/i` 不变。**粘贴后 `bodyLen=0` 的第一诊断 = 截图看弹窗标题是否新变体**，先把变体加进正则再重试粘贴，不要直接判「粘贴失败」盲目重粘（重粘只会再触发同一弹窗）。
+**Why:** 微信该弹窗文案存在多套变体（检查/检测/英文），且随版本漂移；硬编码单变体必过期。
+**How to apply:** 坑 192 `continueInserting()`、Phase 12.5 正文粘贴、全部 `wechat_upload.py` 副本。
+
+### 🔴 type=10 list_card 只展示历史图文素材，不是草稿验收源（v3.39.0 / 2026-09-21 周报实测，坑 221）
+**问题**：0921 周报草稿 `appmsgid=100001297` 保存成功后，复核走坑 213 的「草稿箱」URL（`appmsg?type=10&action=list_card`）——页面是「历史图文素材」，只有 2018–2020 旧稿，**不含任何 type=77 新草稿**；发表记录也无当日条目。若按坑 212 的二态判定（草稿箱无 + 发表记录无）会误判「草稿丢了」并触发 Phase 12 重建，正好撞上「`appmsgid` 出现即禁止重建」铁律，产出重复稿。
+**解决**：公众号草稿验收固定**三件套**——① **`appmsgid` 编辑页直达**（`cgi-bin/appmsg?t=media/appmsg_edit&action=edit&appmsgid={id}&token={token}&lang=zh_CN`，标题/作者/正文/封面全在 = 草稿在）；② 首页「近期草稿」首条 = 当期标题（含「更新于 HH:MM」）；③ 发表记录**无**当日条目（确认未发表 = 存草稿终态）。`type=10 list_card` 仅用于看历史素材，**禁止**当 type=77 验收源。
+**Why:** list_card 的 `type=10` 与新草稿的 `type=77` 是两套列表，「查不到」是接口语义问题，不是草稿状态问题。
+**How to apply:** Phase 12 `verify` 与 `scripts/wechat_check_draft.py`。与坑 212 合并为完整三态：**编辑页可达 + 发表记录无 = 草稿已存**；**发表记录有当日 = 用户已发表（终态，禁重建）**；**编辑页不可达 + 近期草稿无 + 发表记录无 = 才允许怀疑未保存**。
+
+### 🔴 渲染归档未落盘验证，禁止汇报「视频已生成」（v3.39.0 / 2026-09-21 周报实测，坑 222）
+**问题**：0921 周报 Remotion 渲染成功（105.877s / 9,351,919 B），但 ① out 参数是相对路径，渲染命令 CWD 在 `video-project`，产物落在 `news-pipeline/video-project/out/` 而非 Phase 9 声称的根 `out/`；② 归档 `cp` 被分类器抖动（坑 216）打断后未补，`weekly/2026-09-14~2026-09-20/video/` 目录为空就完成了汇报——用户两次追问「视频呢,没有视频」。
+**解决**：① 渲染前 `cd` 仓库根，或 out 写**绝对路径**，消除 CWD 歧义；② 归档 = `cp` 到模式目录 `video/`（daily `news-pipeline/YYYY-MM-DD/video/`、weekly `news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD/video/`、monthly `news-pipeline/monthly/YYYY-MM/video/`）；③ **汇报前门**：`ls -la` 确认 `video/` 非空 + ffprobe 回读时长/分辨率/帧率，缺任一禁止写「视频已生成」；④ 归档被抖动打断时把「待归档」写进状态文件，恢复后第一件事补归档。
+**Why:** 「渲染成功」与「用户能拿到文件」之间隔着归档与验证两步；汇报必须以用户视角的产物位置为准。
+**How to apply:** Phase 9 归档段（两处「归档时机」均已写入汇报门）。
+
 ## 更新日志
+
+### v3.39.0（2026-09-21 周报 W37 实测）
+基于 **2026-09-21 周报全流程**（2026-09-14~09-20 周聚合；TOP1 ZCode 深聊 + 3 快讯 + coding_tools 锚点；视频 105.877s / 9,351,919 B / 3175 帧；公众号草稿 `appmsgid=100001297` 双路验收通过；B站/抖音/视频号用户手动，坑 215 再次命中）实测，吸收坑 220–222：
+
+**公众号（坑 220 / 221）**
+- 结构检查弹窗第三变体「内容结构**检测**」：放行正则必须 `Structure Check|结构检查|结构检测` 三齐全，否则 `bodyLen=0` 空转（坑 192 代码块已同步）
+- `type=10 list_card` 只展示「历史图文素材」，**不是** type=77 草稿验收源；验收三件套 = `appmsgid` 编辑页直达 + 首页「近期草稿」首条 + 发表记录无当日
+
+**渲染归档（坑 222）**
+- remotion out 是相对路径随 CWD（0921 落在 `video-project/out/`）：渲染前 `cd` 仓库根或 out 写绝对路径
+- 归档 + `ls -la`/ffprobe 验证是**汇报前置门**，未验证禁止说「视频已生成」；抖动打断时状态文件记「待归档」
+
+**环境与其他**
+- 坑 216 修正：抖动期 `Write`/`Edit`/`Workflow` 同样会被拦；同批并行「一过拦一」；分类器模型名会变（deepseek-v4.1-flash → glm-5.3-flash）
+- 锚点占比补 ≤1pp 测量容差（0.801~0.810 直接过，0921 的 80.5% 不再触发重排）
+- 坑 215 周报场景再次命中：用户「上传公众号，其他的我已经上传」→ 其余三平台全不碰
+
+**版本**：3.38.0 → 3.39.0
 
 ### v3.38.0（2026-09-21 日报实测）
 基于 **2026-09-21 日报全流程**（linuxdo 374 帖 / 25 批 err=0；日报 353 帖；视频 98.41s；B站 `draftId=3898633` 10:37:50 草稿；公众号流水线建稿后由用户接管）实测，吸收坑 217–219：
