@@ -21,18 +21,11 @@ try:
     with open(settings_path) as f:
         s = json.load(f)
     env = s.get('env', {})
-    url = env.get('GEN_IMG_API_URL', '') or os.environ.get('GEN_IMG_API_URL', '')
-    key = env.get('GEN_IMG_API_KEY', '') or os.environ.get('GEN_IMG_API_KEY', '')
-    model = env.get('GEN_IMG_MODEL', '') or os.environ.get('GEN_IMG_MODEL', 'gpt-image-2')
-    if not model:
-        model = 'gpt-image-2'
-    print(url)
-    print(key)
-    print(model)
 except Exception:
-    print('')
-    print('')
-    print('gpt-image-2')
+    env = {}
+print(env.get('GEN_IMG_API_URL', '') or os.environ.get('GEN_IMG_API_URL', ''))
+print(env.get('GEN_IMG_API_KEY', '') or os.environ.get('GEN_IMG_API_KEY', ''))
+print(env.get('GEN_IMG_MODEL', '') or os.environ.get('GEN_IMG_MODEL', '') or 'gpt-image-2')
 " 2>/dev/null)
 
 API_URL=$(echo "$CONFIG" | sed -n '1p')
@@ -68,34 +61,49 @@ echo "  Prompt: ${PROMPT:0:80}..."
 echo "  Size: $SIZE | Quality: $QUALITY | Format: $FORMAT"
 echo "  API: $API_URL"
 
-RESPONSE=$(curl -s --max-time 180 "${API_URL}/v1/images/generations" \
+# prompt / 响应一律走环境变量与临时文件，禁止 shell 插值进 python 源码
+# （中文 prompt 含引号/换行/三引号会截断 body，响应含 ''' 会截断解析——2924762 实测）
+BODY_FILE=$(mktemp)
+RESP_FILE=$(mktemp)
+cleanup() { rm -f "$BODY_FILE" "$RESP_FILE"; }
+trap cleanup EXIT
+
+GI_MODEL="$MODEL" GI_PROMPT="$PROMPT" GI_SIZE="$SIZE" GI_QUALITY="$QUALITY" \
+GI_N="$N" GI_FORMAT="$FORMAT" GI_BODY_FILE="$BODY_FILE" python3 << 'PYBODY'
+import json, os
+body = {
+    'model': os.environ['GI_MODEL'],
+    'prompt': os.environ['GI_PROMPT'],
+    'size': os.environ['GI_SIZE'],
+    'quality': os.environ['GI_QUALITY'],
+    'n': int(os.environ['GI_N']),
+    'output_format': os.environ['GI_FORMAT'],
+    'response_format': 'b64_json',
+}
+with open(os.environ['GI_BODY_FILE'], 'w', encoding='utf-8') as f:
+    json.dump(body, f, ensure_ascii=False)
+PYBODY
+
+if ! curl -s --max-time 300 "${API_URL}/v1/images/generations" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${API_KEY}" \
-    -d "$(python3 -c "
-import json
-body = {
-    'model': '''${MODEL}''',
-    'prompt': '''${PROMPT}''',
-    'size': '${SIZE}',
-    'quality': '${QUALITY}',
-    'n': ${N},
-    'output_format': '${FORMAT}',
-    'response_format': 'b64_json'
-}
-print(json.dumps(body))
-")")
+    --data-binary @"$BODY_FILE" -o "$RESP_FILE"; then
+    echo "错误: curl 调用失败，请检查网络连接" >&2
+    exit 1
+fi
 
 # === 检查响应 ===
-if [ -z "$RESPONSE" ]; then
+if [ ! -s "$RESP_FILE" ]; then
     echo "错误: API 无响应，请检查网络连接" >&2
     exit 1
 fi
 
 # === 解析并保存图片 ===
-python3 << PYEOF
+python3 - "$RESP_FILE" "$OUTPUT" "$MODEL" << 'PYEOF'
 import base64, json, sys, os
 
-resp_text = '''${RESPONSE}'''
+resp_path, output_path, model = sys.argv[1], sys.argv[2], sys.argv[3]
+resp_text = open(resp_path, encoding='utf-8', errors='replace').read()
 try:
     resp = json.loads(resp_text)
 except json.JSONDecodeError:
@@ -115,7 +123,6 @@ if not data:
     print(resp_text[:500], file=sys.stderr)
     sys.exit(1)
 
-output_path = "${OUTPUT}"
 saved_count = 0
 
 for i, item in enumerate(data):
@@ -140,5 +147,5 @@ if saved_count == 0:
     print("错误: 未能保存任何图片", file=sys.stderr)
     sys.exit(1)
 
-print(f"完成！共生成 {saved_count} 张图片 (model=${MODEL})")
+print(f"完成！共生成 {saved_count} 张图片 (model={model})")
 PYEOF

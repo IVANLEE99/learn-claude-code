@@ -1,7 +1,7 @@
 ---
 name: post-to-img
 description: 将论坛帖子/长文复盘自动转化为日系手账风信息图，并调用 gen-img 生图。触发词: "帖子生图", "post to image", "长文转图", "复盘信息图", "被优化了生图", "手账风海报", "帖子做成图", linux.do 帖子配图
-version: 1.0.0
+version: 1.0.2
 ---
 
 # post-to-img — 帖子/长文 → 手账风信息图
@@ -177,7 +177,22 @@ python3 ~/.claude/skills/post-to-img/scripts/build_prompt.py \
 避免：写实摄影、3D、赛博霓虹、暗黑丧系、纯黑大字墙、无分区的密密麻麻正文、真人脸、低清模糊。
 ```
 
-6. 默认尺寸：**`1536x1024`**（横版信息图）；用户要小红书竖图则用 `1024x1536`。
+6. 默认尺寸：**`1536x1024`**（横版信息图）。帖子成片要双比例时由 `post-to-video` 传入：横版 4:3 用 `1536x1152`，竖版 3:4 用 `1152x1536`（**`1024x1536` 是 2:3，不是 3:4**）。
+7. **画布锁定句自动生成（v1.0.2）**：`build_prompt.py` 按 `--size` 自动写入「画布必须…像素 W×H，宽高比严格 a:b」句。2924762 实测服务端不认精确像素（1152x1536 → 1086×1448）但锁句保证比例——不要手删这行；验收用 PIL 实测比例。
+8. `--orientation vertical` 把三栏改成自上而下堆叠，禁止竖图里硬挤三栏并排。`--prompt-name` 指定文件名时不覆盖 `prompt.txt`，便于同目录出两份。
+
+```bash
+# 横版 4:3 / 竖版 3:4（post-to-video 在场景配图之前调用）
+python3 ~/.claude/skills/post-to-img/scripts/build_prompt.py \
+  --content {slug}/posters/infographic.json \
+  --preset kawaii-journal --orientation horizontal --aspect 4:3 --size 1536x1152 \
+  --prompt-name post-to-img-horizontal.txt --out-dir {slug}/prompts
+
+python3 ~/.claude/skills/post-to-img/scripts/build_prompt.py \
+  --content {slug}/posters/infographic.json \
+  --preset kawaii-journal --orientation vertical --aspect 3:4 --size 1152x1536 \
+  --prompt-name post-to-img-vertical.txt --out-dir {slug}/prompts
+```
 
 ### Step 5 — 确认（可跳过）
 
@@ -308,4 +323,6 @@ bash ~/.claude/skills/post-to-img/scripts/run_gen.sh \
 
 ## 版本
 
+- **v1.0.2**（2026-09-22）：`build_prompt.py` 按 `--size` 自动生成画布锁定句（「像素 W×H，宽高比严格 a:b」——服务端不认精确像素，锁句保比例）；竖版默认尺寸从 `1024x1536`（实为 2:3）修正为 `1152x1536`。
+- **v1.0.1**（2026-09-22）：`build_prompt.py` 增加 `--orientation` / `--aspect` / `--prompt-name`。竖版改为上下堆叠；指定文件名时不覆盖 `prompt.txt`。供 post-to-video 在视频流程前出 4:3 与 3:4 帖子内容图。
 - **v1.0.0**（2026-07-21）：首版。取文 → 结构化 → kawaii-journal prompt → gen-img；双向 skill 同步。
