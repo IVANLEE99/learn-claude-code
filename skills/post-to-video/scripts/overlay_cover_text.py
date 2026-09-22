@@ -4,6 +4,9 @@
 API 中文常糊/错字/日英乱码，封面文字必须像素级准确：先出无字插画，再用本脚本本地叠字。
 正片只写 covers/vertical-3-4.png 与 covers/horizontal-4-3.png；底图放 covers/.scratch/。
 
+真比例（2924762 实测修正）：正片输出 1152×1536（3:4）/ 1536×1152（4:3）；
+底图尺寸不符时按短边放大 + 居中裁切（不变形）。1024x1536 是 2:3，不是 3:4。
+
 用法:
   python3 overlay_cover_text.py --dir <slug_dir> \\
     --in covers/.scratch/vertical-notext.png --out covers/vertical-3-4.png
@@ -16,6 +19,27 @@ import glob
 import json
 import sys
 from pathlib import Path
+
+# 正片目标尺寸：与视频 1080x1440 / 1440x1080 同比例（真 3:4 / 4:3）
+TARGETS = {
+    'vertical-3-4.png': (1152, 1536),
+    'horizontal-4-3.png': (1536, 1152),
+}
+
+
+def fit_cover(img, target):
+    """短边放大到覆盖 target 再居中裁切——只裁边，不拉伸变形。"""
+    from PIL import Image
+
+    tw, th = target
+    w, h = img.size
+    if (w, h) == (tw, th):
+        return img
+    scale = max(tw / w, th / h)
+    nw, nh = round(w * scale), round(h * scale)
+    img = img.resize((nw, nh), Image.LANCZOS)
+    left, top = (nw - tw) // 2, (nh - th) // 2
+    return img.crop((left, top, left + tw, top + th))
 
 
 def find_cover_font() -> str:
@@ -48,10 +72,15 @@ def parse_lines(cover_text: str) -> list[str]:
     return lines[:4]
 
 
-def overlay(src: Path, dst: Path, lines: list[str], fill, stroke):
+def overlay(src: Path, dst: Path, lines: list[str], fill, stroke, target=None):
     from PIL import Image, ImageDraw, ImageFont
 
     img = Image.open(src).convert('RGBA')
+    if target:
+        before = img.size
+        img = fit_cover(img, target)
+        if img.size != before:
+            print(f'[fit ] {src.name} {before[0]}x{before[1]} → {img.size[0]}x{img.size[1]}（cover 裁切，不变形）')
     w, h = img.size
     # 字号随短边走：竖版约 72–96，横版略小
     font_size = max(48, min(96, int(min(w, h) * 0.072)))
@@ -86,10 +115,19 @@ def main():
     p.add_argument('--in', dest='src', default='', help='无字底图（相对 slug 或绝对路径）')
     p.add_argument('--out', dest='dst', default='', help='正片输出路径')
     p.add_argument('--both', action='store_true',
-                   help='自动叠 .scratch 里的 vertical/horizontal-notext → 两张正片')
+                   help='自动叠 .scratch 里的 vertical/horizontal-notext → 两张正片（1152x1536 / 1536x1152）')
+    p.add_argument('--size', default='', help='输出尺寸 WxH（如 1152x1536）；默认：--both 用真 3:4/4:3，单跑保留底图尺寸')
     p.add_argument('--fill', default='#2C2416', help='字体颜色（奶油纸默认深棕）')
     p.add_argument('--stroke', default='#F7F1E3', help='描边（衬在插画上）')
     args = p.parse_args()
+
+    cli_target = None
+    if args.size:
+        try:
+            tw, th = args.size.lower().split('x')
+            cli_target = (int(tw), int(th))
+        except Exception:
+            sys.exit(f'--size 格式错误: {args.size}（应为 1152x1536 这种）')
 
     slug = Path(args.dir).expanduser().resolve()
     data = json.loads((slug / 'content.json').read_text(encoding='utf-8'))
@@ -121,7 +159,7 @@ def main():
                 src = alt
             if not src.exists():
                 sys.exit(f'找不到无字底图（先放到 covers/.scratch/）: {a}')
-            jobs.append((src, slug / 'covers' / official))
+            jobs.append((src, slug / 'covers' / official, cli_target or TARGETS.get(official)))
     else:
         if not args.src or not args.dst:
             sys.exit('指定 --in/--out，或用 --both')
@@ -131,12 +169,12 @@ def main():
             src = slug / src
         if not dst.is_absolute():
             dst = slug / dst
-        jobs.append((src, dst))
+        jobs.append((src, dst, cli_target))
 
-    for src, dst in jobs:
+    for src, dst, target in jobs:
         if not src.exists():
             sys.exit(f'底图不存在: {src}')
-        overlay(src, dst, lines, fill, stroke)
+        overlay(src, dst, lines, fill, stroke, target)
 
 
 if __name__ == '__main__':

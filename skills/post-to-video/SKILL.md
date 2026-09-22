@@ -1,7 +1,7 @@
 ---
 name: post-to-video
 description: 将论坛帖子/长文自动转化为短视频——按 3:4 竖版与 4:3 横版生成配图，再由 content.json 经 edge-tts 生成配音与字幕，最终合成带字幕视频。触发词: "帖子转视频", "post to video", "长文转视频", "帖子做视频", "图文转视频", "复盘视频", "帖子成片", linux.do 帖子视频
-version: 1.0.2
+version: 1.0.4
 ---
 
 # post-to-video — 帖子/长文 → 配图 + TTS + 字幕 → 短视频
@@ -45,9 +45,12 @@ version: 1.0.2
         ↓
 [2b] 合规  对照 合规检查.md → 落盘 review-checklist.md（脚本/生图/封面都要过）
         ↓
-[3] 确认（可选）  用户说「直接出片/开干」则跳过口头确认，**不能跳过 2b 落盘**
+[2c] 帖子内容图（阻塞门，先于一切视频步骤）
+     post-to-img 信息图 → 4:3 + 3:4 提示词 → 两张海报
         ↓
-[4] 生图  gen_images.sh → 场景图 + 封面无字底图（.scratch）→ overlay_cover_text.py 两张正片
+[3] 确认（可选）  用户说「直接出片/开干」则跳过口头确认，**不能跳过 2b 落盘，也不能跳过 2c**
+        ↓
+[4] 场景生图  gen_images.sh → 场景图 + 封面无字底图（.scratch）→ overlay_cover_text.py 两张正片
         ↓
 [5] TTS  gen_tts_edge.py → voiceover/sceneN.wav（24kHz PCM16 单声道）
         ↓
@@ -136,11 +139,51 @@ cp ~/.claude/skills/post-to-video/合规检查.md 的清单段落 \
   → {slug}/review-checklist.md
 ```
 
-未勾完禁止进 Step 4。带娃选题：口播可点到「不敢请外人」，禁止虐婴细节与写实儿童主视觉。
+未勾完禁止进 Step 2c。带娃选题：口播可点到「不敢请外人」，禁止虐婴细节与写实儿童主视觉。
+
+### Step 2c — 帖子内容图（阻塞门，先于视频流程）
+
+**先出整帖信息图，再做场景配图 / TTS / 字幕 / 合成。** 两张海报未通过视觉校验，禁止进 Step 4。
+
+信息图不是封面，也不是场景帧：
+
+| 产物 | 是什么 | 不是什么 |
+|------|--------|----------|
+| `posters/post-to-img-horizontal-poster.png` | 4:3 手账信息图，文字在图里 | 不是 `covers/horizontal-4-3.png` |
+| `posters/post-to-img-vertical-poster.png` | 3:4 手账信息图，文字在图里 | 不是 `covers/vertical-3-4.png` |
+| `images/sceneN-*.png` | 视频每一镜 | 不要用信息图代替分镜 |
+
+风格对齐 `post-to-img` 的 kawaii-journal（奶油纸、草莓粉大标题、圆角卡片、仓鼠/白兔）。参考成片：`generated-images/post-to-img/20260921_2931081/poster.png` 与同目录 `prompt.txt`。
+
+1. 另写 `posters/infographic.json`（post-to-img 的区块 schema：title / subtitle / sections / table / plan / tip / closing）。**禁止**拿它覆盖视频用的 `content.json`。
+2. 标题 ≤14 字；bullet ≤28 字；称呼「道友+名字」；无论坛来源、无写实婴幼儿脸、不把伤害画出来。
+3. 用 `post-to-img` 的 `build_prompt.py` 出两份提示词（竖版必须上下堆叠，不要三栏并排）。脚本会按 `--size` **自动写入画布锁定句**（「像素 W×H，宽高比严格 a:b」；真 3:4 = `1152x1536`，`1024x1536` 是 2:3）。实测服务端不认精确像素，但锁句能保证比例——不要手删：
+
+```bash
+SLUG=~/Documents/learn-claude-code/generated-videos/post-to-video/{slug}
+python3 ~/.claude/skills/post-to-img/scripts/build_prompt.py \
+  --content "$SLUG/posters/infographic.json" \
+  --preset kawaii-journal --orientation horizontal --aspect 4:3 --size 1536x1152 \
+  --prompt-name post-to-img-horizontal.txt --out-dir "$SLUG/prompts"
+python3 ~/.claude/skills/post-to-img/scripts/build_prompt.py \
+  --content "$SLUG/posters/infographic.json" \
+  --preset kawaii-journal --orientation vertical --aspect 3:4 --size 1152x1536 \
+  --prompt-name post-to-img-vertical.txt --out-dir "$SLUG/prompts"
+```
+
+4. manifest 只含这两张，走 `gen_images.sh`（quality/size fallback 与场景图相同）。gpt-image-2 能把中文排进信息图；grok 容易乱码，乱了就缩短 prompt 重试，不要改用封面叠字脚本硬贴整张信息图。
+
+```text
+posters/post-to-img-horizontal-poster.png|1536x1152|prompts/post-to-img-horizontal.txt
+posters/post-to-img-vertical-poster.png|1152x1536|prompts/post-to-img-vertical.txt
+```
+
+5. `Read` 两张图：标题可辨、三区（或竖版上中下）都在、无站点水印。不过就重出。
+6. **比例门（PIL 实测，必须）**：竖版宽高比 ≈0.75（3:4）、横版 ≈1.3333（4:3）。实测端点可能不认精确像素（2924762：请求 1152×1536 返回 1086×1448，等比 0.943×），**比例对即可用，比例不对必须重出**——禁止只看文件大小或只凭目测。通过后才进入 Step 3/4。
 
 ### Step 3 — 确认（可跳过口头确认）
 
-默认展示：场景列表（heading + 口播字数）、封面大字、将生成的图片清单与尺寸、音色/语速、合规清单路径。用户已说「直接出片 / 开干」→ 跳过口头确认，**仍须完成 Step 2b**。
+默认展示：场景列表（heading + 口播字数）、封面大字、帖子内容图两张路径、将生成的场景图清单与尺寸、音色/语速、合规清单路径。用户已说「直接出片 / 开干」→ 跳过口头确认，**仍须完成 Step 2b 与 Step 2c**。
 
 ### Step 4 — 生图（3:4 + 4:3，走 gen-img）
 
@@ -148,11 +191,11 @@ cp ~/.claude/skills/post-to-video/合规检查.md 的清单段落 \
 
 | 文件 | 比例 | 首选 size | 接口不认时 fallback | 用途 |
 |------|------|-----------|---------------------|------|
-| `images/sceneN-3x4.png` | 3:4 | `1024x1536` | `1152x1536` | 竖版视频画面 |
+| `images/sceneN-3x4.png` | 3:4 | `1152x1536`（**1024x1536 是 2:3**） | `1024x1536` | 竖版视频画面 |
 | `images/sceneN-4x3.png` | 4:3 | `1536x1152`（**grok 直接 `1536x1024`**） | `1536x1024` | 横版视频画面 |
 | `covers/.scratch/*-notext.png` | 同上 | 同上 | 同上 | 无字底图，禁止当正片 |
-| `covers/vertical-3-4.png` | 3:4 | Pillow 叠字产出 | — | 抖音/视频号/公众号封面 |
-| `covers/horizontal-4-3.png` | 4:3 | Pillow 叠字产出 | — | B站/通用封面 |
+| `covers/vertical-3-4.png` | 3:4 | Pillow 叠字产出 `1152x1536` | — | 抖音/视频号/公众号封面 |
+| `covers/horizontal-4-3.png` | 4:3 | Pillow 叠字产出 `1536x1152` | — | B站/通用封面 |
 
 每个场景出 **两个比例各一张**（用户只要单一比例时减半）。prompt 由 Claude 按 post-to-img 风格预设拼装（默认 `kawaii-journal`；技术帖可 `clean-tech`），每场景 prompt 落盘 `prompts/sceneN.txt`。
 
@@ -297,8 +340,9 @@ B站分区按内容选（生活向用「生活」，勿盲填「人工智能」�
 
 产出：
   ~/Documents/learn-claude-code/generated-videos/post-to-video/{slug}/
-    source.md  content.json  review-checklist.md  publish.json
-    prompts/  images/  covers/{vertical-3-4,horizontal-4-3}.png  covers/.scratch/
+    source.md  content.json  posters/infographic.json  review-checklist.md  publish.json
+    prompts/  posters/post-to-img-{horizontal,vertical}-poster.png
+    images/  covers/{vertical-3-4,horizontal-4-3}.png  covers/.scratch/
     voiceover/  captions/  video/
 ```
 
@@ -308,8 +352,10 @@ B站分区按内容选（生活向用「生活」，勿盲填「人工智能」�
 - [ ] 口播说人话，每段 ≤ 80 字；scenes 顺序即播放顺序
 - [ ] 无帖子来源；称呼全部「道友+名字」
 - [ ] `review-checklist.md` 已按 合规检查.md 落盘勾选
+- [ ] 帖子内容图两张已出、PIL 实测比例（竖 ≈0.75 / 横 ≈1.3333）且 Read 通过，才开始场景配图与配音
+- [ ] `posters/` 里是信息图，没有拿去替换 `covers/` 或 `images/sceneN`
 - [ ] 图片数 == 音频数 == 场景数；图片均 >5KB
-- [ ] `covers/` 根目录只有两张正片，中间图在 `.scratch/`
+- [ ] `covers/` 根目录只有两张正片（1152×1536 / 1536×1152），中间图在 `.scratch/`
 - [ ] 封面中文大字 Pillow 叠字且 Read 视觉校验通过
 - [ ] 旧 wav 已归档 `.stale_archive/`，durations.json 来自本期 ffprobe
 - [ ] 字幕 dry-run 人工扫过禁切反例；无 <1s 闪行
@@ -334,6 +380,8 @@ B站分区按内容选（生活向用「生活」，勿盲填「人工智能」�
 
 ## 版本
 
+- **v1.0.4**（2026-09-22）：比例修正——竖版 3:4 从误记的 `1024x1536`（实为 2:3）改为 `1152x1536`；`build_prompt.py` 按 `--size` 自动写画布锁定句（实测服务端不认精确像素但锁句保证比例：1152×1536 → 1086×1448）；Step 2c 增加 PIL 实测比例门；`overlay_cover_text.py` 输出真 3:4/4:3（1152×1536 / 1536×1152，cover 裁切不变形）；`gen-img.sh` 去掉 prompt/响应的 shell 插值。
+- **v1.0.3**（2026-09-22）：视频流程前增加阻塞门——用 post-to-img 先出 4:3 / 3:4 帖子内容图（`posters/post-to-img-horizontal-poster.png`、`posters/post-to-img-vertical-poster.png`）。竖版提示词上下堆叠。信息图不是封面，也不是分镜。
 - **v1.0.2**（2026-09-22）：按 2924762 成片过程补全流水线——`合规检查.md`（脚本/生图/封面强制对照）+ `publish.json`（标题与内容脉络）+ `review-checklist.md` 落盘；`gen_images.sh` quality/size 按模型 fallback（grok 禁 high、4:3=1536x1024）；封面无字底图进 `.scratch/`，`overlay_cover_text.py` 叠 `cover_text`；正片只留两张。
 - **v1.0.1**（2026-09-22）：字幕烧录对齐 `ai-news-factory` `Subtitles.tsx`——Pillow PNG 叠黑半透明圆角底（`rgba(0,0,0,0.75)` / padding 10×24 / radius 12），不再只有白字黑边。
 - **v1.0.0**（2026-09-21）：首版。取文 → content.json → gen-img 双比例配图（3:4/4:3）→ edge-tts 配音 → 语义切行 + whisper 对齐字幕 → ffmpeg 合成校验。经验规则沉淀自 ai-news-factory v3.38.0（见 references/experience.md）。

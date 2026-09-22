@@ -4,7 +4,7 @@
 # 规则来源（ai-news-factory 实战坑位 + 2026-09-21 2924762，详见 references/experience.md）：
 # - 断点续跑：已存在且 >5KB 的文件跳过，只补缺失（整批超时后禁止无条件重跑）
 # - quality：gpt-image-2 可 high；grok-imagine-image 只认 low/medium（硬编码 high 会整批失败）
-# - size fallback：3:4 1024x1536→1152x1536；4:3 1536x1152→1536x1024（grok 常拒 1152）
+# - size fallback：3:4 1152x1536→1024x1536（1024x1536 实为 2:3，仅兜底）；4:3 1536x1152→1536x1024（grok 常拒 1152）
 # - 封面正片只许 vertical-3-4.png / horizontal-4-3.png；其它 covers/* 改写进 .scratch/
 # - 单张失败重试；日志不打印任何 API Key
 #
@@ -12,10 +12,10 @@
 #   gen_images.sh <slug_dir> [manifest_file]
 #
 # manifest 每行: <相对输出路径>|<size>|<prompt 文本文件（相对 slug_dir，可省）>
-#   images/scene1-3x4.png|1024x1536|prompts/scene1-3x4.txt
+#   images/scene1-3x4.png|1152x1536|prompts/scene1-3x4.txt
 #   images/scene1-4x3.png|1536x1152|prompts/scene1-4x3.txt
-#   covers/.scratch/vertical-notext.png|1024x1536|prompts/cover-v.txt
-#   covers/.scratch/horizontal-notext.png|1536x1024|prompts/cover-h.txt
+#   covers/.scratch/vertical-notext.png|1152x1536|prompts/cover-v.txt
+#   covers/.scratch/horizontal-notext.png|1536x1152|prompts/cover-h.txt
 
 set -uo pipefail
 
@@ -109,7 +109,7 @@ gen_one() {
   if [ "$out_rel" != "$out_rel_in" ]; then
     echo "[info] 非正片封面改写到 .scratch: ${out_rel_in} → ${out_rel}"
   fi
-  size="$(prefer_size "${size_in:-1024x1536}")"
+  size="$(prefer_size "${size_in:-1152x1536}")"
   if [ "$size" != "${size_in:-}" ] && [ -n "${size_in:-}" ]; then
     echo "[info] ${out_rel} size ${size_in} → ${size}（当前 model 不认原尺寸）"
   fi
