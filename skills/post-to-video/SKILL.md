@@ -1,7 +1,7 @@
 ---
 name: post-to-video
 description: 将论坛帖子/长文自动转化为短视频——按 3:4 竖版与 4:3 横版生成配图，再由 content.json 经 edge-tts 生成配音与字幕，最终合成带字幕视频。触发词: "帖子转视频", "post to video", "长文转视频", "帖子做视频", "图文转视频", "复盘视频", "帖子成片", linux.do 帖子视频
-version: 1.0.4
+version: 1.0.5
 ---
 
 # post-to-video — 帖子/长文 → 配图 + TTS + 字幕 → 短视频
@@ -128,6 +128,7 @@ linux.do 抽取脚本（evaluate）：
 4. 保留原帖金句与事实，不编造；可归纳压缩。
 5. 场景数建议 4–8 个；第 1 场景 = Hook（口播即 `hook` 字段）。
 6. **来源 / 称呼（合规硬规则）**：`source_url` 可留空；口播、字幕、画面、封面、简介 **禁止出现帖子来源**（linux.do / L站 / 链接）。称呼全部 **「道友+名字」**，禁止「佬友」裸用（不要套用 ai-news-factory 的「佬友→大家」）。
+7. **用户名去下划线（坑 223）**：口播里的用户名去掉 `_`，用空格（`道友chen dragon`）。edge-tts 会把 `_` 读成「下划线」。`publish.json` 和图内文字保留原名。改了口播必须重跑对应场景 TTS。
 
 ### Step 2b — 合规对照（不可跳过落盘）
 
@@ -231,7 +232,7 @@ python3 ~/.claude/skills/post-to-video/scripts/gen_tts_edge.py \
 
 脚本行为（全部来自实战规则）：
 
-1. **先清残留**：已有 `voiceover/scene*.wav` 一律 `shutil.move` 归档到 `voiceover/.stale_archive/`（不用 `rm`——自动权限会拦不可逆删除；残留旧音频是 desync 头号根因）。
+1. **先清残留**：已有 `voiceover/scene*.wav` 一律 `shutil.move` 归档到 `voiceover/.stale_archive/`（不用 `rm`——自动权限会拦不可逆删除；残留旧音频是 desync 头号根因）。**无 `--only` 时这是全量归档**（坑 225）：口播未定稿就跑会清掉已有好配音。只改几个场景用 `--only 6,7`，其余 wav 与其 `durations.json` 条目保留。
 2. **逐场景串行**合成（禁止并发），失败指数退避 5s→15s→30s 最多 3 次。
 3. edge-tts 出 MP3 → `ffmpeg -filter:a atempo=1.4 -acodec pcm_s16le -ar 24000 -ac 1` 转 WAV。
 4. 每场景校验文件大小 + ffprobe 时长 > 0，**禁止把空 wav 当成功**。
@@ -253,7 +254,7 @@ python3 ~/.claude/skills/post-to-video/scripts/gen_captions.py \
   --dir ~/.../{slug} --extra-word OpenClaw --extra-word 被优化
 ```
 
-切行规则（语义优先，勿改）：`。！？；` 强制断；`，、：` 仅当行 ≥16 字才断；允许略超至 20 字保住专名/动宾；超 20 黄金分割 40–60%；无合法切点整句保留，**禁止按字符下标硬切**；对齐后 <1s 的行并回上一行。
+切行规则（语义优先，勿改）：`。！？；` 强制断；`，、：` 仅当行 ≥16 字才断；允许略超至 20 字保住专名/动宾；超 20 黄金分割 40–60%；无合法切点整句保留，**禁止按字符下标硬切**；对齐后 <1s 的行并回上一行，**合并后仍 ≤20 字**（坑 224：放宽到 24 会拼出 26 字行，42px 烧录时被右边缘裁掉；超长就保留短行）。
 
 偏移按 **wav 文件实际时长**累加（含片尾静音），不用 whisper 的 `info.duration`（VAD 裁尾会让后面场景字幕整体提前——坑 208）。脚本会打印 `offset += file_dur=X (whisper Y)` 供对账。
 
@@ -280,7 +281,7 @@ python3 ~/.claude/skills/post-to-video/scripts/build_video.py \
 ### Step 8 — 校验与交付（必须执行）
 
 1. **时长对齐**：`ffprobe` 视频时长 ≈ `durations.json` 求和（音频总时长），差 >0.5s 说明分段时长与音频不同源，回 Step 5 重修（缺一步全链漂移）。不要用 captions 末条 `endMs` 当基准——它来自 whisper 实测发音结束时刻，天然早于场景尾部 pad 静音。
-2. **抽帧视觉校验**：首帧 + 1–2 个场景切点抽帧 `Read` 检查画面与字幕：
+2. **抽帧视觉校验**：至少 6 个时间点抽帧 `Read`，必须覆盖**最长几条字幕**所在时刻，不只抽首帧和片尾。字幕被画幅右边缘切掉即回 Step 6 重切（坑 224：Pillow 预检报 995px 仍被裁，数字不能代替看帧）。
    ```bash
    ffmpeg -y -i video/post-video-3x4.mp4 -vf "select=eq(n\,0)" -frames:v 1 /tmp/first.png
    ```
@@ -350,6 +351,8 @@ B站分区按内容选（生活向用「生活」，勿盲填「人工智能」�
 
 - [ ] `cover_text` 是 Hook 短句两行，不是整条标题（坑 203）
 - [ ] 口播说人话，每段 ≤ 80 字；scenes 顺序即播放顺序
+- [ ] 口播用户名无 `_`（否则 TTS 读出「下划线」）
+- [ ] 字幕合并后每行 ≤20 字；抽帧覆盖最长字幕，确认没被右边缘裁掉
 - [ ] 无帖子来源；称呼全部「道友+名字」
 - [ ] `review-checklist.md` 已按 合规检查.md 落盘勾选
 - [ ] 帖子内容图两张已出、PIL 实测比例（竖 ≈0.75 / 横 ≈1.3333）且 Read 通过，才开始场景配图与配音
@@ -380,7 +383,7 @@ B站分区按内容选（生活向用「生活」，勿盲填「人工智能」�
 
 ## 版本
 
-- **v1.0.4**（2026-09-22）：比例修正——竖版 3:4 从误记的 `1024x1536`（实为 2:3）改为 `1152x1536`；`build_prompt.py` 按 `--size` 自动写画布锁定句（实测服务端不认精确像素但锁句保证比例：1152×1536 → 1086×1448）；Step 2c 增加 PIL 实测比例门；`overlay_cover_text.py` 输出真 3:4/4:3（1152×1536 / 1536×1152，cover 裁切不变形）；`gen-img.sh` 去掉 prompt/响应的 shell 插值。
+- **v1.0.5**（2026-09-23）：按 2931081 成片补三条——口播用户名去掉 `_`（坑 223，否则读出「下划线」）；`merge_short_dwell` 合并上限从 24 收到 20 字，抽帧必须覆盖最长字幕（坑 224，26 字行被画幅右缘裁）；`gen_tts_edge.py` 增加 `--only`，全量重跑会归档全部现有 wav（坑 225）。
 - **v1.0.3**（2026-09-22）：视频流程前增加阻塞门——用 post-to-img 先出 4:3 / 3:4 帖子内容图（`posters/post-to-img-horizontal-poster.png`、`posters/post-to-img-vertical-poster.png`）。竖版提示词上下堆叠。信息图不是封面，也不是分镜。
 - **v1.0.2**（2026-09-22）：按 2924762 成片过程补全流水线——`合规检查.md`（脚本/生图/封面强制对照）+ `publish.json`（标题与内容脉络）+ `review-checklist.md` 落盘；`gen_images.sh` quality/size 按模型 fallback（grok 禁 high、4:3=1536x1024）；封面无字底图进 `.scratch/`，`overlay_cover_text.py` 叠 `cover_text`；正片只留两张。
 - **v1.0.1**（2026-09-22）：字幕烧录对齐 `ai-news-factory` `Subtitles.tsx`——Pillow PNG 叠黑半透明圆角底（`rgba(0,0,0,0.75)` / padding 10×24 / radius 12），不再只有白字黑边。

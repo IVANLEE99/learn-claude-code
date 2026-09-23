@@ -174,18 +174,21 @@ def group_caps(tokens, max_len=16, min_len=6, hard_max=20):
     return fixed
 
 
-def merge_short_dwell(aligned, min_sec=1.0):
-    """对齐后：时长 <1s 的行并回上一行（物理下限）。"""
+def merge_short_dwell(aligned, min_sec=1.0, max_len=20):
+    """对齐后：时长 <1s 的行并回上一行（物理下限）。
+    合并后的行必须仍 ≤ max_len。字数上限放宽到 24 会拼出 26 字行，
+    42px 烧录时右侧被画幅裁掉（2931081：门报 995px，成片实际切在「必经之」）。"""
     if not aligned:
         return aligned
     out = [dict(aligned[0])]
     for c in aligned[1:]:
         dur = c['end'] - c['start']
         prev_dur = out[-1]['end'] - out[-1]['start']
-        if dur < min_sec and _char_len(out[-1]['text'] + c['text']) <= 24:
+        joined = _char_len(out[-1]['text'] + c['text']) <= max_len
+        if dur < min_sec and joined:
             out[-1]['text'] = out[-1]['text'] + c['text']
             out[-1]['end'] = c['end']
-        elif prev_dur < min_sec and _char_len(out[-1]['text'] + c['text']) <= 24:
+        elif prev_dur < min_sec and joined:
             out[-1]['text'] = out[-1]['text'] + c['text']
             out[-1]['end'] = c['end']
         else:
@@ -345,7 +348,7 @@ def main():
         dur = adur if adur else sc['duration']
         print(f'  whisper: {len(words)} words, dur={adur:.2f}s (ffprobe {sc["duration"]}s)')
         aligned = align_caps_to_words(caps, words, dur)
-        aligned = merge_short_dwell(aligned, min_sec=1.0)
+        aligned = merge_short_dwell(aligned, min_sec=1.0, max_len=20)
         print(f'  after min-1s merge: {len(aligned)} lines')
         for c in aligned:
             c['sceneId'] = n
