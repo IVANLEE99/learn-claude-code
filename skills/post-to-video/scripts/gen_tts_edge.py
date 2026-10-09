@@ -63,9 +63,12 @@ def load_scenes(slug_dir: Path):
     return items
 
 
-def archive_stale(vo_dir: Path):
-    """旧音频归档而非删除（rm 可能被自动权限判为不可逆删除而拒绝）。"""
+def archive_stale(vo_dir: Path, only=None):
+    """旧音频归档而非删除（rm 可能被自动权限判为不可逆删除而拒绝）。
+    only 非空时只归档这些场景，其余 wav 留在原地。"""
     stale = sorted(vo_dir.glob('scene*.wav'))
+    if only:
+        stale = [f for f in stale if f.stem[5:].isdigit() and int(f.stem[5:]) in only]
     if not stale:
         return
     archive = vo_dir / '.stale_archive'
@@ -98,13 +101,22 @@ def main():
     p.add_argument('--voice', default=DEFAULT_VOICE)
     p.add_argument('--rate', default='+0%', help='edge-tts 语速，如 +10%%')
     p.add_argument('--atempo', default='1.4', help='ffmpeg 加速倍率，1.0 = 原速')
+    p.add_argument('--only', default='', help='只重合成这些场景 id，逗号分隔（如 6,7）；其余 wav 原样保留，不归档')
     args = p.parse_args()
 
     slug_dir = Path(args.dir).expanduser().resolve()
     scenes = load_scenes(slug_dir)
+    only = {int(x) for x in args.only.split(',') if x.strip()}
+    if only:
+        missing = only - {sid for sid, _ in scenes}
+        if missing:
+            sys.exit(f'--only 指定的场景不在 content.json：{sorted(missing)}')
+        scenes = [(sid, text) for sid, text in scenes if sid in only]
     vo_dir = slug_dir / 'voiceover'
     vo_dir.mkdir(parents=True, exist_ok=True)
-    archive_stale(vo_dir)
+    # 坑 223：无 --only 时归档全部旧 wav。重跑前确认 content.json 的 voiceover 是终稿，
+    # 否则好的配音被移进 .stale_archive/，只能从归档里捞回来。
+    archive_stale(vo_dir, only or None)
 
     atempo = float(args.atempo)
     durations = {}
@@ -141,7 +153,12 @@ def main():
             print(f'[scene{sid}] FAILED: {last_err}', file=sys.stderr)
             sys.exit(1)
 
-    (vo_dir / 'durations.json').write_text(
+    dur_path = vo_dir / 'durations.json'
+    if only and dur_path.exists():
+        kept = json.loads(dur_path.read_text(encoding='utf-8'))
+        kept.update(durations)
+        durations = kept
+    dur_path.write_text(
         json.dumps(durations, ensure_ascii=False, indent=2), encoding='utf-8')
     total = sum(durations.values())
     print(f'\n=== DONE === 场景 {len(durations)} 个，总时长 {total:.2f}s')
