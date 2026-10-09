@@ -1,7 +1,7 @@
 ---
 name: post-to-video
 description: 将论坛帖子/长文自动转化为短视频——按 3:4 竖版与 4:3 横版生成配图，再由 content.json 经 edge-tts 生成配音与字幕，最终合成带字幕视频。触发词: "帖子转视频", "post to video", "长文转视频", "帖子做视频", "图文转视频", "复盘视频", "帖子成片", linux.do 帖子视频
-version: 1.0.5
+version: 1.0.6
 ---
 
 # post-to-video — 帖子/长文 → 配图 + TTS + 字幕 → 短视频
