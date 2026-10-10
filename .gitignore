@@ -1,3 +1,4 @@
 .claude/
 generated-images/
 news-pipeline/*/api_config.json
+node_modules

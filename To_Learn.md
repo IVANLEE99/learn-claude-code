@@ -580,7 +580,7 @@ vertical-3-4.png
 
 
 明天0:05分执行
-  执行 linuxdo 全量日报流水线（日期按当天：2026-09-02）。
+  执行 linuxdo 全量日报流水线（日期按当天：2026-10-11）。
   要求与「过滤后全部抓取完」一致：
   1) 用 linuxdo-daily：双源列表 → 合并去重/公益站过滤 → 32h 窗口 → 全量逐帖抓取正文（每批立即保存 batch_browser_N.json）→ 二次过滤 → 写 data/daily/YYYY-MM-DD.json、data/reports/YYYY-MM-DD.md、press、PDF。
   2) 然后用 ai-news-factory 生成当日日报视频：事件按推荐自动选定，不用再向我确认；权限给足直接跑；上传各平台一律存草稿。
@@ -599,10 +599,101 @@ vertical-3-4.png
 
 
 根据今天的生成过程更新优化skill 
-封面图记得按照要求生成
-b站投稿分区选择人工智能
+
 
 #期刊
 #flash
 #新闻播报
 #上新
+
+
+
+Bash 分类器故障约 2.5 小时：python 内联代码全被拦 → 抓取/合并/写盘全走 Playwright file://+download 通道；发现 python3 <file>、curl:*、npx remotion render:*、bash mimo-tts.sh:* 等允许列表前缀可直通。
+mimo-tts 双端点 key 失效：已修补 mimo-tts.sh（/anthropic 剥离 + _001 fallback + 双认证头），仍失败 → 降级用 elysiver grok-voice-latest（MP3 直出，免 ffmpeg）。
+字幕时间轴：whisper API 词级时间戳（4 场景）+ 段内比例兜底（4 场景），锚点位置 65.7% 容差内
+
+
+
+极简中文科技资讯海报，竖版 3:4 构图，浅灰蓝色纯色背景，大面积留白，画面整体干净、克制、现代、专业；主体为居中偏左的大型黑色粗体中文排版，采用现代无衬线字体，字重厚重，行距紧凑，文字形成明确的纵向信息层级；部分关键词使用明亮科技蓝强调，黑色与蓝色形成强烈但简洁的视觉对比；顶部左侧有一个大型蓝色中文左引号装饰，右下区域有对应的大型蓝色右引号装饰，形成书摘/新闻快讯视觉语言。
+
+画面文字按参考图进行排版，保持清晰、准确、简洁：
+“【2026-09-05】
+Astra全量开放
+第一日，Plus额
+度经不起烧｜5
+条重磅AI新闻一
+次看完｜今日
+羊报AI”
+
+其中“Astra”“AI”等关键词以科技蓝突出，其余文字为深黑色；日期位于正文最上方并居中；主体文字从上到下整齐排列，左对齐，字号从大到中等逐级组织，粗体、字距自然；底部右侧有非常淡的灰色水印文字及小型小羊图标，弱化处理，不抢主体视觉；整体采用高级互联网科技媒体资讯卡片风格，类似 AI 新闻社交媒体封面，极简平面设计，Swiss typography，现代编辑设计，精准网格排版，视觉重心集中，无遮挡，无人物，无复杂背景，无插画，无照片。
+
+镜头与构图：正面平视、二维平面海报视角、无透视畸变、完整画布、居中留白、文字区域占画面中部约一半，四周保留充足呼吸空间，竖向 3:4 比例。
+
+光线：均匀柔和的平面照明，无明显阴影，无高光，无渐变光效。
+
+色彩：极浅灰蓝背景，深黑文字，少量高饱和科技蓝强调，低饱和灰色水印，整体冷色、简洁、理性。
+
+风格与画质：极简科技媒体海报、现代中文排版、专业编辑设计、互联网 AI 新闻视觉、扁平化设计、高级留白、超清、锐利边缘、字体清晰、排版精准、4K、高分辨率、干净背景、无噪点、无多余装饰；严格避免乱码、错别字、额外文字、人物、Logo 变形、复杂图案、渐变背景、立体文字、透视文字、过度装饰。
+
+节日祝福(中国节日)
+所有节日
+
+
+只需要上传公众号~其他我已经手动上传了
+
+
+https://linux.do/raw/2995229
+帖子做成视频 不要出现帖子来源
+称呼全部用道友+名字
+竖屏幕视频
+
+
+根据生成的content.json 生成tts 字幕 生成视频
+
+https://xuanhuan.skin/realms/rmjz/
+
+/Users/youngsdream/Documents/learn-claude-code/skills/post-to-img
+/Users/youngsdream/Documents/learn-claude-code/skills/edge-tts
+/Users/youngsdream/Documents/learn-claude-code/skills/ai-news-factory
+参考上面的skill 按要求生成新的skill post-to-video,将ai-news-factory中的经验总结拿过来输出到/Users/youngsdream/Documents/learn-claude-code/skills 然后同步到系统
+帖子内容->按照要求生成图片3:4 和 4:3 ->根据生成的content.json edge-tts生成tts 字幕 生成视频
+
+根据今天的生成过程更新优化skill
+要先生成帖子内容图片后再进行视频流程
+生成帖子内容图
+使用post-to-img 帖子内容->按照要求生成帖子内容3:4 和 4:3帖子内容提示词 生成 post-to-img-horizontal-poster.png post-to-img-vertical-poster.png 
+参考
+/Users/youngsdream/Documents/learn-claude-code/generated-images/post-to-img/20260921_2931081/poster.png
+/Users/youngsdream/Documents/learn-claude-code/generated-images/post-to-img/20260921_2931081/prompt.txt
+
+
+字幕没背景,参考/Users/youngsdream/Documents/learn-claude-code/skills/ai-news-factory字幕添加背景
+
+根据今天的生成过程更新优化skill
+参考/Users/youngsdream/Documents/learn-claude-code/skills/ai-news-factory
+1、生成publish.json
+标题：《靠老人带娃，就是认命吗？》
+包含内容脉络
+深夜吐苦水 → 纠结（不敢请保姆/老人带娃旧模式）→ 评论区一边倒（有人带就不错了）→ 最扎心质问（laoyou：你就是她带大的）→ 务实方案（育儿嫂+沟通）→ 谁带娃谁说了算 → 两条路 → 结尾「每一代前进一点点就很好了」+ 评论区 CTA
+
+2、提取合规的内容到单独的合规检查.md文件,脚本,生图,封面等流程都要遵守
+合规检查.md文件内容包含但不限于
+**🔴 禁止使用的词汇**：
+**🔴 脚本审核检查清单**
+### 🔴 平台合规审查规则
+合规检查清单
+
+
+押韵￼
+
+
+虢礫緙嘞
+
+https://linux.do/t/topic/2935850
+
+多个生图风格
+
+创作自己的ai角色
+Q版国风IP角色插画，半身特写，可爱拟人小羊，大头小身。白色蓬松羊毛，浅粉色圆脸，脸颊两团腮红，黑色小鼻子，开心张嘴，一只眼眨眼、另一只睁大。头顶两侧棕色螺旋羊角。穿红色连帽卫衣，白色抽绳。右手ok，左手竖起大拇指。粗黑色干净描边，赛璐璐平涂，圆润可爱，潮玩感。暖米色做旧宣纸背景，隐约浅色山水纹理，红色细边框，左上短红线与黄色强调线，右下红色回纹角花。高饱和暖色，柔和块面阴影，无强光，矢量插画质感，高清，居中构图。
+
+打开top 10的视频 分析视频的优缺点
