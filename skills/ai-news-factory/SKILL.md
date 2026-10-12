@@ -1,13 +1,17 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.44.0
+version: 3.46.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.44.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.46.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.46.0 核心改进（2026-10-12 周报 W40 实测）**：**周报脚本先过字数门禁再进 TTS（坑 244）**——W40 初版 531 字 → edge-tts 云扬 atempo1.4 实测仅 82s，低于周报 100s 下限整 18s；扩写到 682 字重跑得 104.746s 合格。实测换算 ≈6.4 字/s（atempo1.4），**周报去标点字数门禁 ≥650 字、目标 680–720（105–110s 留头寸）**；脚本写完先 `len(strip_punct(full))` 断言再落 TTS，TTS 实测 <100s 时扩写正文补齐，**不降 atempo、不挪锚点凑时长**。**派生 run_all.sh 必须带 PNG→JPG + 渲染 timeout（坑 245）**——W39 派生版同步段只 `cp scene*.png`，而 Composition 引 `images/scene*.jpg`（v3.45.0 sips/ffmpeg 链是必做步骤不是备注），渲染 seek 到 frame 613 超时；且 10 场景大图默认 30s seek timeout 不够，渲染命令必须 `--timeout=180000`。派生 run_all 后 grep 断言：①同步段含 `ffmpeg ... scene$i.jpg`（或 sips），②渲染命令含 `--timeout`，③无上期日期残留（坑 241 扩展到 run_all）。**concepts.json 结构是 `{concepts:[...], updated}`，concepts 为 list 按 id 查（坑 246）**——verify 脚本 `bank.get('token')` 对 list 直接 `AttributeError: 'list' object has no attribute 'get'`，正确写法 `next(x for x in bank if x.get('id')=='token')`；verify 分两级跑：落盘脚本层即刻跑，**总时长 100–150s 实测项必须等 durations.json 生成后再跑**（无 durations 时 INFO 跳过而非 FAIL）。**B站创作声明是 bcc-select 自定义组件，text= 定位必超时（坑 247）**——`page.locator('text=请选择符合您视频内容的创作声明')` 5s 必超时；正确交互 = `getBoundingClientRect` 取选择框 rect → `page.mouse.click(rect 中心)` 开下拉 → 选项同法点 rect 中心，回读判据沿用 v3.45.0（body 含 `个人观点，仅供参考`）。同理 **form 步分区 locator 超时 ≠ 未选中**——W40 分区 locator 报 timeout 但页面回读已是 `人工智能`，以回读为准不重跑（坑 242 回读铁律正例）。**公众号 `cgi-bin/publish?action=list` 直接 goto 抛 `ERR_HTTP_RESPONSE_CODE_FAILURE`（坑 248）**——发表记录页 URL 不稳定，验收走首页「近期草稿」+ appmsgid 编辑页直达（坑 221 三件套内替代）。**字幕尾差分解补第四项**：坑 234 可加性闭合 = 静音尾 + 帧取整 + 容器 + **whisper 对齐尾隙（末行字幕停在末音节前）**，W40 实测 1.098s = 0.415+0.188+0.048+0.447 精确闭合。**坑 215 收口**：用户中途声明「已经全部手动上传」→ 四平台全部停手（含核验），当期只做 skill 回写。
+>
+> **🔴 v3.45.0（2026-10-11 日报实测，常规记录无新坑）**：1011 期 daily 585 帖 → 视频 70.25s（2106 帧，anchor_pos 0.7312，标准顺序 [1,2,3,4,5,6] 无需重排）→ 四平台全部存草稿成功（公众号脚本分步 open→save 全过 appmsgid=100001519，B站/抖音/视频号用户手动，坑 215）。**场景图 PNG→JPG 落盘链**：`gen_scenes_api.py` 出图 `images/scene*.png`（1920×1080 PNG）→ `sips -s format jpeg` 转 `video-project/public/images/scene*.jpg`（Composition 引 `*.jpg`），转换链须与引用后缀一致，错配则 Remotion 渲染黑帧。**首帧无标题栏属正常**：NewsTitle 有入场动画延迟，`frame 0` 无标题，验收抽 `2s` 帧（标题栏日期+品牌+首条字幕齐现）；52s 帧验锚点字幕「开头说的那个词」。**B站创作声明回读判据**：下拉框 placeholder 常驻 `请选择符合您视频内容的创作声明`，`textContent` 含该文案 ≠ 未选；真判据 = `body.innerText` 是否含已选项（`个人观点，仅供参考`）——1011 期回读 False 确认未选中后，因用户手动接管按坑 215 停手。旧条目归档见正文 v3.44.0。
+>
 > **🔴 v3.44.0 核心改进（2026-10-10 日报实测）**：**派生脚本必须做内容校验，语法检查不算数（坑 241）**——1010 期 `derive_gen_scripts` 只跑了 `py_compile`/`node --check`（leftover=0），但 `wechat_upload.py`/`bili_draft.py` 的 TITLE 只换了日期，SECTIONS/DESC/TAGS 全是 1009 旧事件（DeepSeek-V4/magpie/Pi）；直接跑会把上一期内容发出去。派生后必须 grep 断言：①新日期的核心事件词在脚本里（如 1010 → `Anthropic`、`峰谷`），②上一期的事件词零残留（如 1010 不得含 `DeepSeek-V4`、`magpie`），③MARK/截图前缀等日期标识同步（`__wx1009`→`__wx1010`、`wx1009_step`→`wx1010_step`）。**B站标签重输仍被拒时点推荐行同名 chip（坑 232 补充）**——「今日羊报AI」首入被拒（话题专用 toast）原样重输即过，但 `Claude` 大写连拒两次、重输也失败，点推荐标签行的 `claude`（小写，平台规范化）成功；fallback 顺序 = 重输同文 → 点推荐行同名 chip（大小写不敏感匹配）。**B站分区点击失败后会回落成 vlog，必须回读验证（坑 242）**——form 步分区 locator 超时后分区显示为 `vlog`（默认值），修复方式 = 点当前分区文本（`vlog`/`请选择分区`）打开下拉 → 扁平列表点 `人工智能`（坑 205 协议仍有效），点完必须回读页面显示文本断言 = 目标分区。**公众号分步脚本必须按序执行，禁止直接跳 save（坑 243）**——`save` 步的 `editor_page(ctx)` 依赖 `open` 步打的 `window.__wx1010` 标记，没跑 open 直接 save 会 `AttributeError: 'NoneType' object has no attribute 'bring_to_front'`；分步顺序 open→body→images→cover→title→save→verify，中断后重跑也要从最近的已完成步续。**公众号 body/images 步实测顺畅**：817 字正文无结构检测弹窗（无 B 档内容时坑 220 不触发），6 占位符（5 场景图+封面图）逐张上传+每图即存草稿全过。**坑 215 双命中**：B站、公众号先后被用户手动接管，声明后立即停止该平台一切操作（含核验）。**CDP daemon 会随会话中断消失**：上传前先 `curl -s -m 5 http://localhost:9222/json/version` 探活，空响应则裸启日常 Chrome（坑 198/193 协议）再附着。
 >
 > **🔴 v3.43.0 核心改进（2026-10-09 日报实测）**：**锚点占比不能靠把 CTA 排到锚点前面来凑（坑 236）**——播放顺序 `[1,2,3,4,6,5]` 实测占比 79.25% 合格，但 CTA 在锚点前，叙事顺序错了；正确做法是改回 `[1,2,3,4,5,6]` 并把锚点前的口播加长约 12 字把占比推过 70%（1009 实测 54.841s/78.214s=0.7012）。过渡句必须随顺序变：「回头说」只用于 CTA 之后回扣，「刚才说的」用于锚点紧接正文。**场景图默认走接口，本地 PIL 只是兜底（坑 237）**——1009 场景图直接用了 `gen_scenes_local.py` 的抽象色块，用户要求改接口重渲；封面仍走本地 PIL（中文日期/品牌名接口渲染不可靠，坑 225 不变）。**`publish.json` 是 Phase 10.2 的必落盘产物（坑 238）**——1009 整期跑完目录里没有这个文件，标题/标签没有单一事实源。**B站「封面制作」弹窗的关闭按钮必须点 `cover-editor-head-close` 自身中心（坑 239）**——泛匹配 `[class*=close]` 点到别的元素，弹窗不关、挡住表单。**B站清标签的选择器不能命中推荐标签行（坑 240）**——`.tag-item, [class*=tag-item]` 同时匹配 `.hot-tag-item`，点下去是**新增**话题标签（1009 误加「B站AI无限竞技场」），必须限定在标签输入框的 chips 容器内。
@@ -194,6 +198,7 @@ version: 3.44.0
 4. **生成周报 Markdown**：输出到 `news-pipeline/weekly/YYYY-MM-DD~YYYY-MM-DD.md`
 5. **生成周报封面**：使用周报专用封面提示词（多事件拼贴风格）
 6. **生成视频脚本**：**1件大事3W深聊50s + 锚点15-20s + 2-3条一句话快讯20s + CTA，总时长100-150s**（见 `templates/script-template-weekly.md`，替代旧 5-6 条堆叠）
+7. **🔴 脚本字数门禁（坑 244，进 TTS 前必过）**：去标点去空格总字数 **≥650、目标 680–720**（edge-tts 云扬 atempo1.4 ≈6.4 字/s → 650字≈101s、700字≈109s）；`len(strip_punct(全文))` 断言不过就扩写正文（每段仍 ≤80 字、锚点豁免），**禁止靠降 atempo 或挪锚点凑 100s**。TTS 实测 <100s 同样按此扩写重跑。
 7. **后续流程**：与日报相同（分镜→图片→TTS→字幕→视频→上传）
 
 > 🔴 **周报 Hook 约束**：只选本周最冲突的 1 件作反转/警告开场（套 4 主力公式之一）；**禁堆叠≥2事件**；禁"本期周刊把本周N件大事一次讲清"套话后缀；其余事件降为快讯。
@@ -1592,10 +1597,16 @@ ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:no
 #### Step 8.4: 复制资源到 public 目录
 
 ```bash
-cp news-pipeline/YYYY-MM-DD/images/scene*.png video-project/public/images/
+# 🔴 场景图必须转 JPG（v3.46.0/坑 245）：Composition 引的是 images/scene*.jpg，
+# 只 cp png 会让渲染 seek 超时/黑帧（坑 237/245 同根）。ffmpeg 或 sips 均可：
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  ffmpeg -y -i news-pipeline/…/images/scene$i.png -q:v 2 video-project/public/images/scene$i.jpg
+done
+# 单图输出可加 -frames:v 1 -update 1 消 image2 pattern 警告（文件仍会写出）
 cp news-pipeline/YYYY-MM-DD/voiceover/scene*.wav video-project/public/voiceover/
 cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions.json
 ```
+同步后断言 `video-project/public/images/scene*.jpg` 每场景都非空，再进 Phase 9。
 
 ### Phase 9: 视频合成
 
@@ -1608,9 +1619,10 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
   /Users/youngsdream/Documents/learn-claude-code/news-pipeline/video-project/src/index.ts \
   AINewsVideo \
   "out/{按 REPORT_MODE 读取文件名前缀}.mp4" \
-  --codec h264 --crf 18 \
+  --codec h264 --crf 18 --timeout=180000 \
   --public-dir /Users/youngsdream/Documents/learn-claude-code/news-pipeline/video-project/public
 ```
+> `--timeout=180000` 必带（坑 245）：默认 30s seek timeout 在多场景大图下会在中段帧超时（W40 卡 frame 613）。
 
 **文件名按模式参数映射表读取**：
 - daily：`out/【YYYY-MM-DD】{核心标题}… | 今日羊报AI.mp4`
@@ -2015,6 +2027,33 @@ browser_evaluate("""() => {
   return 'not found';
 }""")
 ```
+
+**Playwright 脚本版（v3.46.0 坑 247，W40 实测）**：`page.locator('text=请选择符合您视频内容的创作声明')` **必超时**（文本在隐藏 placeholder/aria 里），改用坐标点击：
+
+```python
+box = page.evaluate('''() => {
+  const el = [...document.querySelectorAll('.bcc-select-input-wrap, .bcc-select')]
+    .find(e => e.offsetParent && e.getBoundingClientRect().width > 200);
+  const r = el.getBoundingClientRect();
+  return [r.x + r.width / 2, r.y + r.height / 2];
+}''')
+page.mouse.click(*box)                      # 开下拉
+page.wait_for_timeout(1000)
+opt = page.evaluate('''() => {
+  for (const el of document.querySelectorAll('.bcc-select li, .bcc-select [class*="option"]')) {
+    if (!el.offsetParent) continue;
+    if (el.textContent.trim() === '个人观点，仅供参考') {
+      const r = el.getBoundingClientRect();
+      return [r.x + r.width / 2, r.y + r.height / 2];
+    }
+  }
+  return null;
+}''')
+page.mouse.click(*opt)                      # 选中
+# 回读判据（沿用 v3.45.0）：body.innerText 含「个人观点，仅供参考」
+```
+
+同理，form 步任何 locator 超时都**先回读再决定重跑**——W40 分区 locator timeout 但回读已是「人工智能」，不重跑（坑 242/205 回读铁律）。
 
 #### 11.6 填写简介（Quill 编辑器）
 
@@ -3441,6 +3480,8 @@ news-pipeline/
 
 **Why:** 任何「估算每句时长」的方案都无法消除单句偏差累积（v2.3.0 已修时间轴）；但所有标点一视同仁 + 16 字硬墙会切开专名/动宾，必须语义切行。
 **How to apply:** Phase 7 用 `templates/gen_captions.py`（`group_caps` + whisper），先 `--dry-run` 扫禁切反例。禁止逐标点切行、禁止按字硬切、禁止回退纯比例时间轴。旧 `gen_captions_v2.py` / `split_sentences` 已废弃作切行器。
+
+**字幕尾差可加性闭合补第四项（v3.46.0 / 2026-10-12 周报 W40 实测，坑 234 补充）**：成片时长 − 末行字幕结束时刻的差值必须能拆成可加项，否则是真不同步。闭合式 = **静音尾 + 帧取整 + 容器 + whisper 对齐尾隙**。前三项（坑 234 原三项）分别是 TTS 末尾静音、`ceil` 取整到帧、mp4 容器封装余量；第四项是 whisper 把末行字幕停在**末音节之前**留下的尾隙——字幕内容正确、只是收尾略早于口播结束。W40 实测 1.098s = 0.415 + 0.188 + 0.048 + 0.447，四项相加精确等于尾差即 PASS，**不重渲**。四项加不回去才算缺陷。
 
 ### 🔴 旧音频残留导致整体 desync（v3.20.0 / 2026-08-23 W33 周报实测）
 
@@ -5072,10 +5113,12 @@ await inputs[1].setInputFiles('horizontal-4-3.png');   // ⛔ v3.38.0 起禁用
 4. CTA scene 可兜底；`vertical-3-4.png` 必须当期生成成功
 **How to apply:** Phase 5 / 5.5
 
-### 🔴 usage-log 与 concepts 根结构（v3.10.0 / 2026-07-21）
+### 🔴 usage-log 与 concepts 根结构（v3.10.0 / 2026-07-21，v3.46.0 坑 246 补充）
 **问题**：把 `concepts.json` 当 list 迭代 → `AttributeError: str has no get`。
 **解决**：`data = json.load(...); concepts = data['concepts']`；usage-log 可能是 list 或 `{entries:[]}`，append 时兼容两种。
-**How to apply:** Step 1.6 / Phase 2 写 log
+**v3.46.0 补充（坑 246，W40 verify 脚本实测）**：`concepts` 本身是 **list**，按 id 查必须 `next(x for x in concepts if x.get('id')=='token')`。W40 的 `verify_w40.py` 写成 `concepts.get('token')`，对 list 直接 `AttributeError: 'list' object has no attribute 'get'`——根结构修对了，内层查询又当 dict 用，是同一类错误的第二处。
+**verify 分两级跑**：落盘脚本层（事件词/锚点逐字/桥句字数/旧口径零残留）脚本落盘即跑；**总时长 100–150s、锚点占比等实测项必须等 `durations.json` 生成后再跑**，无 durations 时 INFO 跳过，**不算 FAIL**。
+**How to apply:** Step 1.6 / Phase 2 写 log / 每期 `verify_*.py`
 
 ### 🟡 公众号草稿成功但封面未闭环（v3.10.0 / 2026-07-21）
 **问题**：`appmsgid=` 已出现，`.js_cover_preview_new` 仍 `display:none`。
@@ -5586,6 +5629,8 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 **Why:** list_card 的 `type=10` 与新草稿的 `type=77` 是两套列表，「查不到」是接口语义问题，不是草稿状态问题。
 **How to apply:** Phase 12 `verify` 与 `scripts/wechat_check_draft.py`。与坑 212 合并为完整三态：**编辑页可达 + 发表记录无 = 草稿已存**；**发表记录有当日 = 用户已发表（终态，禁重建）**；**编辑页不可达 + 近期草稿无 + 发表记录无 = 才允许怀疑未保存**。
 
+**v3.46.0 补充（坑 248，W40 实测）**：发表记录页 `cgi-bin/publish?action=list` **直接 `goto` 会抛 `ERR_HTTP_RESPONSE_CODE_FAILURE`**，该 URL 不稳定，不能当三件套第③项的入口。替代路径：首页「近期草稿」首条（含「更新于 HH:MM」）+ `appmsgid` 编辑页直达，两件齐即可判「草稿已存且未发表」，**不要为了第③项硬刷 publish 列表**。
+
 ### 🔴 锚点占比不能靠把 CTA 排到锚点前面来凑（v3.43.0 / 2026-10-09 实测，坑 236）
 **问题**：1009 期顺序 `[1,2,3,4,5,6]` 下锚点起始占比 0.6941，差 0.6pp 到 70%。改成 `[1,2,3,4,6,5]` 后占比 0.7925 落进区间，但 CTA 排到了锚点前面——锚点口播「回头说那个四字一轮」变成在收尾之后回扣，叙事顺序错了。
 **解决**：占比是位置约束，**不是**改叙事顺序的理由。锚点必须在 CTA 之前。占比不够时加长锚点**之前**场景的口播（1009 给场景 1 加约 12 字，重跑 TTS 后 54.841s/78.214s=0.7012），或缩短锚点之后的场景。过渡句随顺序变：「回头说」只用于锚点排在 CTA 之后的回扣，「刚才说的」用于锚点紧接它解释的那条正文。改口播后必须重跑 TTS → 重算 captions → 重渲，四者同源（既有铁律）。
@@ -5623,6 +5668,31 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 **How to apply:** Phase 9 归档段（两处「归档时机」均已写入汇报门）。
 
 ## 更新日志
+
+### v3.46.0（2026-10-12 周报 W40 实测）
+基于 **2026-10-05~10-11 周报全流程**（TOP1「时间表先行，价格随后跟上」深聊 + 3 快讯 + token 锚点 15s 兜底；TTS 104.746s / 成片 104.981s / 3148 帧 / 10.10MB；锚点占比 0.7569；字幕尾差 1.098s 四项闭合；四平台用户中途声明已手动上传，坑 215 收口，当期只做 skill 回写）实测，吸收坑 244–248：
+
+**脚本（坑 244）**
+- 周报进 TTS 前过字数门禁：去标点去空格 **≥650、目标 680–720**（atempo1.4 ≈6.4 字/s）；W40 初版 531 字实测仅 82s，扩写到 682 字重跑得 104.746s
+- 不过门禁就扩写正文（每段仍 ≤80，锚点豁免），**禁止降 atempo、禁止挪锚点凑时长**
+
+**渲染（坑 245）**
+- 派生 `run_all.sh` 同步段必须带 PNG→JPG（Composition 引 `images/scene*.jpg`，只 cp png 会 seek 超时/黑帧），渲染命令必须 `--timeout=180000`（默认 30s 在 W40 卡 frame 613）
+- 派生后 grep 断言：同步段含 jpg 转换、渲染命令含 `--timeout`、无上期日期残留（坑 241 扩展到 run_all）
+
+**概念库与核验（坑 246）**
+- `concepts.json` 的 `concepts` 是 list，按 id 查用 `next(...)`，`concepts.get(id)` 直接 `AttributeError`
+- verify 分两级：脚本层即刻跑；时长/占比实测项等 `durations.json` 再跑，无数据 INFO 跳过而非 FAIL
+
+**B站（坑 247）**
+- 创作声明是 bcc-select 自定义组件，`locator('text=…')` 必超时；`getBoundingClientRect` 取中心 `page.mouse.click` 开下拉再点选项，回读判据沿用 v3.45.0（body 含「个人观点，仅供参考」）
+- form 步 locator 超时先回读再决定重跑：W40 分区报 timeout 但回读已是「人工智能」
+
+**公众号与字幕（坑 248 / 坑 234 补充）**
+- `cgi-bin/publish?action=list` 直接 goto 抛 `ERR_HTTP_RESPONSE_CODE_FAILURE`；验收走首页「近期草稿」+ appmsgid 编辑页（坑 221 三件套内替代）
+- 字幕尾差闭合补第四项 whisper 对齐尾隙：W40 1.098s = 静音尾 0.415 + 帧取整 0.188 + 容器 0.048 + 尾隙 0.447
+
+**版本**：3.45.0 → 3.46.0
 
 ### v3.43.0（2026-10-09 日报实测）
 基于 **2026-10-09 日报全流程**（linuxdo 435 抓 / 29 批 err=0 / 日报 429 帖；视频 78.357s / 7.7MB / 1920×1080，场景图接口重渲；公众号草稿 `appmsgid=100001494` 三件套验收通过）实测，吸收坑 236–240：
