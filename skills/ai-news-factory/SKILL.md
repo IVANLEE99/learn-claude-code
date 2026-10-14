@@ -1,13 +1,15 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.46.0
+version: 3.47.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.46.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.47.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.47.0 核心改进（2026-10-13 日报实测）**：**封面大字必须按可用宽度实测收缩字号（坑 249）**——竖版封面固定比例字号 `int(w*0.150)=172px` 对 8 字行实宽 1376px，超出可打印宽度（1152−2×margin≈934px）被 PIL 直接裁掉，用户报「内容被截断」；修法 = `font.getlength()` 实测行宽、从目标字号向下收缩（下限 48），生成时打印每行 px 与 limit 并断言 `px ≤ limit`（1013 修复后竖版 812/928 ≤ 934）。横版同样要过门（1013 横版 1272/1276 已贴极限，钩子再长 1 字即截）。**edge-tts WSS 403 根因=出口 IP，第一动作 `--proxy` 走非 CN 出口（坑 250）**——1013 TTS 卡死约 3.5h：时钟偏移（DRM 自校正无效）、版本升降（6.1.16/7.2.8 都 403）、UA/Chromium header 补丁（MSIE+129 探测矩阵 24 组全 403）全部无效，HTTPS `voices/list` 却正常（只有 WSS 被拒）；终局 = `edge-tts --proxy http://127.0.0.1:7897` + 用户把代理切美国出口一次通过，直连与 `api.msedgeservices.com` 仍 403。终端无 `HTTPS_PROXY` env、系统 scutil 代理对 aiohttp 不生效，**必须显式 `--proxy`**（`gen_tts.py` 已固化）；探测脚本用 `python3 -I` 会忽略 `SSL_CERT_FILE` 报证书假故障。**Playwright attach 无报错挂起 → 整平台切 raw CDP websockets（坑 251）**——1013 B站/抖音/视频号三平台 `connect_over_cdp` 全部纯挂起（并发 raw 客户端无冲突 → 是 Playwright flatten 协议自身问题）；视频号另命中 **wujie 空壳**（`#app` 后代数=1、`.app-body-full` kids=0，SPA 未挂载，`Page.reload` 多次无效）→ **`Page.navigate` 到 `/platform/post/video` 重新挂载**（返回 `net::ERR_ABORTED` 属正常），轮询 shadowRoot `#app` 后代数 >10 且 `input[type=file]` 出现才继续（实测 kids=1410）。raw-CDP 上传协议与全步骤模板 = `news-pipeline/2026-10-13/scripts/channels_upload_1013.py`（`DOM.enable` 先行否则 `Document.getDocument` 报 -32601；pierce 遍历找 file input；`Input.insertText` 填 contenteditable；Vue 受控 input 用 value-setter+input 事件）。**公众号占位符/合集偶发空态直接重跑该步（坑 252，与坑 232 同族）**——images 跑完 verify `placeholders=1` → 重跑 `wechat_upload.py images` 幂等补齐（脚本每次扫描剩余 PLACEHOLDER 替换）再 save 即 0；save 首跑合集下拉 `option not found (0 items)`（选项未加载）→ 重跑 save 即挂上「今日羊报 AI」。**坑 236 补充**：加长口播前先**按场景字数预估锚点占比**（时长∝字数，1013 预估 0.6936→补 19 字→0.7060，TTS 实测 0.7099 一次过，省 TTS 返工）；仍略低时锚点场景 atempo +0.1（1.4→1.5）作最后微调。**API 429 双形态（坑 253）**：`maximum 25 requests in 5 minutes` 限频 + `Concurrency limit exceeded` 并发上限都会批量杀死请求（1013 主循环与 skill 回写 workflow 双双命中，6 宽子 agent 全灭、2 宽也有阵亡）→ 对策 = 拆单 + 间隔重试 + workflow 并发宽度 ≤2，被杀 agent 返回 null 不会自动重试，关键提取宁可主循环自己做。**坑 215**：视频号最终由用户手动上传完成，声明后立即停手（含核验）。
+>
 > **🔴 v3.46.0 核心改进（2026-10-12 周报 W40 实测）**：**周报脚本先过字数门禁再进 TTS（坑 244）**——W40 初版 531 字 → edge-tts 云扬 atempo1.4 实测仅 82s，低于周报 100s 下限整 18s；扩写到 682 字重跑得 104.746s 合格。实测换算 ≈6.4 字/s（atempo1.4），**周报去标点字数门禁 ≥650 字、目标 680–720（105–110s 留头寸）**；脚本写完先 `len(strip_punct(full))` 断言再落 TTS，TTS 实测 <100s 时扩写正文补齐，**不降 atempo、不挪锚点凑时长**。**派生 run_all.sh 必须带 PNG→JPG + 渲染 timeout（坑 245）**——W39 派生版同步段只 `cp scene*.png`，而 Composition 引 `images/scene*.jpg`（v3.45.0 sips/ffmpeg 链是必做步骤不是备注），渲染 seek 到 frame 613 超时；且 10 场景大图默认 30s seek timeout 不够，渲染命令必须 `--timeout=180000`。派生 run_all 后 grep 断言：①同步段含 `ffmpeg ... scene$i.jpg`（或 sips），②渲染命令含 `--timeout`，③无上期日期残留（坑 241 扩展到 run_all）。**concepts.json 结构是 `{concepts:[...], updated}`，concepts 为 list 按 id 查（坑 246）**——verify 脚本 `bank.get('token')` 对 list 直接 `AttributeError: 'list' object has no attribute 'get'`，正确写法 `next(x for x in bank if x.get('id')=='token')`；verify 分两级跑：落盘脚本层即刻跑，**总时长 100–150s 实测项必须等 durations.json 生成后再跑**（无 durations 时 INFO 跳过而非 FAIL）。**B站创作声明是 bcc-select 自定义组件，text= 定位必超时（坑 247）**——`page.locator('text=请选择符合您视频内容的创作声明')` 5s 必超时；正确交互 = `getBoundingClientRect` 取选择框 rect → `page.mouse.click(rect 中心)` 开下拉 → 选项同法点 rect 中心，回读判据沿用 v3.45.0（body 含 `个人观点，仅供参考`）。同理 **form 步分区 locator 超时 ≠ 未选中**——W40 分区 locator 报 timeout 但页面回读已是 `人工智能`，以回读为准不重跑（坑 242 回读铁律正例）。**公众号 `cgi-bin/publish?action=list` 直接 goto 抛 `ERR_HTTP_RESPONSE_CODE_FAILURE`（坑 248）**——发表记录页 URL 不稳定，验收走首页「近期草稿」+ appmsgid 编辑页直达（坑 221 三件套内替代）。**字幕尾差分解补第四项**：坑 234 可加性闭合 = 静音尾 + 帧取整 + 容器 + **whisper 对齐尾隙（末行字幕停在末音节前）**，W40 实测 1.098s = 0.415+0.188+0.048+0.447 精确闭合。**坑 215 收口**：用户中途声明「已经全部手动上传」→ 四平台全部停手（含核验），当期只做 skill 回写。
 >
 > **🔴 v3.45.0（2026-10-11 日报实测，常规记录无新坑）**：1011 期 daily 585 帖 → 视频 70.25s（2106 帧，anchor_pos 0.7312，标准顺序 [1,2,3,4,5,6] 无需重排）→ 四平台全部存草稿成功（公众号脚本分步 open→save 全过 appmsgid=100001519，B站/抖音/视频号用户手动，坑 215）。**场景图 PNG→JPG 落盘链**：`gen_scenes_api.py` 出图 `images/scene*.png`（1920×1080 PNG）→ `sips -s format jpeg` 转 `video-project/public/images/scene*.jpg`（Composition 引 `*.jpg`），转换链须与引用后缀一致，错配则 Remotion 渲染黑帧。**首帧无标题栏属正常**：NewsTitle 有入场动画延迟，`frame 0` 无标题，验收抽 `2s` 帧（标题栏日期+品牌+首条字幕齐现）；52s 帧验锚点字幕「开头说的那个词」。**B站创作声明回读判据**：下拉框 placeholder 常驻 `请选择符合您视频内容的创作声明`，`textContent` 含该文案 ≠ 未选；真判据 = `body.innerText` 是否含已选项（`个人观点，仅供参考`）——1011 期回读 False 确认未选中后，因用户手动接管按坑 215 停手。旧条目归档见正文 v3.44.0。
@@ -1250,6 +1252,7 @@ python3 news-pipeline/YYYY-MM-DD/scripts/gen_covers_local.py
 - 日期/品牌名变量**必须按模式参数映射表读取**，禁止硬编码 `2026-08-21`——改日期时只改 `DATE` 一处
 - 本地 scene 图是抽象几何风格，视觉质量低于 API 出图；**仅作兜底**，API 恢复后应切回 API
 - 脚本依赖系统字体：`/System/Library/Fonts/STHeiti Medium.ttc`（品牌名）、`/Library/Fonts/Arial Unicode.ttf`（日期）；缺字体时换 `PingFang.ttc` / `Helvetica.ttc`
+- **🔴 v3.47.0 坑 249：封面大字必须按可用宽度实测收缩字号**——固定比例字号（如竖版 `int(w*0.150)=172px`）对 8 字行实宽 1376px，超出可打印宽度（1152−2×margin≈934px）会被 PIL 直接裁掉（1013 用户报「内容被截断」）。修法：`font.getlength()` 实测行宽，从目标字号向下收缩直到 `px ≤ w − 2*margin`（下限 48）；生成时**打印每行 px 与 limit 并断言**。横版同样要过此门（1013 横版 1272/1276 已贴极限）
 - 生成后**必须视觉校验**：`Read` 打开 PNG 确认日期/品牌文字清晰无糊无错字，且**日期水平居中**（v3.29.0 硬要求，见 Phase 5.5）
 
 #### 决策流程
@@ -1360,6 +1363,13 @@ edge-tts --text "配音文本" \
 ffmpeg -y -i /tmp/sceneN_edge.mp3 -acodec pcm_s16le -ar 24000 -ac 1 \
   "news-pipeline/YYYY-MM-DD/voiceover/sceneN.wav"
 ```
+
+**🔴 v3.47.0 / 坑 250：WSS 403 的根因是出口 IP，第一动作 = `--proxy` 走非 CN 出口**（2026-10-13 实测，TTS 曾卡死约 3.5h）：
+
+- 症状：`wss://speech.platform.bing.com` 握手 `WSServerHandshakeError 403`，但 HTTPS `voices/list` 正常——**只有 WSS 被拒**。
+- 已排除（1013 全试过、全部无效，禁止重走）：Sec-MS-GEC 时钟偏移（DRM 自校正也无效）、edge-tts 版本升降（6.1.16 与 7.2.8 都 403）、改 `constants.py` 的 UA/Chromium 版本（MSIE UA + 129 header 补丁，探测矩阵 24 组全 403）、user-site/framework-site 双安装互切。
+- 正确路径：`edge-tts --text ... --proxy http://127.0.0.1:7897`。**终端没有 `HTTPS_PROXY` env、系统 scutil 代理对 aiohttp 不生效，必须显式 `--proxy`**；若代理出口在 CN 节点仍 403，**请用户把代理切到美国等非 CN 出口**后一次通过（1013：切美国出口后 6 场景全过；直连与 `api.msedgeservices.com` 仍 403 → 根因=出口 IP）。`gen_tts.py` 派生时保留 `--proxy` 参数。
+- 排查探测脚本注意：`python3 -I` 会忽略 `SSL_CERT_FILE`，会报 `ClientConnectorCertificateError` 假故障；用 certifi `cafile` 建 context 或去掉 `-I`。
 
 **推荐音色**：
 | 音色 | Voice ID | 说明 |
@@ -2470,6 +2480,9 @@ browser_file_upload("news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png")
 # 重复以上步骤插入多张图片
 # 🔴 v3.30.0：每张图上传完成后立刻点「保存为草稿」，验证 bodyLen 不降再传下一张
 # （否则 insertHTML/未走原生粘贴时，上传会触发内部空模型回刷，正文整篇消失）
+# 🔴 v3.47.0 坑 252：images 步跑完后 verify 若 placeholders>0（1013 残留 1 个），
+# 直接重跑 `wechat_upload.py images` 幂等补齐（脚本每次扫描剩余 PLACEHOLDER 替换）再 save，
+# 不要手工在编辑器里翻残留占位符。
 ```
 
 #### 12.7 上传封面（已验证流程 v3.8.0 / 2026-07-19 周报实测）
@@ -2917,6 +2930,10 @@ browser_run_code_unsafe("""async (page) => {
   return 'clicked option';
 }""")
 
+# 🔴 v3.47.0 坑 252：合集下拉偶发「option not found (0 items)」（选项列表未加载完成），
+# 与坑 232（B站标签重输）同族——先重跑 `wechat_upload.py save` 一次再定性；
+# 1013 首跑 0 items，重跑即挂上「今日羊报 AI」。禁止据此判定合集不可用转手动。
+
 # 步骤4：点击「确认」
 browser_run_code_unsafe("""async (page) => {
   const confirmBtn = page.getByRole('button', { name: '确认' });
@@ -3261,6 +3278,12 @@ browser_run_code_unsafe("""async (page) => {
   return 'clicked';
 }""")
 ```
+
+**🔴 v3.47.0 / 坑 251：wujie 空壳用 `Page.navigate` 重新挂载；Playwright attach 无报错挂起 → 整平台切 raw CDP websockets**（2026-10-13 实测）：
+
+- **症状A（attach 挂起）**：`connect_over_cdp` **无报错纯挂起**（1013 B站/抖音/视频号三平台均出现；并发 raw CDP 客户端无冲突 → 问题是 Playwright flatten 协议/事件洪泛自身）。对策 = 该平台脚本整平台改 **raw CDP websockets**，全步骤模板 = `news-pipeline/2026-10-13/scripts/channels_upload_1013.py`：`/json/list` 取 `webSocketDebuggerUrl` → websockets 收发 CDP JSON（cmd/ev 助手）；文件上传 = `DOM.enable`（**缺它 `Document.getDocument` 报 -32601**）→ `Document.getDocument{depth:-1,pierce:true}` → `DOM.querySelectorAll('input[type=file]')` → `DOM.setFileInputFiles`；contenteditable 用 `Input.insertText`；Vue 受控 input 用原生 value-setter + `input` 事件；截图 `Page.captureScreenshot`。
+- **症状B（wujie 空壳）**：登录墙清掉后 `#app` 仍是空壳（`.app-body-full` kids=0、`querySelectorAll('*').length==1`、`appText` 空），`Page.reload` 多次无效 → **`Page.navigate` 到 `https://channels.weixin.qq.com/platform/post/video` 让 wujie 微应用重新挂载**；nav 返回 `net::ERR_ABORTED` **属正常**，不作失败判据。
+- **挂载判据（轮询 ≤60s）**：shadowRoot 内 `#app` 后代数 >10 且 `input[type=file]` 出现（1013 实测 kids=1410、2 个 file input：video + image cover、按钮含「保存草稿」），未达标**禁止**开始表单操作。
 
 #### 13.2 上传视频
 
@@ -5634,6 +5657,7 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 ### 🔴 锚点占比不能靠把 CTA 排到锚点前面来凑（v3.43.0 / 2026-10-09 实测，坑 236）
 **问题**：1009 期顺序 `[1,2,3,4,5,6]` 下锚点起始占比 0.6941，差 0.6pp 到 70%。改成 `[1,2,3,4,6,5]` 后占比 0.7925 落进区间，但 CTA 排到了锚点前面——锚点口播「回头说那个四字一轮」变成在收尾之后回扣，叙事顺序错了。
 **解决**：占比是位置约束，**不是**改叙事顺序的理由。锚点必须在 CTA 之前。占比不够时加长锚点**之前**场景的口播（1009 给场景 1 加约 12 字，重跑 TTS 后 54.841s/78.214s=0.7012），或缩短锚点之后的场景。过渡句随顺序变：「回头说」只用于锚点排在 CTA 之后的回扣，「刚才说的」用于锚点紧接它解释的那条正文。改口播后必须重跑 TTS → 重算 captions → 重渲，四者同源（既有铁律）。
+**v3.47.0 补充（1013 实测）**：加长口播前先**按场景字数预估锚点占比**（atempo 相近时时长∝字数，免 TTS 返工迭代）——1013 写完脚本一算 0.6936 不达标，给场景 2/4 共补 19 字推到 0.7060，TTS 实测 0.7099 一次过。TTS 后仍略低时可用**锚点场景 atempo +0.1**（1.4→1.5，缩短锚点时长抬占比；1013 scene5 9.04s）作最后微调，主杠杆仍是加长锚点前口播。
 **Why:** 70–80% 是为了让锚点落在观众还没划走的位置，把 CTA 提前等于用错误的叙事换一个合格的数字。
 **How to apply:** Phase 8 锚点位置校验；审核清单第 4 节同时记播放顺序和过渡句，两者必须自洽。
 
@@ -5667,7 +5691,59 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 **Why:** 「渲染成功」与「用户能拿到文件」之间隔着归档与验证两步；汇报必须以用户视角的产物位置为准。
 **How to apply:** Phase 9 归档段（两处「归档时机」均已写入汇报门）。
 
+### 🔴 封面大字超宽被静默裁掉，必须按可用宽度实测收缩字号（v3.47.0 / 2026-10-13 实测，坑 249）
+**问题**：1013 竖版封面 `vertical-3-4.png` 用户报「内容被截断」。`gen_covers_local.py` 用固定比例字号 `int(w*0.150)=172px`，「先验三百条哈希」8 字行实宽 1376px，超出可打印宽度（1152−2×margin≈934px），PIL `draw.text` 超出画布部分**静默裁掉**、无任何告警；「真比例回读断言」只验了 1152×1536 画布尺寸，验不出文字截断。
+**解决**：① `fit_size(part1, highlight, max_width, start_size, min_size=48)`：`font.getlength()` 实测整行宽度，从目标字号逐级收缩直到 `px ≤ max_width`；② 生成时**打印每行 px 与 limit** 并断言（1013 修复后竖版 812px/928px ≤ 934px）；③ 横版同样要过此门——1013 横版 1272px/1276px 已贴极限，钩子再长 1 字即截；④ 生成后 `Read` 目检确认两行大字完整在画布内。
+**Why:** 固定比例字号假设「大字短句长度恒定」，但 Hook 原词每期不同；画布越窄（竖版 1152）越容易超宽，且 PIL 不报错。
+**How to apply:** Phase 5.5 `gen_covers_local.py`；审核清单封面项同时记录「行宽断言过 + 目检无截断」。
+
+### 🔴 edge-tts WSS 403 根因是出口 IP，禁止在 header/版本/时钟上空转（v3.47.0 / 2026-10-13 实测，坑 250）
+**问题**：1013 TTS 卡死约 3.5h：`wss://speech.platform.bing.com` 握手持续 `403`，而 HTTPS `voices/list` 正常。逐项排查全部无效：Sec-MS-GEC 时钟偏移（+66s，DRM 自校正无效）、edge-tts 6.1.16 与 7.2.8、user-site/framework-site 双安装互切、用户提供的 MSIE UA + Chromium 129 header 补丁（原始 WSS 探测矩阵 24 组全 403）。
+**解决**：根因 = **出口 IP**。`edge-tts --proxy http://127.0.0.1:7897` + **用户把代理切到美国出口**后 6 场景一次通过；直连与 `api.msedgeservices.com` 仍 403。三个关键事实：① 终端没有 `HTTPS_PROXY` env、系统 scutil 代理对 aiohttp 不生效，**必须显式 `--proxy`**（`gen_tts.py` 已固化）；② 代理在 CN 节点时同样 403，出口国家是变量；③ `python3 -I` 探测脚本忽略 `SSL_CERT_FILE` 会报 `ClientConnectorCertificateError` 假故障（用 certifi `cafile` 或去掉 `-I`）。
+**Why:** 服务端按出口 IP 段风控时，客户端指纹（UA/版本/时钟/token）怎么改都没用；「WSS 403 但 HTTPS 正常」就是 IP 段风控而非 token 错误的特征信号。
+**How to apply:** Phase 6.3；TTS 403 时第一动作 = 单句 `--proxy` 探测，403 → 请用户切非 CN 出口，**最多再试一次直连**，然后按此诊断收敛，不再改 header/版本。
+
+### 🔴 Playwright attach 无报错挂起 → 整平台切 raw CDP；wujie 空壳用 Page.navigate 重挂（v3.47.0 / 2026-10-13 实测，坑 251）
+**问题**：1013 上传阶段 B站/抖音/视频号三平台的 Playwright `connect_over_cdp` 全部**无报错纯挂起**（并发 raw CDP 客户端对同一 daemon 无冲突 → 问题是 Playwright flatten 协议/事件洪泛自身）。视频号叠加第二个故障：登录墙清掉后 `#app` 仍是空壳（`.app-body-full` kids=0、后代总数=1、`appText` 空，SPA 未挂载），`Page.reload` 多次无效。
+**解决**：① attach 挂起 >30s 即弃 Playwright，该平台脚本整平台改 **raw CDP websockets**（模板 `news-pipeline/2026-10-13/scripts/channels_upload_1013.py`：`/json/list` → `webSocketDebuggerUrl` → cmd/ev 助手；`DOM.enable` **先行**否则 `Document.getDocument` 报 -32601；`Document.getDocument{depth:-1,pierce:true}` + `DOM.querySelectorAll('input[type=file]')` 定位 shadow 内 input → `DOM.setFileInputFiles`；contenteditable 用 `Input.insertText`；Vue 受控 input 用原生 value-setter + `input` 事件；截图 `Page.captureScreenshot`）。② wujie 空壳 = **`Page.navigate` 到 `/platform/post/video` 重新挂载**；nav 返回 `net::ERR_ABORTED` 属正常。③ 挂载判据（轮询 ≤60s）：`#app` 后代数 >10 且 `input[type=file]` 出现（1013 实测 kids=1410、2 个 file input、按钮含「保存草稿」），未达标禁止碰表单。
+**Why:** Playwright 挂起不抛异常，最容易被误判成「浏览器死了」去重启 daemon——实际 daemon 活着，换客户端即可；wujie 空壳同理，reload 只重拉外壳，navigate 才会重跑微应用挂载。
+**How to apply:** Phase 11/13/14 上传开工前 `curl -s -m 5 http://localhost:9222/json/version` 探活（坑 198 协议）；attach 挂起即切 raw CDP，不再回头试 Playwright。
+
+### 🔴 公众号占位符/合集偶发空态，先重跑该步再定性（v3.47.0 / 2026-10-13 实测，坑 252）
+**问题**：1013 公众号链路两处偶发空态：① images 步跑完，verify 读到 `placeholders=1`（最后一个占位符未替换）；② save 步首跑「合集」下拉 `option not found (0 items)`（选项列表未加载完成）。
+**解决**：① 直接重跑 `wechat_upload.py images`——脚本幂等（每轮扫描剩余 `PLACEHOLDER` 替换），1013 重跑一次即 `left=0`，再 save；② 重跑 `wechat_upload.py save` 即挂上「今日羊报 AI」。与坑 232（B站标签重输即过）同族：**平台前端偶发空态先重跑该步一次再定性**，禁止据此判定功能不可用转手动。
+**Why:** 两处都是「前端异步加载未完成就读状态」；脚本本身幂等，重跑成本远低于人工排查。
+**How to apply:** Phase 12.6 images / 12.10 合集 / save+verify；verify 报 placeholders>0 时的第一动作 = 重跑 images。
+
+### 🔴 API 429 双形态会批量杀死请求/子 agent（v3.47.0 / 2026-10-14 记录，坑 253）
+**问题**：1013 期主循环撞过 `429 · maximum 25 requests in 5 minutes`（限频）；skill 回写时 6 宽 Workflow 子 agent 全灭于 `429 · Concurrency limit exceeded for user`（并发上限），降到 2 宽仍有阵亡——被杀的 agent 返回 null **不会自动重试**，静默丢覆盖。
+**解决**：① Workflow/Agent 并发宽度 **≤2**（有其他会话并行时更保守）；② 关键提取/核验类工作宁可主循环自己做，不依赖子 agent 覆盖率；③ 主循环自身被 429 时拆单 + `sleep` 间隔重试（与坑 216 分类器抖动同对策）。
+**Why:** 429 的两种文案（限频/并发）都表现为批量失败；子 agent 的 null 是终态，等不来恢复。
+**How to apply:** 任何 Workflow 编排前评估并发；提取结果里出现 null/空份额时按「被杀」处理补跑，不当成「无发现」。
+
 ## 更新日志
+
+### v3.47.0（2026-10-13 日报实测）
+基于 **2026-10-13 日报全流程**（linuxdo 447/447 抓 / 30 批 err=0 / 日报 439 帖（正文 437）；场景图 gpt-image-2 API 6/6（curl 子进程路径）；TTS 100.211s / 锚点 0.7099（scene5 atempo 1.5 微调）；成片 100.395s / 3010 帧 / 10.85MB；B站草稿 draftId=3982205 全表单绿、抖音暂存离开（坑 230）、公众号 appmsgid=100001547 三件套验收过、视频号用户手动（坑 215））实测，吸收坑 249–253：
+
+**封面（坑 249）**
+- 竖版固定比例字号 172px 对 8 字行实宽 1376px > 可打印 934px 被 PIL 静默裁掉；`fit_size()` 按 `font.getlength()` 收缩 + 打印行宽断言；横版 1272/1276 也已贴极限，横竖都过门
+
+**TTS（坑 250）**
+- edge-tts WSS 403 根因 = 出口 IP：时钟/版本/UA header 补丁全无效（24 组探测矩阵 403）；`--proxy http://127.0.0.1:7897` + 美国出口一次通过；终端无 `HTTPS_PROXY`、scutil 代理不生效必须显式 `--proxy`（gen_tts.py 固化）；`python3 -I` 忽略 `SSL_CERT_FILE` 报证书假故障
+- `gen_scenes_api.py` 已固化 **curl 子进程路径**：Python urllib 走系统 SSL 证书链报 `CERTIFICATE_VERIFY_FAILED` **不是接口故障**（1013 6/6 全过）
+
+**上传（坑 251 / 252）**
+- Playwright `connect_over_cdp` 无报错纯挂起（B站/抖音/视频号三平台）→ 整平台切 raw CDP websockets；模板 = `channels_upload_1013.py`（DOM.enable 先行、pierce 找 file input、Input.insertText、value-setter 填受控 input）
+- 视频号 wujie 空壳（#app kids=1，reload 无效）→ `Page.navigate` 到 `/platform/post/video` 重挂（ERR_ABORTED 属正常）；挂载判据 = #app 后代数 >10 + file input 出现
+- 公众号 placeholders>0 → 重跑 images 步幂等补齐；合集 0 items → 重跑 save 即过（与坑 232 同族：偶发空态先重跑该步）
+
+**锚点与运维（坑 236 补充 / 坑 253）**
+- TTS 前按场景字数预估锚点占比（1013 预估 0.6936 → 补 19 字 → 0.7060，实测 0.7099 一次过）；最后微调可用锚点场景 atempo +0.1
+- API 429 双形态（25 req/5min 限频 + Concurrency limit）批量杀请求/子 agent；Workflow 并发宽度 ≤2，被杀 agent 返回 null 不重试，关键工作主循环自己做
+- 运维记录：报告阶段曾出现同一文件十余次 no-op 重写（模型卡循环）+ 多轮响应中途截断——**每 stage 落盘后以磁盘产物为准做一次校验**，不采信循环内的自我汇报
+
+**版本**：3.46.0 → 3.47.0
 
 ### v3.46.0（2026-10-12 周报 W40 实测）
 基于 **2026-10-05~10-11 周报全流程**（TOP1「时间表先行，价格随后跟上」深聊 + 3 快讯 + token 锚点 15s 兜底；TTS 104.746s / 成片 104.981s / 3148 帧 / 10.10MB；锚点占比 0.7569；字幕尾差 1.098s 四项闭合；四平台用户中途声明已手动上传，坑 215 收口，当期只做 skill 回写）实测，吸收坑 244–248：
