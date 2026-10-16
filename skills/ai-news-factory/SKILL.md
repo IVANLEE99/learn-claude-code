@@ -1,13 +1,15 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.48.0
+version: 3.50.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.48.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.50.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.50.0 核心改进（2026-10-15 日报实测，公众号链路两坑）**：**合集「option not found (0 items)」是假阴性，判据只认编辑页回读（坑 255）**——1015 公众号 save 步首跑报 `0 items`，按坑 252 重跑 save **仍 0 items**，但编辑页回读文本已含 `「今日羊报 AI」`，**合集实际早已挂上**。根因：`li.select-opt-li` 只在下拉**手动展开**后才渲染；脚本链路（点「合集」label → 点「未添加」→ 点 `input[placeholder="请选择合集"]` → value-setter 填「今日羊报」）在选项未渲染时**仍会命中默认/唯一合集**并写入，此时 DOM 里没有 `li.select-opt-li`，计数自然是 0——**0 是「没展开」，不是「没选中」**。唯一可靠判据 = 编辑页回读**独立的短文本叶子节点**含合集名（标题/正文里本来就有「今日羊报」字样，必须区分：合集命中的是 `「今日羊报 AI」` 这种独立叶子，不是标题行或 CTA 行）。**禁止**用 `0 items` 当失败信号、禁止据此重跑或转手动。**`type=10 list_card` 第二次假阴性，验收只认首页「近期草稿」（坑 221 补充）**——`wechat_check_draft.py 2026-10-15` 走 `list_card` 返回 `草稿箱标题候选: []` + `in_publish_record: false` → 打印 `两处均无 — 需排查`，而草稿 `appmsgid=100001568` 实际完好。正确动作 = 改走首页**「近期草稿」**入口（点文本为「近期草稿」的节点），实测首条即当期标题，与 10-14/10-13/10-12 历史草稿同列返回；**该入口不跳转 URL**（仍停在 `cgi-bin/home`），不能靠 URL 判断是否进入，只能看 DOM 文本。**正例固化**：本期只上传公众号（B站/抖音/视频号用户已手动，坑 215 全不碰含核验）；`wechat-article-2026-10-15.md` 落盘 8656B 含「无配图版全文」降级节；6 张 `wechat-images/sceneN.jpg` 全过严格解码 + 底边绿行扫描（绿行=0）后才上传；上传脚本 `wechat_upload_1015.py` 带坑 241 内容断言（sections=4 / placeholders=6 / images=6，反期·禁词·密钥全过）。
+> **🔴 v3.49.0 核心改进（2026-10-15 日报实测）**：**curl 下载图片被静默截断 → 成片纯绿条，必须严格 PIL 解码 + 尺寸门禁（坑 254）**——1015 成片第 1/3/5 场景底部各有纯绿条（实测 59/725/32 行，RGB 恒 `(0,137,0)`）。排查起初误判为 Remotion/CSS/素材拷贝问题，**根因在图片下载**：`gen_scenes_api.py` 的 `ok-url` 分支 `curl -s -o out URL` 拿到的 body **尾部被截断**（scene1/3/5 分别少 43/16/14 字节），而 `curl` 对截断 body 仍 **exit 0**；脚本只验 `getsize(out) > 5000` 即判成功。三个残缺 JPEG 一路流过 ffmpeg 转 PNG（`-v error` 只吐 `overread 8` 不报错）→ 转 public JPG → 渲染，ffmpeg 容错解码器把**取不到的尾部填成重复值**，烧进成片就是绿条。**修法**：① 下载后**严格 PIL 解码** `Image.open(p); im.load()`，**绝不设 `ImageFile.LOAD_TRUNCATED_IMAGES`**（设了照样读得出、是本坑最大的检测陷阱），截断会抛 `OSError: image file is truncated (N bytes not processed)`，捕获即判失败换端点；② 尺寸门禁 `>5000` → `>20000` 且**同时过解码**；③ 底边绿行扫描做二次断言（取底边 5 点，`|g-137|<12` 且 `|r|,|b|<12` 连续计数，>0 即失败）；④ **禁止只验产物不验源**——1015 一开始反复重转 PNG/JPG 完全无效，因为 `_api.png` 本身就是坏的；⑤ `skip (exists)` 只认「尺寸合规 **且** 严格解码通过」，否则「坏但足够大」的文件永不会被重试（1015 scene1/3/5 就是被旧逻辑跳过的）。**正例固化**：6 场景 `_api`+成图 12 文件全过三合一门禁后才进渲染；场景时长/锚点未受影响（总 98.795s、anchor_scene 5、anchor_pos 0.7376），**无需重跑 TTS/字幕，只需重渲染**。
 > **🔴 v3.48.0 核心改进（2026-10-14 日报实测）**：**edge-tts WSS 403 第二根因=客户端版本 DRM 令牌算法过期（坑 250 补充）**——1014 实测：代理出口已美国、时钟偏移 0.5s、`--proxy` 显式指定，7.2.8 仍全线 403；**升级 `pip install -U edge-tts`（7.2.8→7.3.1）后一次通过**。403 排查顺序固定为：①`--proxy` 非 CN 出口（ip-api.com 查出口，ipinfo 常 429）②系统时钟（NTP 偏移 >60s 即修）③**版本升级到 ≥7.3.1**；三步皆过仍 403 才考虑 UA/header 矩阵。**`Document.getDocument` 方法名根本不存在（坑 251 模板修正）**——1013 模板 `channels_upload_1013.py` 里写的 `Document.getDocument` 无论有无 `DOM.enable` 都报 -32601（当时 upload 步未跑通未暴露）；**CDP 正确方法名是 `DOM.getDocument`**。且 **`DOM.querySelectorAll` 不穿 wujie shadowRoot**（root 级查询返回空数组）——必须在 `DOM.getDocument{depth:-1,pierce:true}` 返回树上**手工 walk `children` + `shadowRoots` + `contentDocument`** 收集 `input[type=file]`（模板=`channels_upload_1014.py` `_file_input_ids()`）。**视频号「空壳」判定假阴性**：`window.__WUJIE` 为 false / `document.body.innerText` 近空 **不代表**子应用没渲染——innerText 不进 shadowRoot，实体判定=查 `wujie-app.shadowRoot` 内表单元素（file input/短标题/合集）；真·空壳判据仍按坑 251（shadowRoot `#app` 后代数 ≤1）。**视频号 setFileInputFiles 后 300s 无 ready=多半 node 选错**：pierce walk 收集的 file input 可能是封面/头像等非视频入口，`setFileInputFiles` 对错 node **静默失败**——正确姿势=set 后先回读 shadow 文本有无进度/`%`，20s 无进度立即换下一个 node，不傻等 300s（1014 用户手动收尾，下期按此验证）。**B站创作声明回读判据修正（坑 247 补充）**：`input[placeholder*="创作声明"]` rect 中心点开 → 选项 rect 中心点「个人观点，仅供参考」→ **回读用 `input.value`**，`body.innerText` 不含已选值（pre-draft `declOk=False` 属预期，以 input.value 为准）；分区三级「知识/人工智能」同现属正常形态。**`connect_over_cdp` 挂起第二形态（坑 251 补充）**：`ws connected` 后卡死在握手返回（180s 超时），同一 daemon 时段性出现（sync API 可用→下一次挂起）；对策不变=raw CDP websockets。**公众号草稿箱 URL 陷阱**：`cgi-bin/appmsg?t=media/appmsg_draft&action=edit` 打开的是**空白新草稿编辑器**不是列表——草稿箱验收判据=首页「近期草稿」文本含标题+更新时间（坑 221/248 组合复用）。**正例固化**：锚点字数预估法（1014 预估≈0.71 → TTS 实测 0.7141 一次过）；封面 fit_size 门（竖版 933/934px 压线通过，172px 固定字号必截断的坑 249 修复在 1014 无回归）；审核清单门禁流程（§1-5、7 绿后渲染，§6 渲染后 8/8 回填）零返工。
 > **🔴 v3.47.0 核心改进（2026-10-13 日报实测）**：**封面大字必须按可用宽度实测收缩字号（坑 249）**——竖版封面固定比例字号 `int(w*0.150)=172px` 对 8 字行实宽 1376px，超出可打印宽度（1152−2×margin≈934px）被 PIL 直接裁掉，用户报「内容被截断」；修法 = `font.getlength()` 实测行宽、从目标字号向下收缩（下限 48），生成时打印每行 px 与 limit 并断言 `px ≤ limit`（1013 修复后竖版 812/928 ≤ 934）。横版同样要过门（1013 横版 1272/1276 已贴极限，钩子再长 1 字即截）。**edge-tts WSS 403 根因=出口 IP，第一动作 `--proxy` 走非 CN 出口（坑 250）**——1013 TTS 卡死约 3.5h：时钟偏移（DRM 自校正无效）、版本升降（6.1.16/7.2.8 都 403）、UA/Chromium header 补丁（MSIE+129 探测矩阵 24 组全 403）全部无效，HTTPS `voices/list` 却正常（只有 WSS 被拒）；终局 = `edge-tts --proxy http://127.0.0.1:7897` + 用户把代理切美国出口一次通过，直连与 `api.msedgeservices.com` 仍 403。终端无 `HTTPS_PROXY` env、系统 scutil 代理对 aiohttp 不生效，**必须显式 `--proxy`**（`gen_tts.py` 已固化）；探测脚本用 `python3 -I` 会忽略 `SSL_CERT_FILE` 报证书假故障。**Playwright attach 无报错挂起 → 整平台切 raw CDP websockets（坑 251）**——1013 B站/抖音/视频号三平台 `connect_over_cdp` 全部纯挂起（并发 raw 客户端无冲突 → 是 Playwright flatten 协议自身问题）；视频号另命中 **wujie 空壳**（`#app` 后代数=1、`.app-body-full` kids=0，SPA 未挂载，`Page.reload` 多次无效）→ **`Page.navigate` 到 `/platform/post/video` 重新挂载**（返回 `net::ERR_ABORTED` 属正常），轮询 shadowRoot `#app` 后代数 >10 且 `input[type=file]` 出现才继续（实测 kids=1410）。raw-CDP 上传协议与全步骤模板 = `news-pipeline/2026-10-13/scripts/channels_upload_1013.py`（`DOM.enable` 先行否则 `Document.getDocument` 报 -32601；pierce 遍历找 file input；`Input.insertText` 填 contenteditable；Vue 受控 input 用 value-setter+input 事件）。**公众号占位符/合集偶发空态直接重跑该步（坑 252，与坑 232 同族）**——images 跑完 verify `placeholders=1` → 重跑 `wechat_upload.py images` 幂等补齐（脚本每次扫描剩余 PLACEHOLDER 替换）再 save 即 0；save 首跑合集下拉 `option not found (0 items)`（选项未加载）→ 重跑 save 即挂上「今日羊报 AI」。**坑 236 补充**：加长口播前先**按场景字数预估锚点占比**（时长∝字数，1013 预估 0.6936→补 19 字→0.7060，TTS 实测 0.7099 一次过，省 TTS 返工）；仍略低时锚点场景 atempo +0.1（1.4→1.5）作最后微调。**API 429 双形态（坑 253）**：`maximum 25 requests in 5 minutes` 限频 + `Concurrency limit exceeded` 并发上限都会批量杀死请求（1013 主循环与 skill 回写 workflow 双双命中，6 宽子 agent 全灭、2 宽也有阵亡）→ 对策 = 拆单 + 间隔重试 + workflow 并发宽度 ≤2，被杀 agent 返回 null 不会自动重试，关键提取宁可主循环自己做。**坑 215**：视频号最终由用户手动上传完成，声明后立即停手（含核验）。
 >
@@ -2936,6 +2938,14 @@ browser_run_code_unsafe("""async (page) => {
 # 🔴 v3.47.0 坑 252：合集下拉偶发「option not found (0 items)」（选项列表未加载完成），
 # 与坑 232（B站标签重输）同族——先重跑 `wechat_upload.py save` 一次再定性；
 # 1013 首跑 0 items，重跑即挂上「今日羊报 AI」。禁止据此判定合集不可用转手动。
+#
+# 🔴 v3.50.0 坑 255（2026-10-15 实测，重要修正）：**`li.select-opt-li` 计数为 0
+# 不等于合集未选中**。1015 首跑 save 报 `option not found (0 items)`，重跑 save 仍
+# `0 items`，但**编辑页回读已含「今日羊报 AI」**——说明「点 合集 label → 点未添加
+# → 点 input → 填关键词」这条链在选项列表尚未渲染时**仍会命中默认/唯一合集**，
+# 而 `li.select-opt-li` 只在用户手动展开时才出现。
+# **判定合集是否挂上的唯一可靠判据 = 编辑页回读文本含合集名**（见下方 verify 用法），
+# 绝不能用 `option not found (0 items)` 当失败信号，更不可据此重跑或转手动。
 
 # 步骤4：点击「确认」
 browser_run_code_unsafe("""async (page) => {
@@ -5657,6 +5667,18 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 
 **v3.46.0 补充（坑 248，W40 实测）**：发表记录页 `cgi-bin/publish?action=list` **直接 `goto` 会抛 `ERR_HTTP_RESPONSE_CODE_FAILURE`**，该 URL 不稳定，不能当三件套第③项的入口。替代路径：首页「近期草稿」首条（含「更新于 HH:MM」）+ `appmsgid` 编辑页直达，两件齐即可判「草稿已存且未发表」，**不要为了第③项硬刷 publish 列表**。
 
+**v3.50.0 补充（坑 221 第二次命中，2026-10-15 实测）**：`wechat_check_draft.py 2026-10-15` 走 `type=10 list_card` 返回 `草稿箱标题候选: []` + `in_publish_record: false` → 判定文案 `两处均无 — 需排查`。**这是假阴性，不是草稿丢失**——1015 草稿 `appmsgid=100001568` 实际完好。正确动作 = **改走首页「近期草稿」入口**（点文本为「近期草稿」的节点，页面停在 `cgi-bin/home`，草稿标题直接出现在首页 DOM 里），实测首条即 `【2026-10-15】Argon测评两极…`，与 10-14/10-13/10-12 等历史草稿同列返回。**铁律复述**：`type=10 list_card` 的空结果**永远不能**作为「草稿未保存」的证据；`wechat_check_draft.py` 的 `verdict` 字段在 `in_draft_box=false` 时**必须**再跑一次近期草稿入口才可定性。1015 的「近期草稿」入口片段：
+```python
+r = page.evaluate('''() => {
+  const as = Array.from(document.querySelectorAll('a,li,div,span'));
+  const t = as.find(e => /近期草稿|Recent drafts?/i.test((e.textContent||'').trim())
+                          && e.offsetParent && (e.textContent||'').trim().length < 20);
+  if (t) { t.click(); return 'clicked:' + t.textContent.trim(); }
+  return 'not-found';
+}''')   # 实测返回 'clicked:近期草稿 全部草稿'，URL 仍为 cgi-bin/home
+```
+注意该入口**不跳转 URL**（仍停在 `home?t=home/index`），所以不能靠 URL 判断是否进入，只能看 DOM 文本是否出现当期标题。
+
 ### 🔴 锚点占比不能靠把 CTA 排到锚点前面来凑（v3.43.0 / 2026-10-09 实测，坑 236）
 **问题**：1009 期顺序 `[1,2,3,4,5,6]` 下锚点起始占比 0.6941，差 0.6pp 到 70%。改成 `[1,2,3,4,6,5]` 后占比 0.7925 落进区间，但 CTA 排到了锚点前面——锚点口播「回头说那个四字一轮」变成在收尾之后回扣，叙事顺序错了。
 **解决**：占比是位置约束，**不是**改叙事顺序的理由。锚点必须在 CTA 之前。占比不够时加长锚点**之前**场景的口播（1009 给场景 1 加约 12 字，重跑 TTS 后 54.841s/78.214s=0.7012），或缩短锚点之后的场景。过渡句随顺序变：「回头说」只用于锚点排在 CTA 之后的回扣，「刚才说的」用于锚点紧接它解释的那条正文。改口播后必须重跑 TTS → 重算 captions → 重渲，四者同源（既有铁律）。
@@ -5712,11 +5734,35 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 **Why:** Playwright 挂起不抛异常，最容易被误判成「浏览器死了」去重启 daemon——实际 daemon 活着，换客户端即可；wujie 空壳同理，reload 只重拉外壳，navigate 才会重跑微应用挂载。
 **How to apply:** Phase 11/13/14 上传开工前 `curl -s -m 5 http://localhost:9222/json/version` 探活（坑 198 协议）；attach 挂起即切 raw CDP，不再回头试 Playwright。
 
+### 🔴 curl 下载图片被静默截断 → 渲染出纯绿条，必须严格 PIL 解码 + 尺寸门禁（v3.49.0 / 2026-10-15 日报实测，坑 254）
+**问题**：1015 成片首帧起第 1/3/5 场景画面底部各有纯绿条（实测行数 59 / 725 / 32 行，RGB 恒为 `(0,137,0)`）。排查起初误判为 Remotion/CSS/素材拷贝问题，实际根因在**图片下载环节**：`gen_scenes_api.py` 的 `ok-url` 分支用 `curl -s -o out URL` 取图，接口返回的 body **尾部被截断**（scene1/3/5 分别少 43 / 16 / 14 字节），而 `curl` 对截断 body 仍 **exit 0**；脚本只校验 `getsize(out) > 5000` 即判成功，解码正确性无人把关。于是三个缺损 JPEG 一路流过 ffmpeg 转 PNG（`-v error` 只吐 `overread 8` 警告不报错）、转 public JPG，ffmpeg 的容错 JPEG 解码器把**取不到的尾部像素填成重复值**，最终烧进成片变成绿条。
+**解决**：① 下载后**严格 PIL 解码**——`Image.open(p); im.load()`，**绝不可**设 `ImageFile.LOAD_TRUNCATED_IMAGES`（设了仍能读、反而制造假阳性，是本坑最大的检测陷阱）；被截断会抛 `OSError: image file is truncated (N bytes not processed)`，捕获即判失败重试下一端点。② 尺寸门禁从 `>5000` 提到 `>20000` 且**同时过解码**；③ 末尾绿行扫描作为二次断言（取底边 5 点，`|g-137|<12 且 |r|,|b|<12` 连续即计数，>0 即失败）；④ **禁止只验产物不验源**——1015 一开始反复重转 PNG/JPG 完全无效，因为 `_api.png` 本身就是坏的；⑤ `skip (exists)` 只认「尺寸合规 **且** 严格解码通过」的文件，否则「坏但足够大」的文件永不会被重试（1015 scene1/3/5 就是被旧逻辑跳过的）。
+**Why:** 「HTTP 200 + exit 0」不等于「文件完整」，中间网络/网关截断完全可能；ffmpeg 对残缺 JPEG 的容错解码把「缺失」伪装成「画面」，肉眼与常规 ffprobe 都验不出，只有严格解码才会显式抛错。**正确图源验证必须发生在转换之前**。
+**How to apply:** `gen_scenes_api.py` 下载分支 + 生成后校验段；Phase 5 场景图生成与 Phase 9 渲染前各跑一次「严格解码 + 尺寸 + 绿行」三合一门禁，12 个文件（6 `_api`/6 成图）全绿才允许进渲染。
+
 ### 🔴 公众号占位符/合集偶发空态，先重跑该步再定性（v3.47.0 / 2026-10-13 实测，坑 252）
 **问题**：1013 公众号链路两处偶发空态：① images 步跑完，verify 读到 `placeholders=1`（最后一个占位符未替换）；② save 步首跑「合集」下拉 `option not found (0 items)`（选项列表未加载完成）。
 **解决**：① 直接重跑 `wechat_upload.py images`——脚本幂等（每轮扫描剩余 `PLACEHOLDER` 替换），1013 重跑一次即 `left=0`，再 save；② 重跑 `wechat_upload.py save` 即挂上「今日羊报 AI」。与坑 232（B站标签重输即过）同族：**平台前端偶发空态先重跑该步一次再定性**，禁止据此判定功能不可用转手动。
 **Why:** 两处都是「前端异步加载未完成就读状态」；脚本本身幂等，重跑成本远低于人工排查。
 **How to apply:** Phase 12.6 images / 12.10 合集 / save+verify；verify 报 placeholders>0 时的第一动作 = 重跑 images。
+
+### 🔴 合集「option not found (0 items)」是假阴性，判据只认编辑页回读（v3.50.0 / 2026-10-15 实测，坑 255）
+**问题**：1015 公众号 save 步首跑打印 `collection option: option not found (0 items)`，按坑 252 重跑 save **仍是 0 items**——但编辑页回读文本里已含 `「今日羊报 AI」`，合集实际**早已挂上**。若照坑 252 的「重跑一次仍不行就转手动」会白白丢掉一个已完成的草稿合集。
+**根因**：`li.select-opt-li` 是**用户手动展开下拉后**才渲染的选项节点；脚本链路（点「合集」label → 点「未添加」→ 点 `input[placeholder="请选择合集"]` → value-setter 填「今日羊报」）在选项列表未渲染时**仍会命中默认/唯一合集**并写入，此时 DOM 里根本没有 `li.select-opt-li`，计数自然为 0。**0 是「没展开」，不是「没选中」。**
+**解决**：合集是否挂上的**唯一可靠判据 = 编辑页回读文本含合集名**：
+```python
+st = page.evaluate('''() => {
+  const all = Array.from(document.querySelectorAll('*')).filter(e => e.children.length === 0);
+  const hits = all.filter(e => /今日羊报/.test(e.textContent || '') && e.offsetParent)
+                  .map(e => (e.textContent || '').trim().slice(0, 40));
+  return { hits: hits.slice(0, 10),
+           bodyLen: (document.querySelectorAll('.ProseMirror')[1]?.innerText || '').replace(/\s/g,'').length };
+}''')
+# hits 含「「今日羊报 AI」」= 合集已挂；hits 只有标题/正文命中 = 未挂
+```
+判读要点：标题与正文里本来就有「今日羊报」字样，**必须区分**——合集命中的是**独立的、短文本的**叶子节点（如 `「今日羊报 AI」`），不是标题行或 CTA 行。
+**Why:** `li.select-opt-li` 计数测量的是「下拉是否展开」，不是「值是否已写入」；拿展开状态当写入状态是典型的假阴性，且重跑不会改变结论（每次都不展开）。
+**How to apply:** Phase 12.10 合集步 + `wechat_upload.py save` 的返回判读。**禁止**用 `option not found (0 items)` 作为失败信号、禁止据此重跑或转手动；以编辑页回读为准。与坑 252 的关系：坑 252 说「偶发空态先重跑一次」仍成立（针对 placeholders 与真正的选项未加载），但**合集这一项的重跑判据已被本条取代**。
 
 ### 🔴 API 429 双形态会批量杀死请求/子 agent（v3.47.0 / 2026-10-14 记录，坑 253）
 **问题**：1013 期主循环撞过 `429 · maximum 25 requests in 5 minutes`（限频）；skill 回写时 6 宽 Workflow 子 agent 全灭于 `429 · Concurrency limit exceeded for user`（并发上限），降到 2 宽仍有阵亡——被杀的 agent 返回 null **不会自动重试**，静默丢覆盖。
@@ -5725,6 +5771,40 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 **How to apply:** 任何 Workflow 编排前评估并发；提取结果里出现 null/空份额时按「被杀」处理补跑，不当成「无发现」。
 
 ## 更新日志
+
+### v3.50.0（2026-10-15 日报实测，公众号链路）
+基于 **2026-10-15 公众号上传全流程**（草稿 `appmsgid=100001568`；B站/抖音/视频号用户已手动，坑 215 全不碰含核验）实测，吸收坑 255：
+
+**合集选择（坑 255，重要修正）**
+- 症状：save 步打印 `collection option: option not found (0 items)`，按坑 252 重跑 save **仍 0 items**
+- 真相：编辑页回读文本已含 `「今日羊报 AI」`，**合集早已挂上**——`li.select-opt-li` 只在下拉手动展开后才渲染，计数 0 表示「没展开」而非「没选中」
+- 判据：**只认编辑页回读**——查独立短文本叶子节点含合集名（`「今日羊报 AI」`），须与标题行/CTA 行里的「今日羊报」字样区分
+- 禁止：拿 `0 items` 当失败信号、据此重跑或转手动（坑 252 对合集的「重跑一次」判据被本条取代）
+
+**草稿验收（坑 221 第二次命中）**
+- 症状：`wechat_check_draft.py 2026-10-15` 走 `type=10 list_card` 返回 `草稿箱标题候选: []` + `in_publish_record: false` → `两处均无 — 需排查`
+- 真相：假阴性，草稿完好；`list_card` 的 `type=10` 与草稿的 `type=77` 是两套列表
+- 正确动作：改走首页**「近期草稿」**入口（点文本为「近期草稿」的节点），实测首条即当期标题，与历史草稿同列返回
+- 注意：该入口**不跳转 URL**（仍停在 `cgi-bin/home`），不能靠 URL 判断，只能看 DOM 文本
+
+**正例固化**
+- 只上传公众号时，其余三平台按坑 215 一律不碰（含核验），state 记 `skipped`
+- 图文落盘 `wechat-article-2026-10-15.md`（8656B），末尾附「无内文配图版全文」降级节，图片通路失败时可直接改用
+- 6 张 `wechat-images/sceneN.jpg` 上传前全过严格解码 + 底边绿行扫描（绿行=0，坑 254 门禁复用到公众号链路）
+- 上传脚本带坑 241 内容断言：`sections=4 / placeholders=6 / images=6`，反期日期·B档禁词·密钥样式全过
+
+**版本**：3.49.0 → 3.50.0
+
+### v3.49.0（2026-10-15 日报实测）
+基于 **2026-10-15 日报全流程**（linuxdo 全量抓取；场景图 gpt-image-2 API 6/6；TTS 98.795s / 锚点 0.7376 / anchor_scene 5）实测，吸收坑 254：
+
+**场景图下载（坑 254）**
+- 症状：成片第 1/3/5 场景底部纯绿条，实测 59/725/32 行 RGB 恒 `(0,137,0)`；不是渲染/CSS/素材拷贝问题
+- 根因：`gen_scenes_api.py` `ok-url` 分支 `curl -s -o out URL` 的 body 尾部被截断（少 43/16/14 字节）而 **curl 仍 exit 0**，脚本只验 `getsize > 5000`；ffmpeg 容错 JPEG 解码把缺失尾部填成重复值 → 绿条一路带进 PNG/JPG/成片
+- 修法：下载后**严格 PIL** `Image.open(p); im.load()`（**绝不设 `LOAD_TRUNCATED_IMAGES`**，设了照样读得出=假阴性），截断抛 `OSError: ... truncated (N bytes not processed)` → 判失败换端点；尺寸门禁 `>5000`→`>20000` 且须过解码；底边 5 点绿行扫描二次断言；`skip (exists)` 只认「尺寸合规且严格解码通过」
+- 教训：**必须先验源再验产物**——反复重转 PNG/JPG 对坏源完全无效；「HTTP 200 + exit 0」≠ 文件完整
+
+**版本**：3.48.0 → 3.49.0
 
 ### v3.48.0（2026-10-14 日报实测）
 基于 **2026-10-14 日报全流程**（linuxdo 563/563 抓 / 38 批+retry / 日报 557 帖（正文 557）；场景图 gpt-image-2 API 6/6；TTS 卡 403 约 2h 后 edge-tts 升级 7.3.1 走通，100.314s / 锚点 0.7141 一次过；成片 100.48s / 3013 帧 / 10.45MB；B站/抖音/公众号三平台草稿全验收、视频号用户手动收尾（坑 215））实测：
