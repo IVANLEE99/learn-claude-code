@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.51.0
+version: 3.52.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.51.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.52.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.52.0 核心改进（2026-10-17 日报实测，B站上传路径坑 258）**：**渲染/归档文件名 = `publish.json.title`（后缀 `| 今日羊报AI`），但 B站上传脚本按 `publish.json.platform.bilibili.title`（后缀 `｜4条重磅AI新闻一次看完 | 今日羊报AI`）拼 VIDEO 路径 → `FileNotFoundError`**（1017 实测：视频已渲染成功，`bili_upload.py upload` 步在 `os.path.getsize(VIDEO)` 处崩——VIDEO 里含 `｜4条重磅AI新闻一次看完`，实际产物文件名不含该片段）。根因：`publish.json.title` 与 `bilibili.title` 是两个字段（前者列表标题、后者带「N条」营销后缀），渲染用前者、脚本 VIDEO 却抄后者。修法：**B站上传脚本的 `VIDEO` 必须用 `publish.json.title`（与渲染产物名一致），不要用 `bilibili.title`**；派生后先 `ls news-pipeline/{date}/video/` 核对实际文件名再写 VIDEO。**坑 215 全程命中**：本期公众号自动上传成功（open→body 993字→images 5图占位符0→cover hasQpic→title 61字→save appmsgid=100001587 合集picked→verify bodyLen 856 全绿），但 B站/抖音/视频号四平台初始全部未登录（CDP daemon 无登录态）→ 依次标记 `login_required`；后 B站、公众号陆续登录（公众号自动上传完成），其余由用户手动接管，坑 215 收口。**登录态判定假阳性**：抖音首页含「作品发布及管理」等营销文案，脚本 `guard()` 误判「已登录」→ 实际是扫码/验证码登录页；**判据必须看上传表单元素**（`作品描述`/`暂存离开`/`设置封面`），禁以页面出现「作品/发布」文案为准。**公众号配图格式**：`wechat-images/` 需 `sceneN.jpg`（not png），从 `images/sceneN.png` ffmpeg 转，另 `cover.png` = `horizontal-4-3.png` 拷贝；上传脚本 `IMAGES` 按此引用。**B档措辞**：本期「商务部出口登记」正文用「合规边界/临时登记」，避开 B 档禁词「监管/审查」——输出前 `grep` B 档禁词自检全过。
 > **🔴 v3.51.0 核心改进（2026-10-16 日报实测，环境断供 + 渲染边界帧）**：**`~/.claude/settings.json` 的 GEN_IMG/MIMO_TTS 凭据会静默丢失（坑 256）**——1016 视频链开工时 settings.json 的 env 只剩 ANTHROPIC_* 十键，`GEN_IMG_API_URL/_KEY`（及 `_001/_002/_003` 回退）与 `MIMO_TTS_API_*` 全没了，`gen_scenes_api.py` 的 ENDPOINTS 解析为空。排查顺序：① `~/.claude/settings.json.bak-*` 备份里找（1016 从 9-22 的 `settings.json.bak-post2video-2931081` 恢复 16 键后 9/9 场景图一次走通）；② 日常跑流水线前 `python3 -c` 打印 endpoint 名 + keylen 做**存在性探针**（禁打印 key 本体）；③ 恢复后原地 `cp settings.json settings.json.bak-pre{MMDD}-HHMM` 留痕。注意 key 的分组语义别搞错：1016 实测 `main`（ai.xmiaom.com）对 gpt-image-2 直接回非 JSON（`Expecting value: line 1 column 1`），实际承接的是 `main_001`（elysiver.h-e.top，grok-imagine-image）——**首轮 5/9、scene2/7/8/9 全挂，重跑 missing-only 即全过**，说明是时段性抖动不是端点死亡，**重跑缺失文件前不要换端点顺序**（与坑 253 的「拆单+间隔重试」同对策）。**TTS 用探针先验环境再跑全量**：1016 先验 `edge-tts 7.3.1`（坑 250 门禁）+ 代理探活（非 CN 出口 IP）双绿后才跑 9 场景，一次过 113.008s / anchor_pos 0.7024。**渲染边界帧漂移约一帧（坑 257）**——1016 成片视频流 113.166667s vs 音频 113.216000s，相差 0.049s（<1 帧@30fps）：逐场景 `ceil(dur*30)` 的垫帧累计 3395 帧，画面边界比音频边界早约一帧，锚点帧 t=79.4s 抽到的是 scene7 尾帧、音频已进 scene5——**属测量容差，不重渲、不重排**（与坑 209 重排阈值 >5% 不可比）。验收时抽锚点帧允许 ±0.2s 偏差，以字幕时间轴为准。**正例固化**：场景时长/锚点用字数预估（1016 预估 0.7065 → TTS 实测 0.7024 一次过，锚点 scene5 排播放第 7 位 `[1,2,3,4,6,7,5,8,9]`）；公众号全链分步一次过（open→body 1471字→images 占位符0→cover hasQpic→title 65字→save appmsgid=100001578→verify 1283字，占位符0、合集 picked）；B站/抖音/视频号用户手动，坑 215 全不碰含核验。
 > **🔴 v3.50.0 核心改进（2026-10-15 日报实测，公众号链路两坑）**：**合集「option not found (0 items)」是假阴性，判据只认编辑页回读（坑 255）**——1015 公众号 save 步首跑报 `0 items`，按坑 252 重跑 save **仍 0 items**，但编辑页回读文本已含 `「今日羊报 AI」`，**合集实际早已挂上**。根因：`li.select-opt-li` 只在下拉**手动展开**后才渲染；脚本链路（点「合集」label → 点「未添加」→ 点 `input[placeholder="请选择合集"]` → value-setter 填「今日羊报」）在选项未渲染时**仍会命中默认/唯一合集**并写入，此时 DOM 里没有 `li.select-opt-li`，计数自然是 0——**0 是「没展开」，不是「没选中」**。唯一可靠判据 = 编辑页回读**独立的短文本叶子节点**含合集名（标题/正文里本来就有「今日羊报」字样，必须区分：合集命中的是 `「今日羊报 AI」` 这种独立叶子，不是标题行或 CTA 行）。**禁止**用 `0 items` 当失败信号、禁止据此重跑或转手动。**`type=10 list_card` 第二次假阴性，验收只认首页「近期草稿」（坑 221 补充）**——`wechat_check_draft.py 2026-10-15` 走 `list_card` 返回 `草稿箱标题候选: []` + `in_publish_record: false` → 打印 `两处均无 — 需排查`，而草稿 `appmsgid=100001568` 实际完好。正确动作 = 改走首页**「近期草稿」**入口（点文本为「近期草稿」的节点），实测首条即当期标题，与 10-14/10-13/10-12 历史草稿同列返回；**该入口不跳转 URL**（仍停在 `cgi-bin/home`），不能靠 URL 判断是否进入，只能看 DOM 文本。**正例固化**：本期只上传公众号（B站/抖音/视频号用户已手动，坑 215 全不碰含核验）；`wechat-article-2026-10-15.md` 落盘 8656B 含「无配图版全文」降级节；6 张 `wechat-images/sceneN.jpg` 全过严格解码 + 底边绿行扫描（绿行=0）后才上传；上传脚本 `wechat_upload_1015.py` 带坑 241 内容断言（sections=4 / placeholders=6 / images=6，反期·禁词·密钥全过）。
 > **🔴 v3.49.0 核心改进（2026-10-15 日报实测）**：**curl 下载图片被静默截断 → 成片纯绿条，必须严格 PIL 解码 + 尺寸门禁（坑 254）**——1015 成片第 1/3/5 场景底部各有纯绿条（实测 59/725/32 行，RGB 恒 `(0,137,0)`）。排查起初误判为 Remotion/CSS/素材拷贝问题，**根因在图片下载**：`gen_scenes_api.py` 的 `ok-url` 分支 `curl -s -o out URL` 拿到的 body **尾部被截断**（scene1/3/5 分别少 43/16/14 字节），而 `curl` 对截断 body 仍 **exit 0**；脚本只验 `getsize(out) > 5000` 即判成功。三个残缺 JPEG 一路流过 ffmpeg 转 PNG（`-v error` 只吐 `overread 8` 不报错）→ 转 public JPG → 渲染，ffmpeg 容错解码器把**取不到的尾部填成重复值**，烧进成片就是绿条。**修法**：① 下载后**严格 PIL 解码** `Image.open(p); im.load()`，**绝不设 `ImageFile.LOAD_TRUNCATED_IMAGES`**（设了照样读得出、是本坑最大的检测陷阱），截断会抛 `OSError: image file is truncated (N bytes not processed)`，捕获即判失败换端点；② 尺寸门禁 `>5000` → `>20000` 且**同时过解码**；③ 底边绿行扫描做二次断言（取底边 5 点，`|g-137|<12` 且 `|r|,|b|<12` 连续计数，>0 即失败）；④ **禁止只验产物不验源**——1015 一开始反复重转 PNG/JPG 完全无效，因为 `_api.png` 本身就是坏的；⑤ `skip (exists)` 只认「尺寸合规 **且** 严格解码通过」，否则「坏但足够大」的文件永不会被重试（1015 scene1/3/5 就是被旧逻辑跳过的）。**正例固化**：6 场景 `_api`+成图 12 文件全过三合一门禁后才进渲染；场景时长/锚点未受影响（总 98.795s、anchor_scene 5、anchor_pos 0.7376），**无需重跑 TTS/字幕，只需重渲染**。
@@ -1642,6 +1643,7 @@ cp news-pipeline/YYYY-MM-DD/captions/captions.json video-project/public/captions
 - daily：`out/【YYYY-MM-DD】{核心标题}… | 今日羊报AI.mp4`
 - weekly：`out/【MM-DD~MM-DD】{核心标题}… | 羊报AI周刊.mp4`
 - **monthly**：`out/【YYYY-MM】{核心标题}… | 羊报AI月报.mp4`
+- **🔴 该文件名 = `publish.json.title`（后缀 `| 今日羊报AI`），不是 `bilibili.title`（坑 258 / 1017 实测）**：`publish.json.title` 与 `platform.bilibili.title` 是两字段（后者带 `｜N条重磅AI新闻一次看完` 营销后缀）。渲染/归档用 `title`，但 B站上传脚本 `VIDEO` 若误抄 `bilibili.title` 会在 `upload` 步 `getsize` 崩（`FileNotFoundError`）。修法：渲染后先 `ls news-pipeline/{date}/video/` 核对实际文件名，再写 `bili_upload.py` 的 `VIDEO` = `publish.json.title`。
 
 **关键参数说明**：
 - `node_modules/.bin/remotion`：使用 video-project 下的本地 remotion
@@ -3466,6 +3468,47 @@ news-pipeline/
 **月报输入**：`data/monthly/{YYYY-MM}.md`（项目根 data 目录，由 linuxdo-daily v13 生成，**不在 news-pipeline 下**）。
 
 ## 已知坑与经验教训
+
+### 🔴 B站上传 VIDEO 路径必须用 publish.json.title 非 bilibili.title（v3.52.0 / 2026-10-17 实测，坑 258）
+
+**问题**：1017 视频渲染成功（`news-pipeline/2026-10-17/video/【2026-10-17】OpenCode免费开放两个国产模型，DeepSeek搜索开始收费 | 今日羊报AI.mp4`），但 `bili_upload.py upload` 步在 `os.path.getsize(VIDEO)` 处抛 `FileNotFoundError`——脚本里 `VIDEO` 抄的是 `publish.json.platform.bilibili.title`（`…收费｜4条重磅AI新闻一次看完 | 今日羊报AI.mp4`），而实际产物文件名用的是 `publish.json.title`（无「｜4条重磅AI新闻一次看完」段）。
+
+**根因**：`publish.json` 有两个标题字段：
+- `title` = `【YYYY-MM-DD】{核心标题}… | 今日羊报AI`（列表标题，**也是渲染/归档文件名**，Phase 9/10.4 用此）
+- `platform.bilibili.title` = `【YYYY-MM-DD】{核心标题}…｜4条重磅AI新闻一次看完 | 今日羊报AI`（**带「N条重磅」营销后缀**，仅用于 B站投稿列表标题）
+
+渲染 out 参数按 `title` 拼，B站上传脚本 VIDEO 却常误抄 `bilibili.title`，两者差一个「｜N条重磅AI新闻一次看完」片段。
+
+**解决**：
+1. 渲染后先 `ls news-pipeline/{date}/video/` 核对**实际文件名**。
+2. `bili_upload.py` 的 `VIDEO` 一律填 `publish.json.title`（含 `| 今日羊报AI` 后缀、不含「｜N条重磅」段），**不要用 `bilibili.title`**。
+3. 派生 B站上传脚本后，用 `python3 -c` 校验 `VIDEO` 指向的文件 `os.path.exists` 为 True 再跑 upload。
+
+**How to apply:** Phase 9 渲染后 → Phase 11 派生 bili_upload 时，VIDEO 从 `publish.json.title` 拼（同渲染文件名），跑 upload 前先验证路径存在。坑 215 收口前若发现此错，只需改 VIDEO 一行重跑 upload，无需重渲。
+
+### 🔴 四平台登录态判定要读上传表单元素，勿以「作品/发布」文案为准（v3.52.0 / 2026-10-17 实测）
+
+**问题**：1017 抖音首页含「作品发布及管理」「数据分析」「商单任务变现」等大量营销文案，脚本 `guard()` / 登录判据误判「已登录」；实际页面是「扫码登录/验证码登录」登录页（`creator.douyin.com` 未登录态）。若据此直接跑 upload，`file input` 找不到 → `no file input — 可能未登录` 才暴露。
+
+**解决**：登录态判据必须读**上传表单元素**，不是页面文案：
+- 抖音：`作品描述` / `暂存离开` / `设置封面` 出现 = 已登录；`扫码登录`/`验证码` = 未登录
+- B站：`上传视频`/`投稿` 且无 `扫码登录` = 已登录；`passport.bilibili.com` URL = 未登录
+- 视频号：`login.html` URL / `发表视频`/`草稿` 表单 = 未登录/已登录
+- 公众号：`新的创作`/`New creation` = 已登录
+
+**How to apply:** 上传开工前逐平台用 CDP `Runtime.evaluate` 读 `document.body.innerText` + 看 URL，**只认上传表单元素判登录**；任一平台未登录 → 标记 `login_required`，不空转。
+
+### 🔴 公众号配图需 sceneN.jpg + cover.png，非 sceneN.png（v3.52.0 / 2026-10-17 实测）
+
+**问题**：1017 公众号上传脚本 `IMAGES` 引用 `wechat-images/sceneN.jpg`，但 `wechat-images/` 初始只有 `sceneN.png`（从 `images/` cp 而来）→ 上传前需先转 JPG。另 `cover.png` 需单独生成（= `horizontal-4-3.png` 拷贝）。
+
+**解决**：上传公众号前准备：
+```bash
+for i in 2 3 4 5 6; do ffmpeg -y -i wechat-images/scene$i.png -q:v 2 wechat-images/scene$i.jpg; done
+cp horizontal-4-3.png wechat-images/cover.png
+# 并 PIL 严格解码 + 尺寸门禁（坑 254）
+```
+`wechat_upload.py` 的 `IMAGES` 按此引用（PLACEHOLDER_IMG_N → sceneN.jpg，COVER → cover.png）。场景图（scene2-6，跳过 Hook scene1）作正文配图。
 
 ### 🔴 字幕与音频不同步（v2.0.0 → v2.1.0 → v2.2.0 → v2.3.0 → v3.25.0 演进）
 
@@ -5772,6 +5815,28 @@ st = page.evaluate('''() => {
 **How to apply:** 任何 Workflow 编排前评估并发；提取结果里出现 null/空份额时按「被杀」处理补跑，不当成「无发现」。
 
 ## 更新日志
+
+### v3.52.0（2026-10-17 日报实测，B站上传路径坑 258）
+基于 **2026-10-17 日报全流程**（linuxdo 395/395 抓 / 27 批 err=0 / 日报 382 帖；场景图 gpt-image-2 API 7/7（main 首轮空响应→_001 承接）；TTS 94.880s / 锚点 0.7688（scene6 api_key，先加长 scene7 压到 0.78 再跑）；成片 95.06s / 2850 帧 / 11MB；公众号自动上传 open→body 993字→images 5图占位符0→cover hasQpic→title 61字→save appmsgid=100001587 合集picked→verify bodyLen 856 全绿；B站/抖音/视频号初始未登录 login_required → 用户手动接管坑 215 收口）实测，吸收坑 258 + 登录态判定 + 公众号配图三条：
+
+**B站上传路径（坑 258，核心）**
+- 渲染/归档文件名 = `publish.json.title`（后缀 `| 今日羊报AI`，无「｜N条重磅AI新闻一次看完」段）
+- B站上传脚本 `VIDEO` 误抄 `publish.json.platform.bilibili.title`（带「｜4条重磅」段）→ `upload` 步 `os.path.getsize` 崩 `FileNotFoundError`
+- 修法：渲染后先 `ls news-pipeline/{date}/video/` 核对实际文件名，`VIDEO` 填 `publish.json.title`；派生后 python 校验路径 exists 再跑
+
+**四平台登录态判定**
+- 抖音首页含「作品发布及管理」等营销文案，`guard()` 误判已登录 → 实际是扫码/验证码登录页
+- 判据只认上传表单元素：抖音 `作品描述`/`暂存离开`/`设置封面`；B站 `上传视频`/`投稿` 且无 `扫码登录`；视频号 `login.html` URL；公众号 `新的创作`/`New creation`
+- 本期四平台初始全未登录 → 依次 `login_required`；公众号、B站陆续登录后推进，抖音/视频号由用户手动接管（坑 215 收口）
+
+**公众号配图**
+- `wechat-images/` 需 `sceneN.jpg`（从 `sceneN.png` ffmpeg 转）+ `cover.png`（= `horizontal-4-3.png` 拷贝），非裸 `sceneN.png`
+- 上传脚本 `IMAGES` 按此引用（PLACEHOLDER_IMG_N → sceneN.jpg，COVER → cover.png）
+
+**B档措辞**
+- 本期「商务部出口登记」正文用「合规边界/临时登记」，避开 B 档禁词「监管/审查」；输出前 grep B 档禁词自检全过
+
+**版本**：3.51.0 → 3.52.0
 
 ### v3.51.0（2026-10-16 日报实测，环境断供 + 渲染边界帧）
 基于 **2026-10-16 日报全流程**（linuxdo 516/516 抓 / 35 批 err=0 / 日报 509 帖；场景图 API 9/9（首轮 5/9 + 重跑 missing-only）；TTS 113.008s / 锚点 0.7024（scene5 播放第 7 位）；成片 113.216s / 3395 帧 / 11.0MB；公众号 open→body→images→cover→title→save→verify 一次过 appmsgid=100001578；B站/抖音/视频号用户手动，坑 215）实测，吸收坑 256–257：
