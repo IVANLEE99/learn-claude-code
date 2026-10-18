@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.52.0
+version: 3.53.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.52.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.53.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.53.0 核心改进（2026-10-18 日报实测，公众号验收入口三坑 259-261）**：**首页「近期草稿」里的 appmsgid 是另一套 ID，验收判据只认标题文本（坑 259）**——首页草稿卡片链接的 `appmsgid=2247485xxx` 与编辑器 `appmsgid=100001596` 完全不同体系，按 appmsgid 文本匹配首页必假阴性（1018 实测 `appid_in_home=False` 而草稿完好在箱）；正确判据=首页/草稿箱 DOM 含**当期标题文本**（`V4.1-Flash-1017`）。**直接 goto 草稿箱列表页 URL 会掉会话 + 默认落在「历史图文素材」tab（坑 260）**——`action=list` 页直跳（带不带 token 均试过）只见「请重新登录」或 2018/2020 旧素材，正确动作=从带 token 的现成 `home/index` 标签页**在页内点击**进入，列表页打开后**必须再点「草稿箱」tab** 才见当期草稿（默认 tab 是「历史图文素材」，不切 tab 会误判草稿丢失）。**「发表记录」tab 点了不跳转、仍回草稿箱列表（坑 261）**——发表记录判据改用**首页「近期发表」区块**（1018：最新=昨日 1017 期 → 当日无发表 ✓）。**正例固化**：公众号分步链一次过（open→body 1036字→images 5图占位符 0→cover hasQpic→title 67字→save appmsgid=100001596 合集「今日羊报 AI」picked→verify 全绿）；分类器故障期（只读过/非只读全拦）把 prep 脚本+状态文件先落盘，恢复后 `prep_wechat_1018.sh`（cover=horizontal + CDP 探活）→ 分步续跑，一次过。
 > **🔴 v3.52.0 核心改进（2026-10-17 日报实测，B站上传路径坑 258）**：**渲染/归档文件名 = `publish.json.title`（后缀 `| 今日羊报AI`），但 B站上传脚本按 `publish.json.platform.bilibili.title`（后缀 `｜4条重磅AI新闻一次看完 | 今日羊报AI`）拼 VIDEO 路径 → `FileNotFoundError`**（1017 实测：视频已渲染成功，`bili_upload.py upload` 步在 `os.path.getsize(VIDEO)` 处崩——VIDEO 里含 `｜4条重磅AI新闻一次看完`，实际产物文件名不含该片段）。根因：`publish.json.title` 与 `bilibili.title` 是两个字段（前者列表标题、后者带「N条」营销后缀），渲染用前者、脚本 VIDEO 却抄后者。修法：**B站上传脚本的 `VIDEO` 必须用 `publish.json.title`（与渲染产物名一致），不要用 `bilibili.title`**；派生后先 `ls news-pipeline/{date}/video/` 核对实际文件名再写 VIDEO。**坑 215 全程命中**：本期公众号自动上传成功（open→body 993字→images 5图占位符0→cover hasQpic→title 61字→save appmsgid=100001587 合集picked→verify bodyLen 856 全绿），但 B站/抖音/视频号四平台初始全部未登录（CDP daemon 无登录态）→ 依次标记 `login_required`；后 B站、公众号陆续登录（公众号自动上传完成），其余由用户手动接管，坑 215 收口。**登录态判定假阳性**：抖音首页含「作品发布及管理」等营销文案，脚本 `guard()` 误判「已登录」→ 实际是扫码/验证码登录页；**判据必须看上传表单元素**（`作品描述`/`暂存离开`/`设置封面`），禁以页面出现「作品/发布」文案为准。**公众号配图格式**：`wechat-images/` 需 `sceneN.jpg`（not png），从 `images/sceneN.png` ffmpeg 转，另 `cover.png` = `horizontal-4-3.png` 拷贝；上传脚本 `IMAGES` 按此引用。**B档措辞**：本期「商务部出口登记」正文用「合规边界/临时登记」，避开 B 档禁词「监管/审查」——输出前 `grep` B 档禁词自检全过。
 > **🔴 v3.51.0 核心改进（2026-10-16 日报实测，环境断供 + 渲染边界帧）**：**`~/.claude/settings.json` 的 GEN_IMG/MIMO_TTS 凭据会静默丢失（坑 256）**——1016 视频链开工时 settings.json 的 env 只剩 ANTHROPIC_* 十键，`GEN_IMG_API_URL/_KEY`（及 `_001/_002/_003` 回退）与 `MIMO_TTS_API_*` 全没了，`gen_scenes_api.py` 的 ENDPOINTS 解析为空。排查顺序：① `~/.claude/settings.json.bak-*` 备份里找（1016 从 9-22 的 `settings.json.bak-post2video-2931081` 恢复 16 键后 9/9 场景图一次走通）；② 日常跑流水线前 `python3 -c` 打印 endpoint 名 + keylen 做**存在性探针**（禁打印 key 本体）；③ 恢复后原地 `cp settings.json settings.json.bak-pre{MMDD}-HHMM` 留痕。注意 key 的分组语义别搞错：1016 实测 `main`（ai.xmiaom.com）对 gpt-image-2 直接回非 JSON（`Expecting value: line 1 column 1`），实际承接的是 `main_001`（elysiver.h-e.top，grok-imagine-image）——**首轮 5/9、scene2/7/8/9 全挂，重跑 missing-only 即全过**，说明是时段性抖动不是端点死亡，**重跑缺失文件前不要换端点顺序**（与坑 253 的「拆单+间隔重试」同对策）。**TTS 用探针先验环境再跑全量**：1016 先验 `edge-tts 7.3.1`（坑 250 门禁）+ 代理探活（非 CN 出口 IP）双绿后才跑 9 场景，一次过 113.008s / anchor_pos 0.7024。**渲染边界帧漂移约一帧（坑 257）**——1016 成片视频流 113.166667s vs 音频 113.216000s，相差 0.049s（<1 帧@30fps）：逐场景 `ceil(dur*30)` 的垫帧累计 3395 帧，画面边界比音频边界早约一帧，锚点帧 t=79.4s 抽到的是 scene7 尾帧、音频已进 scene5——**属测量容差，不重渲、不重排**（与坑 209 重排阈值 >5% 不可比）。验收时抽锚点帧允许 ±0.2s 偏差，以字幕时间轴为准。**正例固化**：场景时长/锚点用字数预估（1016 预估 0.7065 → TTS 实测 0.7024 一次过，锚点 scene5 排播放第 7 位 `[1,2,3,4,6,7,5,8,9]`）；公众号全链分步一次过（open→body 1471字→images 占位符0→cover hasQpic→title 65字→save appmsgid=100001578→verify 1283字，占位符0、合集 picked）；B站/抖音/视频号用户手动，坑 215 全不碰含核验。
 > **🔴 v3.50.0 核心改进（2026-10-15 日报实测，公众号链路两坑）**：**合集「option not found (0 items)」是假阴性，判据只认编辑页回读（坑 255）**——1015 公众号 save 步首跑报 `0 items`，按坑 252 重跑 save **仍 0 items**，但编辑页回读文本已含 `「今日羊报 AI」`，**合集实际早已挂上**。根因：`li.select-opt-li` 只在下拉**手动展开**后才渲染；脚本链路（点「合集」label → 点「未添加」→ 点 `input[placeholder="请选择合集"]` → value-setter 填「今日羊报」）在选项未渲染时**仍会命中默认/唯一合集**并写入，此时 DOM 里没有 `li.select-opt-li`，计数自然是 0——**0 是「没展开」，不是「没选中」**。唯一可靠判据 = 编辑页回读**独立的短文本叶子节点**含合集名（标题/正文里本来就有「今日羊报」字样，必须区分：合集命中的是 `「今日羊报 AI」` 这种独立叶子，不是标题行或 CTA 行）。**禁止**用 `0 items` 当失败信号、禁止据此重跑或转手动。**`type=10 list_card` 第二次假阴性，验收只认首页「近期草稿」（坑 221 补充）**——`wechat_check_draft.py 2026-10-15` 走 `list_card` 返回 `草稿箱标题候选: []` + `in_publish_record: false` → 打印 `两处均无 — 需排查`，而草稿 `appmsgid=100001568` 实际完好。正确动作 = 改走首页**「近期草稿」**入口（点文本为「近期草稿」的节点），实测首条即当期标题，与 10-14/10-13/10-12 历史草稿同列返回；**该入口不跳转 URL**（仍停在 `cgi-bin/home`），不能靠 URL 判断是否进入，只能看 DOM 文本。**正例固化**：本期只上传公众号（B站/抖音/视频号用户已手动，坑 215 全不碰含核验）；`wechat-article-2026-10-15.md` 落盘 8656B 含「无配图版全文」降级节；6 张 `wechat-images/sceneN.jpg` 全过严格解码 + 底边绿行扫描（绿行=0）后才上传；上传脚本 `wechat_upload_1015.py` 带坑 241 内容断言（sections=4 / placeholders=6 / images=6，反期·禁词·密钥全过）。
@@ -5814,7 +5815,37 @@ st = page.evaluate('''() => {
 **Why:** 429 的两种文案（限频/并发）都表现为批量失败；子 agent 的 null 是终态，等不来恢复。
 **How to apply:** 任何 Workflow 编排前评估并发；提取结果里出现 null/空份额时按「被杀」处理补跑，不当成「无发现」。
 
+### 🔴 公众号验收三件套的三个入口坑（v3.53.0 / 2026-10-18 实测，坑 259-261）
+**坑 259：首页/草稿卡片链接里的 appmsgid ≠ 编辑器 appmsgid，验收判据只认标题文本**——1018 verify 后在首页按 `APPMSGID=100001596` 文本匹配 → `appid_in_home=False` 假阴性；首页「近期草稿」卡片链接里的 `appmsgid=2247485xxx`（2247485243/2247485234/…）是另一套 ID 体系，与编辑器 URL 里的 `appmsgid=100001596` 不是一个东西。**唯一可靠判据 = DOM 含当期标题文本**（如 `V4.1-Flash-1017`），实测首页/草稿箱均命中。
+**坑 260：直接 goto 草稿箱列表页 URL 会掉会话，且默认落在「历史图文素材」tab**——`appmsg_edit_v2&action=list` 页直接 goto（先不带 token → 「请重新登录」；带 token 直跳 → 登录态在但默认 tab 显示 2018/2020 的「历史图文素材」，看不到当期草稿）。正确动作 = 从带 token 的现成 `home/index` 标签页 `bring_to_front` 后**在页内导航/点击**进入，列表页打开后**必须点文本为「草稿箱」的 tab** 再断言标题（1018：点 tab 后首条即 `【2026-10-18】DeepSeek V4.1-Flash-1017…`，更新于 16:41）。
+**坑 261：「发表记录」tab 点击不跳转，发表记录判据改用首页「近期发表」区块**——在列表页/首页点「发表记录」后页面仍回草稿箱列表（DOM 未变），按 tab 文本判断是否进入会永远读不到。正确动作 = 读**首页「近期发表」区块**（`indexOf('近期发表')` 后取 tail）：1018 最新一条=昨日 1017 期「已发表」→ 当日无发表 ✓。判据逻辑：近期发表首条日期 ≠ 当期日期（或首条标题不含当期日期串）。
+**正例固化**：公众号分步链一次过（坑 243 顺序 open→body 1036字→images 5图占位符 0→cover hasQpic→title 67字→save appmsgid=100001596 合集「今日羊报 AI」picked→verify 编辑页全绿）；分类器故障期（只读过/非只读全拦，坑 1003/216）把 prep 脚本+PIPELINE-STATUS.md 先落盘（Write 通道可用），恢复后 `prep_wechat_1018.sh`（cover=horizontal 拷贝 + CDP 9222 探活）→ 按状态文件分步续跑，零重跑。
+**Why:** 验收三件套的后两件依赖入口页，而入口页的 URL/tab/ID 体系每个都是假阴性来源——错一个就可能把完好草稿误判成丢失、或误以为发生了发表事故。
+**How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
+
 ## 更新日志
+
+### v3.53.0（2026-10-18 日报实测，公众号验收入口三坑 259-261）
+基于 **2026-10-18 日报全流程**（日报 384 帖/381 带正文；脚本+审核清单 12/12 PASS，锚点 0.8113 OUT→加长 scene7 CTA 至 0.7809 PASS；场景图 7/7（scene1/4 main_001 兜底）；TTS 113.479s；字幕 53 行闭合；成片 3408 帧/113.664s/12.4MB 抽帧全对；公众号自动上传一次过 appmsgid=100001596；B站/抖音/视频号用户手动坑 215 不碰）实测，吸收公众号验收三入口坑：
+
+**坑 259：验收判据只认标题文本，禁用 appmsgid 文本匹配首页**
+- 首页「近期草稿」卡片链接的 `appmsgid=2247485xxx` 与编辑器 `appmsgid=100001596` 是两套 ID 体系
+- 1018 实测 `appid_in_home=False` 假阴性，但草稿完好；正确判据 = DOM 含当期标题文本（`V4.1-Flash-1017`）
+
+**坑 260：列表页直跳掉会话 + 默认「历史图文素材」tab**
+- `appmsg_edit_v2&action=list` 直接 goto：不带 token → 请重新登录；带 token → 默认 tab 是旧素材，看不见当期草稿
+- 正确动作 = 从带 token 的 `home/index` 标签页页内进入，**必须点「草稿箱」tab** 再断言标题
+
+**坑 261：「发表记录」tab 点了不跳转**
+- 列表页/首页点「发表记录」后 DOM 不变（仍草稿箱列表），按 tab 判断会永远读不到
+- 发表记录判据 = 首页「近期发表」区块首条：1018 最新=昨日 1017 期 → 当日无发表 ✓
+
+**正例固化**
+- 锚点 0.8113 OUT → 只加长 scene7 CTA（+~32 字）→ 0.7809 PASS，场景 1-6 TTS 时长逐字不变（坑 236 反向应用）
+- 公众号分步链一次过：open→body 1036字→images 占位符 0→cover qpic→title 67字→save appmsgid=100001596 合集 picked→verify 全绿
+- 分类器故障期：prep 脚本+状态文件先落盘（Write 通道），恢复后续跑零重跑
+
+**版本**：3.52.0 → 3.53.0
 
 ### v3.52.0（2026-10-17 日报实测，B站上传路径坑 258）
 基于 **2026-10-17 日报全流程**（linuxdo 395/395 抓 / 27 批 err=0 / 日报 382 帖；场景图 gpt-image-2 API 7/7（main 首轮空响应→_001 承接）；TTS 94.880s / 锚点 0.7688（scene6 api_key，先加长 scene7 压到 0.78 再跑）；成片 95.06s / 2850 帧 / 11MB；公众号自动上传 open→body 993字→images 5图占位符0→cover hasQpic→title 61字→save appmsgid=100001587 合集picked→verify bodyLen 856 全绿；B站/抖音/视频号初始未登录 login_required → 用户手动接管坑 215 收口）实测，吸收坑 258 + 登录态判定 + 公众号配图三条：
