@@ -1,12 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.53.0
+version: 3.56.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.55.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.56.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.56.0 核心改进（2026-10-18 周报 W41 实测，周报派生链七坑 271-277）**：**`image-prompts-*.json` 有 dict/list 两种形态，派生脚本读写前先做 dict 兼容（坑 271）**——W41 的 prompts 落盘是 `{"date":..., "scenes":[...]}` dict 形态（W40 曾是顶层 list），`gen_images_w41.py` 直接 `for p in prompts` 报 `TypeError: string indices must be integers`；修法 = 读完即 `if isinstance(prompts, dict): prompts = prompts.get('scenes', [])`，**读 prompts / voiceover / concepts 三处 JSON 一律加此兼容行**（verify_w41 同样对 `scenes`/`plist`/`bank` 三处做了 dict/list 双兼容）。**derive 做日期替换时「先换日期、后加新 pattern」，extra pattern 必须写新日期形态（坑 272）**——`derive()` 内先 `s.replace(OLD_DATE, NEW_DATE)` 再应用 extra 替换，extra 里若仍写旧文件名（如 W40 的 `image-prompts-2026-10-05~2026-10-11.json`）会 `WARN pattern not found` 静默跳过、插入的兼容行挂错位置；**extra 的锚点字符串一律用 NEW_DATE 形态写**。**NewsTitle patch 必须覆盖「单日残留」形态（坑 273）**——共享工程被日报会话改过后，`PERIOD_DATE` 可能是单日值 `'2026-10-18'`（不是上期周报区间），只备 `OLD_RANGE→NEW_RANGE` 会 patch 落空；W41 的 `patch_newstitle_w41.py` 内置 5 形态全覆盖（单日 `2026-10-18` / 上期区间 / 相邻单日 / 前两周区间）+ `BRAND '今日羊报AI'→'羊报AI周刊'`，落空即 `SystemExit` 报错不静默过。**triple-quote docstring 与 `import` 写同一行必 `SyntaxError`（坑 274）**——derive 内嵌新脚本字符串时 `"""把...改成 W41 周报值。"""` 与 `import pathlib` 同行，`"""` 闭合后同行代码非法；**内嵌模板一律 docstring 独占一行**。**COVER 云端模板是死代码，`SCENES_ONLY=True` 但封面大字仍须同步更新（坑 275）**——W41 `gen_images_w41.py` 封面走本地 PIL（坑 225），`if not SCENES_ONLY` 分支永不执行，但 COVER 字符串里仍印 W40 大字/日期/水印；派生时若不同步换词，下次 SCENES_ONLY 翻转即烧错版。**derive 对 `run_all.sh` 做 VID 整行三形态替换 + `patch_newstitle_w40→w41` 文件名修正（坑 276）**——VID 行在日期替换后可能是新日期+旧标题的混合态（`【10-12~10-18】时间表先行…`），单 pattern 覆盖不全；W41 用三行 `s.replace`（混合态/全旧态/短日期态）全覆盖 + 逐项 `check` 断言（title 无 `时间表先行` 残留）；另 `run_all` 引用的 patch 文件名 `w40→w41` 必须同步改，否则调到旧期脚本。**禁词扫描作用域只限 BODY_HTML 正文段（坑 277）**——全脚本扫描会把 `BANNED_KEYWORDS` 定义行自身计为命中（W41 初版 27 误报）；**扫描对象 = BODY_HTML 常量段**，定义行/注释/verify 逻辑排除在外。正例：W41 TTS 105.994s（666 字门禁 PASS）/ 成片 106.15s 10541KB / 锚点实测 0.7486 / 尾差 0.580s（cap 105.58→wav 105.994→video 106.15，坑 234 三项可解释）/ 公众号 appid=100001605 一次过。
 
 > **🔴 v3.55.0 核心改进（2026-10-19 日报实测，产物完整性与流程坑 265-270）**：**`publish.json` 必须由脚本生成，禁止手写（坑 265）**——1019 手写精简版只填了标题/封面/视频/时长/锚点，漏了顶层 `description`/`tags`/`draft_only` 与各平台 `description`/`partition`，**`platform.channels` 段整个不存在**（视频号脚本取不到标题）。1018 的完整结构=顶层 `date/title/description/tags/draft_only/cover/video/duration/anchor/platform`，`platform` 下 `bilibili{title,partition,tags,description}` / `douyin{title,tags,description}` / `channels{title,tags,description}` / `wechat{title,collection,article,images}`。**派生后必须逐字段 diff 上期 publish.json**，缺字段即失败。**合集下拉需等 ≥2.5s 才渲染选项（坑 266，坑 255 的时效补充）**——1019 `li.select-opt-li` 在 1.2s 时是 `0 items`、2.5s 后正常渲染 3 个选项（羊报AI周刊/「今日羊报 AI」/羊报AI月报）；**坑 255 说「0 items 是没展开不是没选中」仍成立，但补一条：脚本内等待时间不足也会真的没渲染**——对策=输入关键词后轮询等待选项出现（最多 ~5s），再点选。**首页「近期草稿」需 reload 才见刚存的草稿（坑 267）**——1019 存完草稿后首页草稿区仍显示 10-12 的旧条目，`location.reload()` + 9s 后首条才变成当期的「更新于 09:50」；**验收前必须 reload 首页**，否则会误判草稿丢失。**raw CDP 打标必须是数字 1（坑 268）**——上传脚本用 `window.__wx1019 === 1` 严格比较识别编辑页，raw CDP 若写成字符串 `'1'` 则不匹配，脚本会重新开新编辑页（丢已填内容）；**跨工具打标统一用 `= 1`（数字）**。**共享 Remotion 工程 `news-pipeline/video-project` 多会话争用（坑 269）**——该目录被日报与周报（W41）共用，`src/Composition.tsx`/`Root.tsx` 是单份配置；**改前必须先确认另一会话产物已在盘**（1019 实测 W41 周报成片 10-18 22:41 已生成 → 可安全改），并先 `cp` 备份为 `.bak-w41` 再改，改完核对 `public/images/` 场景数（周报 10 场景 → 日报 7 场景要删多余 sceneN.jpg）。**heredoc 写文件前先确认 cwd（坑 270）**——1019 在 `news-pipeline/2026-10-19/scripts` 下执行 `mkdir -p ../prompts && cat > .../prompts/x.json`，因相对路径基准错位导致目录没建成、文件静默丢失（无报错）；**写产物一律用绝对路径或 Write 工具**，写完 `ls` 复核。
 
@@ -5965,6 +5967,40 @@ st = page.evaluate('''() => {
 - 运维记录：报告阶段曾出现同一文件十余次 no-op 重写（模型卡循环）+ 多轮响应中途截断——**每 stage 落盘后以磁盘产物为准做一次校验**，不采信循环内的自我汇报
 
 **版本**：3.46.0 → 3.47.0
+
+### v3.56.0（2026-10-18 周报 W41 实测）
+基于 **2026-10-12~10-18 周报全流程**（TOP1「先赔钱再收费，DeepSeek的一周账单」深聊 + 3 快讯 + distillation 锚点 15s 兜底；脚本 666 字门禁 PASS；TTS 105.994s / 锚点实测 0.7486 / 命中词 0.3183；成片 106.15s / 3183 帧 / 10541KB / h264 1920×1080；尾差 0.580s = cap 105.58→wav 105.994→video 106.15 三项可解释；公众号 appid=100001605 一次过 body 934 字占位符 0；B站/抖音/视频号用户手动，坑 215）实测，吸收坑 271–277：
+
+**prompts 形态兼容（坑 271）**
+- `image-prompts-*.json` 有 dict（`{"date","scenes"}`）与顶层 list 两种落盘形态，跨期派生必先兼容
+- 读完即 `if isinstance(prompts, dict): prompts = prompts.get('scenes', [])`；verify 对 `scenes`/`plist`/`bank` 三处同样双兼容
+- 症状：直接迭代 dict 得 key 字符串 → `TypeError: string indices must be integers`
+
+**derive 替换顺序（坑 272）**
+- `derive()` 先做 OLD→NEW 日期替换、再应用 extra；extra 锚点串必须用 NEW_DATE 形态写，否则 `WARN pattern not found` 静默跳过
+- 断言：extra 应用后无 WARN，或 WARN 项逐条人工确认
+
+**NewsTitle 单日残留（坑 273）**
+- 共享 video-project 被日报会话改过后 PERIOD_DATE 可能是单日值；patch 模板备 5 形态（当期单日/上期区间/相邻单日/前两周区间）+ BRAND 对
+- 落空即 `SystemExit`，禁止静默过；渲染后首帧目检复核（坑 189 协议不变）
+
+**内嵌模板语法（坑 274）**
+- `"""docstring"""` 必须独占一行，禁止与 `import` 同行（必 SyntaxError）
+- 派生后对新脚本跑 `py_compile`，过语法再跑内容断言（坑 241 三层不变）
+
+**死代码同步（坑 275）**
+- `SCENES_ONLY=True` 时 COVER 云端模板不执行，但其中的封面大字/日期/水印仍须同步换成当期，否则下次翻转即错版
+- 派生断言加一项：COVER 串含当期 Hook 词、不含上期 Hook 词
+
+**run_all 派生（坑 276）**
+- VID 行做三形态整行替换（混合态/全旧态/短日期态）+ `patch_newstitle_w40→w41` 文件名同步
+- 断言：title 无上期标题残留（W41：无 `时间表先行`）、同步段含 jpg 转换、渲染含 `--timeout`（坑 245 复用）
+
+**禁词扫描作用域（坑 277）**
+- 只扫 BODY_HTML 正文段；扫全脚本会把 BANNED_KEYWORDS 定义行自身计入（W41 初版 27 误报）
+- W41 实测：BANNED 表内 `越界/风控` 等词在正文技术语境出现属合规（结论=合规通过，非改词）
+
+**版本**：3.55.0 → 3.56.0
 
 ### v3.46.0（2026-10-12 周报 W40 实测）
 基于 **2026-10-05~10-11 周报全流程**（TOP1「时间表先行，价格随后跟上」深聊 + 3 快讯 + token 锚点 15s 兜底；TTS 104.746s / 成片 104.981s / 3148 帧 / 10.10MB；锚点占比 0.7569；字幕尾差 1.098s 四项闭合；四平台用户中途声明已手动上传，坑 215 收口，当期只做 skill 回写）实测，吸收坑 244–248：
