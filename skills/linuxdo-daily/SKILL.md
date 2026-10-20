@@ -1,13 +1,14 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.1.0
+version: 16.2.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **v16.2 核心改进（2026-10-20 日报实测）**：**Discourse 帖子页内嵌 i18n 字典含官方警告原文，裸 includes 判据对正常页逐页误报（新坑）**——1020 期 `bodyText.includes('系统检测到该账号存在异常使用行为')` 连误报 3 次（23:04 + 次晨 2 次），`_resume` 的 sticky 标记检查直接拒绝续跑；用户指出"打开后页面有内容、没有被封"才暴露误判。根因：Discourse 前端把 en/zh/zh-hant 三语警告文案以内嵌 JSON 字典形式下发（含 `SUBMIT_FEEDBACK`/`EDIT_INPUT` 键），**每个正常帖子页都含该字符串**。修法：判据函数 `isOfficialWarning()` 必须排除字典行——命中关键词时再检查同行是否含 `/"zh-hant"\s*:/`、`/"en"\s*:"/`、`SUBMIT_FEEDBACK`、`EDIT_INPUT`，有则判正常；改判据前先用诊断脚本回读页面三要素（标题/正文长度/cooked 数）确认页面真实可用，`node --check` 过后再续跑。1020 实测：406 帖队列 → 28 批 err=0 → daily 395 帖。**附带**：看门狗三态（pid 活/log 近 5min/heartbeat ≤25min）任一真则跳过，中断续跑先 `bash data/_resume_*.sh` 补齐抓取链再碰下游。
 > **v16.1 核心改进（2026-10-16 日报实测）**：**派生日期有三种 sed 漏网形态（坑 241 日期三形态跨 skill）**——1016 期 `s/1015/1016/g` + `s/2026-10-15/2026-10-16/g` 只能命中①连字符日期（`2026-10-16`）、②裸期号（`1016`）、③下划线标识（`__wx1016`），**漏掉 `datetime(2026, 10, 15, 0, 5)` 这种逗号分隔的 Python 日期常量**：`_build_queue_1016.py` 的 `BASE = datetime(2026, 10, 15, 0, 5, tzinfo=CST)` 没被替换，32h 窗口会整体偏一天（`_build_queue` 自带的 `assert (BASE-CUTOFF)==32h` 救不了，因为 BASE 和 CUTOFF 一起偏）。修法：派生后 `grep -n "2026, 10,"` 逐行核对 BASE 行 + 运行期 `print(BASE.isoformat())` 断言；亮点对照窗口（`2026-10-1{3,4,5}.md`）、cutoff 字符串（`2026-10-14 16:05`）同样逐项核对。1016 实测：516 帖队列 → 35 批 err=0 → daily 509 帖。**附带**：`data/source_a/b.json` + `crawl_queue.json` 属上一期残留时必须一并归档，否则 `_resume` 脚本会拿旧队列跳过重建（1016 冷启动归档 37 残留批次 + source/queue 另存 `-src` 目录）。
 > **v16.0 核心改进（2026-09-18～09-20 三期全量日报实测）**：把 v15.9 的 Node 直连 Playwright 从临时兜底升级为**可复用全量抓取协议**：脚本必须按当期日期复制/参数化（禁止只改文件名却保留 0917 注释与固定 cutoff）；32h 窗口基准默认固定为当期 **00:05 CST**，禁止用脚本实际启动时间 `datetime.now()` 漂移；最近 3 日标题去重必须做**规范化比较**，不只精确字符串；每批结果写临时文件后原子替换，避免中断留下半截 JSON；冷启动归档目录已存在时不得 `shutil.rmtree` 覆盖，须生成唯一目录。0918：422→400；0919：414（413 valid/1 error）→400；0920：326→316。安全分类器不可用时只读命令仍可过，非只读任务暂停并改用 Write/Edit 落盘，恢复后从磁盘 batch 续跑。
 > **v15.9 核心改进（2026-09-17 日报实测）**：Playwright MCP 断连时改 **Node 直连 Playwright** 抓列表+正文（headed 过 Cloudflare；`page.evaluate` 只传单对象参数）；chromium 路径用本机最新 `chromium-NNNN`，勿写死 1223。全量 **26 批 / 382 帖 0 error**，二次过滤 **362**。
