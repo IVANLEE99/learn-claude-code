@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.58.0
+version: 3.59.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.58.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.59.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.59.0 核心改进（2026-10-21 日报实测，合规软化 + 视频号专版 + 正文原位重贴四坑 284-287）**：**视频号无资质账号过审红线=时政外事叙事，对策=删敏感场景出「专版」而非改主版（坑 284）**——1021 主版含 OpenAI 窃听案 scene3（涉外司法叙事+庭审/监控类画面+「窃听器」措辞）反复拒审；主版与其他平台一律不动（坑 215），建临时目录 `video-channel/`（删减口播 texts + voiceover 符号链接复用主版 wav + 按新播放顺序重算字幕），共享工程改前先 `cp` 备份主版 captions（`captions-main-5scene-backup.json`），Composition `sceneConfig`/Root `SCENE_DURS` 临时改删减版渲染，**渲染完立即还原 5 场景配置**（坑 269 纪律）；成片命名加「【视频号专版】」前缀交用户手动传；**删中段场景后锚点必须重算**（本例删 scene3 后 101.074/124.893=0.8093 → 65.754/89.728=0.7328 仍落 [0.70,0.80]），交付前字幕+口播 grep 敏感词（窃听/监控/反代）零残留。**公众号正文原位全量替换（正文含图）唯一可靠方案=DOM 清空+合成 paste（坑 285）**——改稿重传时 `mouse.click` 编辑区中心落在 img 上→Meta+A/Backspace/V 键盘事件全不达编辑器；合成 `ClipboardEvent('paste')` 在非空正文上是**追加**（ProseMirror 用自身 state 光标，不理 DOM Selection，fix2 得 2342 字全双份）；正确流程=① `removeChild` 逐个清空 `.ProseMirror` 子节点（触发 mutation 同步进 state）→ ② 空正文上合成 paste 追加=等效全量替换 → ③ 回读断言 markers 全中+唯一标记 `count==1` → ④ save 后 appmsgid 原位保留（更新稿不新建草稿）。**body 步后 placeholders=N 是正常态，禁当失败判据（坑 286）**——占位符由图片步回填，重贴校验若写「无 PLACEHOLDER」则明明成功也报 FAILED（fix3 假阴性 ×3）；校验只看 markers+去重。**合规冲突处置=停上传→问用户→按选择软化原位更新（坑 287）**——涉具体个人未决案件/未证实指控的绝对化陈述（人名+国籍+「嫌疑人」定性）会触发合规拦截（工具侧与平台侧同理，属合理约束）；正确动作=立即停传、给用户 A（照传）/B（软化后传）/C（删段落）选项，选 B 后按「据媒体报道/疑似/以官方披露为准 + 括注（据 XX，帖 ID；以官方信息为准）」模板软化口播与图文，**原位 update 草稿不新建**；不自作主张删内容。小坑备查：`python3 -I` 断 site-packages（PIL 不可用）→ 跑封面/图像脚本去掉 -I；import 无条件 `main()` 的派生模块前先 `sys.argv=['x','noop']` 垫参；derive 重跑会覆盖手工修复→修复直接 Edit 目标文件再 grep 验证；派生内嵌 NEW_CHECKS 含 `\n` 转义会成真换行→用 `chr(10)`。1021 正例：日报 466 帖/475 全正文 33 批；TTS 124.893s 锚点 0.8093 容差内；成片 125.056s/3750 帧/14.3MB；公众号 appmsgid=100001636 软化原位更新 markers 全中；专版 89.728s/2690 帧/11MB 锚点 0.7328。
 > **🔴 v3.58.0 核心改进（2026-10-20 日报返工，字幕播放顺序错位坑 283）**：**`play_order` 重排场景后，字幕时间轴必须跟着重排，否则 1:06 后整体错位（坑 283）**——1020 期播放顺序 `[1,2,4,3,5,6]`（锚点前置调占比），但 `captions.json` 仍按编号顺序 `[1..6]` 拼时间轴：scene3 锚点块（11.765s）在 66.9s，scene4 MiniMax 块（26.695s）在 78.7s；实际播放 scene4 在 66.948–93.643、scene3 在 93.643–105.408。用户报"1:06 后字幕和音频对不上"。修法 = 字幕块整体平移（锚点块 +26.695s、MiniMax 块 −11.765s）后**按 startMs 重排数组**（Subtitles 按 startMs 独立定位，重排为干净；保留块内相对偏移），再用 ffprobe/抽帧双验（70s MiniMax 帧 + 95s 锚点帧字幕与画面一致）后替换成片；条数 61/总长 127289 不变，review-checklist §12 无需改。**根治**：gen_captions 组装时间轴时必须读 `play_order`，按播放顺序累加各场景 wav 时长定块偏移，而不是按场景编号顺序拼。
 > **🔴 v3.57.0 核心改进（2026-10-20 日报实测，抖音/视频号上传五坑 278-282）**：**视频号 wujie 页秒级重渲染，`set_input_files` 对 ElementHandle 必 detached（坑 278）**——1020 期 `input[type=file]` 每次 fresh-query 都能找到，但 `set` 瞬间即 `Cannot set input files to detached element`，重试 5 次全灭；修法 = 放弃 handle 直设，改 `page.expect_file_chooser` + 点上传区（视频传 `.ant-upload-drag` 中心，一次过 11.6MB）。**视频号发表动态页 ready 判据与上传页不同（坑 279）**——`删除/重新上传`文本在发表页不存在，上传成功看预览帧（OpenCode 字幕帧可现）+ 表单可填；判据必须按页面形态分别写，**截图为准**，文本轮询只做辅助。**视频号封面是"编辑→选帧+上传封面(+号/.add-icon)"弹窗结构（坑 280）**——竖 3:4（`.vertical-img-wrap`）/横 4:3（`.horizon-img-wrap`）各一个编辑入口，点编辑后弹窗含视频帧条 + `上传封面` + `.add-icon` 加号；且弹窗有关闭状态机（点确认后关闭），每次循环须 Esc 清残留→重开→校验 add-icon 可见（`offsetParent` 非空且 rect 非 [0,0]）再点，隐藏节点点下去 filechooser 永不弹。**抖音"上传失败，重新上传"可是假失败态（坑 281）**——右侧预览报失败但表单 poll `ready=True`（标题 17 字/描述/暂存离开全在）；对策 = file input 直传重传（一次轮询即就绪），不纠结预览文案；封面确认按钮须 `完成/保存/确定` 三词全覆盖（1020 首版只找"完成"漏"保存"），且按坑 229 封面不持久失败不阻塞存草稿。**视频号 tab 会跳到 `/post/list`（坑 282）**——疑似发表/保存后自动跳转或 wujie 路由漂移，脚本按 URL 精确匹配即 `channels page gone`；修法 = 按域名模糊匹配（`channels.weixin.qq.com` + `post/` 前缀），list 页先看是否草稿已存再决定回发表页。1020 正例：抖音 filechooser 重传→横竖封面保存→暂存离开→"继续编辑"横幅 True；视频号表单 evaluate 回读 desc/short/errors 全绿（assert 字符串比对中文引号转义易错，以字段分别断言为准）。
 > **🔴 v3.56.0 核心改进（2026-10-18 周报 W41 实测，周报派生链七坑 271-277）**：**`image-prompts-*.json` 有 dict/list 两种形态，派生脚本读写前先做 dict 兼容（坑 271）**——W41 的 prompts 落盘是 `{"date":..., "scenes":[...]}` dict 形态（W40 曾是顶层 list），`gen_images_w41.py` 直接 `for p in prompts` 报 `TypeError: string indices must be integers`；修法 = 读完即 `if isinstance(prompts, dict): prompts = prompts.get('scenes', [])`，**读 prompts / voiceover / concepts 三处 JSON 一律加此兼容行**（verify_w41 同样对 `scenes`/`plist`/`bank` 三处做了 dict/list 双兼容）。**derive 做日期替换时「先换日期、后加新 pattern」，extra pattern 必须写新日期形态（坑 272）**——`derive()` 内先 `s.replace(OLD_DATE, NEW_DATE)` 再应用 extra 替换，extra 里若仍写旧文件名（如 W40 的 `image-prompts-2026-10-05~2026-10-11.json`）会 `WARN pattern not found` 静默跳过、插入的兼容行挂错位置；**extra 的锚点字符串一律用 NEW_DATE 形态写**。**NewsTitle patch 必须覆盖「单日残留」形态（坑 273）**——共享工程被日报会话改过后，`PERIOD_DATE` 可能是单日值 `'2026-10-18'`（不是上期周报区间），只备 `OLD_RANGE→NEW_RANGE` 会 patch 落空；W41 的 `patch_newstitle_w41.py` 内置 5 形态全覆盖（单日 `2026-10-18` / 上期区间 / 相邻单日 / 前两周区间）+ `BRAND '今日羊报AI'→'羊报AI周刊'`，落空即 `SystemExit` 报错不静默过。**triple-quote docstring 与 `import` 写同一行必 `SyntaxError`（坑 274）**——derive 内嵌新脚本字符串时 `"""把...改成 W41 周报值。"""` 与 `import pathlib` 同行，`"""` 闭合后同行代码非法；**内嵌模板一律 docstring 独占一行**。**COVER 云端模板是死代码，`SCENES_ONLY=True` 但封面大字仍须同步更新（坑 275）**——W41 `gen_images_w41.py` 封面走本地 PIL（坑 225），`if not SCENES_ONLY` 分支永不执行，但 COVER 字符串里仍印 W40 大字/日期/水印；派生时若不同步换词，下次 SCENES_ONLY 翻转即烧错版。**derive 对 `run_all.sh` 做 VID 整行三形态替换 + `patch_newstitle_w40→w41` 文件名修正（坑 276）**——VID 行在日期替换后可能是新日期+旧标题的混合态（`【10-12~10-18】时间表先行…`），单 pattern 覆盖不全；W41 用三行 `s.replace`（混合态/全旧态/短日期态）全覆盖 + 逐项 `check` 断言（title 无 `时间表先行` 残留）；另 `run_all` 引用的 patch 文件名 `w40→w41` 必须同步改，否则调到旧期脚本。**禁词扫描作用域只限 BODY_HTML 正文段（坑 277）**——全脚本扫描会把 `BANNED_KEYWORDS` 定义行自身计为命中（W41 初版 27 误报）；**扫描对象 = BODY_HTML 常量段**，定义行/注释/verify 逻辑排除在外。正例：W41 TTS 105.994s（666 字门禁 PASS）/ 成片 106.15s 10541KB / 锚点实测 0.7486 / 尾差 0.580s（cap 105.58→wav 105.994→video 106.15，坑 234 三项可解释）/ 公众号 appid=100001605 一次过。
@@ -3478,6 +3479,36 @@ news-pipeline/
 
 ## 已知坑与经验教训
 
+### 🔴 视频号时政外事场景拒审→删敏感场景出「专版」单独渲染（v3.59.0 / 2026-10-21 实测，坑 284）
+
+**问题**：1021 主版（5 场景，含 scene3 OpenAI 窃听案）上传视频号反复拒审，用户报「一直过不了审核」。
+
+**根因**：无新闻资质账号的红线是时政外事叙事（对照 skill 目录《微信视频号常见的不合规频道内容概述.md》《微信视频号运营规范.md》）。scene3 三要素叠加：①涉外司法案件（窃听案、外籍嫌疑人、保释庭审）；②庭审/安保监控类画面（courtroom+security camera 场景图）；③「窃听器」等敏感词直接入字幕与口播。另「反代」属灰产边缘词。单删词不够——画面+叙事整体都是风险源。
+
+**解决**（专版流程，主版与其他平台一律不动，坑 215）：
+1. 建 `news-pipeline/{date}/video-channel/` 临时目录：删减版 `scripts/voiceover-texts.json`（去掉敏感场景）、`voiceover/` 符号链接复用主版 wav、按新播放顺序重算 `captions/captions.json`。
+2. 共享工程改前备份：`cp public/captions.json {date}/captions/captions-main-5scene-backup.json`；改 `Composition.tsx` sceneConfig 与 `Root.tsx` SCENE_DURS 为删减版（数组顺序=播放顺序，imageId/audioId 保留原场景号）。
+3. 渲染成片命名加「【视频号专版】」前缀，与主版同目录共存。
+4. **渲染完立即还原** sceneConfig/SCENE_DURS/captions.json 为主版配置（坑 269 共享工程纪律），并回读断言（字幕条数/末条 endMs/sceneIds）。
+5. 锚点重算：删中段场景→锚点起点前移，占比=新锚点起点/新总时长，必须重算且落 [0.70,0.80]（本例 0.8093→0.7328）。
+6. 交付前 grep 字幕+口播敏感词（窃听/监控/反代）零残留；ffprobe 验规格（时长/分辨率/帧数）。
+
+### 🔴 公众号正文原位全量替换=DOM 清空+合成 paste；合规冲突先停后问（v3.59.0 / 2026-10-21 实测，坑 285-287）
+
+**问题**：草稿已存（appmsgid=100001636）后需软化绝对化陈述并原位更新正文。三轮重贴：fix1 键盘法全灭、fix2 全文双份、fix3 明明成功却报 FAILED。
+
+**根因**（四个独立坑）：
+- **坑 285 键盘法失效**：正文含 5 张图后，`mouse.click` 编辑区中心落在 img 上，焦点不在可编辑文本，Meta+A/Backspace/V 全不达编辑器；且合成 `ClipboardEvent('paste')` 在非空正文上是**追加**——ProseMirror 监听 paste 但用自身 state 光标插入，不理 DOM Selection（fix2 得 2342 字全双份）。
+- **坑 286 假阴性判据**：body 步后 `PLACEHOLDER`×N 是正常态（图片步才回填），校验条件写成「无 PLACEHOLDER」→ 成功也报 FAILED。
+- **坑 287 合规冲突**：涉具体个人未决案件/未证实指控的绝对化陈述（人名+国籍+定性），继续自动化会被合理拦截；正确动作不是绕过而是停下来问用户。
+
+**解决**：
+1. 全量替换唯一可靠流程：① `removeChild` 逐个清空 `.ProseMirror` 子节点（DOM 变更触发 ProseMirror mutation 同步进 state）→ ② 空正文上合成 `ClipboardEvent('paste')`（DataTransfer 带 text/html）追加=等效全量替换 → ③ 回读断言：软化 markers 全中 + 唯一标记 `count==1`（防双份）。
+2. 校验判据只看 markers+去重，**不看 placeholders**（图片步回填后自然归零）。
+3. save 后 appmsgid 原位保留=更新稿不新建草稿；save 前后各回读一次断言长度与 markers。
+4. 合规软化模板：「据 XX 援引知情人士的报道」「疑似」「案件细节以司法程序披露为准」+ 括注（据 XX，帖 ID；以官方信息为准）；口播与图文同步软化，数字保留但标注「待官方确认」。
+5. 小坑备查：`python3 -I` 断 site-packages（PIL 不可用）→ 跑封面/图像脚本去掉 -I；import 无条件 `main()` 的派生模块前先 `sys.argv=['x','noop']` 垫参；derive 重跑会覆盖手工修复→修复直接 Edit 目标文件再 grep 验证；派生内嵌 NEW_CHECKS 含 `\n` 转义会成真换行→用 `chr(10)`。
+
 ### 🔴 B站上传 VIDEO 路径必须用 publish.json.title 非 bilibili.title（v3.52.0 / 2026-10-17 实测，坑 258）
 
 **问题**：1017 视频渲染成功（`news-pipeline/2026-10-17/video/【2026-10-17】OpenCode免费开放两个国产模型，DeepSeek搜索开始收费 | 今日羊报AI.mp4`），但 `bili_upload.py upload` 步在 `os.path.getsize(VIDEO)` 处抛 `FileNotFoundError`——脚本里 `VIDEO` 抄的是 `publish.json.platform.bilibili.title`（`…收费｜4条重磅AI新闻一次看完 | 今日羊报AI.mp4`），而实际产物文件名用的是 `publish.json.title`（无「｜4条重磅AI新闻一次看完」段）。
@@ -5832,6 +5863,9 @@ st = page.evaluate('''() => {
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.59.0（2026-10-21 日报实测，合规软化 + 视频号专版 + 正文原位重贴）
+基于 **2026-10-21 日报全流程**（日报 466 帖/475 全正文 33 批；TTS 124.893s 锚点 0.8093 容差内；成片 125.056s/3750 帧/14.3MB；公众号草稿 appmsgid=100001636 软化后原位更新 markers 全中无重复；B站/抖音用户手动坑 215；视频号主版拒审→删 scene3 窃听案出 4 场景专版 89.728s/2690 帧/11MB 锚点 0.7328 敏感词零残留，用户手动传）实测，吸收坑 284-287：
 
 ### v3.53.0（2026-10-18 日报实测，公众号验收入口三坑 259-261）
 基于 **2026-10-18 日报全流程**（日报 384 帖/381 带正文；脚本+审核清单 12/12 PASS，锚点 0.8113 OUT→加长 scene7 CTA 至 0.7809 PASS；场景图 7/7（scene1/4 main_001 兜底）；TTS 113.479s；字幕 53 行闭合；成片 3408 帧/113.664s/12.4MB 抽帧全对；公众号自动上传一次过 appmsgid=100001596；B站/抖音/视频号用户手动坑 215 不碰）实测，吸收公众号验收三入口坑：
