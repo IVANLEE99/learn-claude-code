@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.60.0
+version: 3.61.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.60.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.61.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.61.0 核心改进（2026-10-23 日报实测，视频号标注/合集新 DOM + 抖音恢复令牌六坑 292-297）**：**视频号 AI 标注真控件是「视频标注」下拉，不是中文勾选框（坑 292）**——wujie shadowRoot 内找「AI生成」/`input[type=checkbox]` 永远 `ai declare: absent`；真控件 = `.mark-tag-select` 的 `.select-display` + `.mark-tag-options`，选项全英文 `No label needed` / `Contains AI-generated content` / `Fictional storyline for entertainment only` / `Personal opinion for reference only` / `Content contains ads` / `Self-recorded content` / `Content is reposted`，**合规须选 `Contains AI-generated content`**；回读以 `.select-display` 文本为准。**视频号新版合集 DOM 变了，且 wujie 内 Vue 组件只认真实鼠标坐标点击（坑 293）**——旧 `.option-item` 前缀匹配返回 False；新链路 = 点 `.post-album-display` 展开 → `.post-album-wrap .option-item` 选项；**JS `.click()` 对这层 Vue 组件不生效（返回成功但 display 不变）**，必须取 `getBoundingClientRect` 中心后 `page.mouse.click(x,y)`；选项文案带「共N个作品」（本期 132/4/22/4）。**wujie shadowRoot 内 file input 用 `evaluate_handle().as_element()` 必 detached（坑 294）**——视频号封面对话框（`.vertical-img-wrap .edit-btn` → 标题「编辑个人主页卡片」→ 取消/确认）上传时，`as_element().set_input_files()` 报 `Cannot set input files to detached element`；改用 Playwright locator 形式 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(...)` 一次过；确认按钮同样 JS 查不到（`.weui-desktop-btn_primary` 从错误 wrapper 取空），走真实坐标点击。**抖音「继续编辑」是一次性消费令牌，核验后必须同标签再暂存（坑 295，坑 290 第三形态）**——抖音**没有草稿列表页**（`/content/manage?tab=draft` 空壳），唯一恢复入口是发布页横幅；为核验新开标签点「继续编辑」→ 读表单 → 关标签，**草稿就此消失**（此后任何标签横幅都不再出现）。正确 = 端到端一次跑完：暂存 → **同标签**点「继续编辑」回读 → **再点一次「暂存离开」** → 终态「按钮消失 + 横幅出现」；外部标签只准**读**横幅文本，**禁点击**。**抖音竖封面真入口是悬停槽位→「编辑封面」，弹窗内正确 input 是 `.selectArea-BCIYQD input[type=file]`（坑 296）**——`get_by_role('button', name='设置竖封面')` 常 `disabled`（只是提示位），点它必超时；弹窗内 6 个 file input 中其余 4–5 个是模板/贴纸选择器，喂错**静默无报错**。封面槽位按 `.coverControl-CjlzqC` 下标断言：`[0]`=横 4:3、`[1]`=竖 3:4，用 `img.naturalWidth/naturalHeight` 判 1536×1151 / 1150×1535；「竖封面缺失」文案在 AI 推荐封面生成期会**瞬时为真**，**禁只 grep 文本判封面**。**抖音合集选项匹配必须最小面积法排除下拉容器（坑 297）**——`/^「?今日羊报/` + `/共\s*\d+\s*个作品/` 会同时命中整个下拉容器（文本 `请选择合集不选择合集「虢礫緙嘞」共4个作品…` 整块），点它等于没选；约束 `textContent.length ≤ 40` + `rect.height ∈ [10,90]` 后**取面积最小的节点**点击，本期命中 `「今日羊报Al」共132个作品`。1023 正例：日报全量抓取完成；成片 128.128s/3842 帧/1920×1080/14,178,371B 锚点 0.7110；封面本地 PIL 对齐 2026-10-21 海报模板（横 1536×1152/竖 1152×1536）；四平台全草稿（B站 人工智能 分区+7 标签+合集、公众号 appmsgid+bodyLen1179+占位符0、视频号 描述+短标题+合集「今日羊报Al」+AI标注英文选项+3:4 封面、抖音 标题+desc157+5 话题+声明+双封面+第133集）。
 > **🔴 v3.60.0 核心改进（2026-10-22 日报实测，登录探测与空壳重挂四坑 288-291）**：**登录探测必须用 default context 新开页（坑 288）**——`connect_over_cdp()` 返回的是 Browser 不是 context，直接 `ctx.new_page()` 等价 `browser.new_page()` 自建**隔离 context 不共享 cookies**，四平台（B站/抖音/视频号/公众号）登录探测全误判 `login_required`，而旧 tab 明明停在登录后 URL、新开页却跳扫码页；正确写法=`browser.contexts[0].new_page()` 取 default context 再开页，goto 上传页 wait 4s 后按 v3.52 判据读表单元素（B站「上传/投稿」、抖音「作品描述」、视频号 url 无 `login.html`、公众号「新的创作」）判定，**禁用隔离模式做登录探测**。**wujie 空壳重挂要开全新标签而非旧标签 goto（坑 289）**——空壳判据 `wujie-app` 存在但 shadowRoot 内 `input/button/[contenteditable]` 计数=0（appKids=1、inShadow=0）；旧标签上 `page.goto('/platform/post/video')` 只改 URL 不触发 wujie 重挂载、仍是空壳，`Page.reload` 多次亦无效；正确=`pg.close()` + `browser.contexts[0].new_page()`（新标签必须走 default context 才共享登录态，同坑 288）+ goto `/platform/post/create` 一次挂载成功（实测 1201 节点 + file input 就绪），此后每步前先断言 `hasWujie && inShadow>0` 再动上传区/表单。**抖音「暂存离开」点击可能被吞，必须双信号验收（坑 290）**——点击回执（`locator.click()` 返回）**不等于**草稿落库，偶发点后表单未关闭、内容随页面关闭丢失；验收=轮询到「暂存离开」按钮消失 `hasZancun=false` **且**「继续编辑」恢复横幅出现，两者齐才算成功（坑 14.10 单信号验收的补强），缺一即重做上传+meta+封面后 JS 直点按钮，**不得只凭点击回执汇报草稿已存**。**B站视频上传直接对 accept 含 video 的 input `set_input_files`（坑 291）**——新版投稿页 `expect_file_chooser` 点击「上传视频」必超时（不触发原生 chooser），改为遍历 `input[type=file]` 按 `accept` 过滤（含 `video`/`mp4` → 视频；含 `image` → 封面弹窗内的图，坑 218 复用）后直接 `set_input_files`，**禁用索引定位**（页面上 `.mp4`×2 / `.txt` / `.zip` / 封面 image 共存，按 `inputs[1]`/`inputs[-1]` 会喂错 input 且全程静默无报错）。1022 正例：日报 387 帖全带正文；TTS 112.38s 锚点 0.7073 容差内；成片 112.512s/3374 帧/1920×1080；四平台全草稿（B站分区/声明/7 标签、公众号零占位符、视频号 wujie 全链、抖音双信号验收过）；场景图 API 写实版换图后仅重渲染即交付（无需重跑 TTS/字幕）。
 > **🔴 v3.59.0 核心改进（2026-10-21 日报实测，合规软化 + 视频号专版 + 正文原位重贴四坑 284-287）**：**视频号无资质账号过审红线=时政外事叙事，对策=删敏感场景出「专版」而非改主版（坑 284）**——1021 主版含 OpenAI 窃听案 scene3（涉外司法叙事+庭审/监控类画面+「窃听器」措辞）反复拒审；主版与其他平台一律不动（坑 215），建临时目录 `video-channel/`（删减口播 texts + voiceover 符号链接复用主版 wav + 按新播放顺序重算字幕），共享工程改前先 `cp` 备份主版 captions（`captions-main-5scene-backup.json`），Composition `sceneConfig`/Root `SCENE_DURS` 临时改删减版渲染，**渲染完立即还原 5 场景配置**（坑 269 纪律）；成片命名加「【视频号专版】」前缀交用户手动传；**删中段场景后锚点必须重算**（本例删 scene3 后 101.074/124.893=0.8093 → 65.754/89.728=0.7328 仍落 [0.70,0.80]），交付前字幕+口播 grep 敏感词（窃听/监控/反代）零残留。**公众号正文原位全量替换（正文含图）唯一可靠方案=DOM 清空+合成 paste（坑 285）**——改稿重传时 `mouse.click` 编辑区中心落在 img 上→Meta+A/Backspace/V 键盘事件全不达编辑器；合成 `ClipboardEvent('paste')` 在非空正文上是**追加**（ProseMirror 用自身 state 光标，不理 DOM Selection，fix2 得 2342 字全双份）；正确流程=① `removeChild` 逐个清空 `.ProseMirror` 子节点（触发 mutation 同步进 state）→ ② 空正文上合成 paste 追加=等效全量替换 → ③ 回读断言 markers 全中+唯一标记 `count==1` → ④ save 后 appmsgid 原位保留（更新稿不新建草稿）。**body 步后 placeholders=N 是正常态，禁当失败判据（坑 286）**——占位符由图片步回填，重贴校验若写「无 PLACEHOLDER」则明明成功也报 FAILED（fix3 假阴性 ×3）；校验只看 markers+去重。**合规冲突处置=停上传→问用户→按选择软化原位更新（坑 287）**——涉具体个人未决案件/未证实指控的绝对化陈述（人名+国籍+「嫌疑人」定性）会触发合规拦截（工具侧与平台侧同理，属合理约束）；正确动作=立即停传、给用户 A（照传）/B（软化后传）/C（删段落）选项，选 B 后按「据媒体报道/疑似/以官方披露为准 + 括注（据 XX，帖 ID；以官方信息为准）」模板软化口播与图文，**原位 update 草稿不新建**；不自作主张删内容。小坑备查：`python3 -I` 断 site-packages（PIL 不可用）→ 跑封面/图像脚本去掉 -I；import 无条件 `main()` 的派生模块前先 `sys.argv=['x','noop']` 垫参；derive 重跑会覆盖手工修复→修复直接 Edit 目标文件再 grep 验证；派生内嵌 NEW_CHECKS 含 `\n` 转义会成真换行→用 `chr(10)`。1021 正例：日报 466 帖/475 全正文 33 批；TTS 124.893s 锚点 0.8093 容差内；成片 125.056s/3750 帧/14.3MB；公众号 appmsgid=100001636 软化原位更新 markers 全中；专版 89.728s/2690 帧/11MB 锚点 0.7328。
 > **🔴 v3.58.0 核心改进（2026-10-20 日报返工，字幕播放顺序错位坑 283）**：**`play_order` 重排场景后，字幕时间轴必须跟着重排，否则 1:06 后整体错位（坑 283）**——1020 期播放顺序 `[1,2,4,3,5,6]`（锚点前置调占比），但 `captions.json` 仍按编号顺序 `[1..6]` 拼时间轴：scene3 锚点块（11.765s）在 66.9s，scene4 MiniMax 块（26.695s）在 78.7s；实际播放 scene4 在 66.948–93.643、scene3 在 93.643–105.408。用户报"1:06 后字幕和音频对不上"。修法 = 字幕块整体平移（锚点块 +26.695s、MiniMax 块 −11.765s）后**按 startMs 重排数组**（Subtitles 按 startMs 独立定位，重排为干净；保留块内相对偏移），再用 ffprobe/抽帧双验（70s MiniMax 帧 + 95s 锚点帧字幕与画面一致）后替换成片；条数 61/总长 127289 不变，review-checklist §12 无需改。**根治**：gen_captions 组装时间轴时必须读 `play_order`，按播放顺序累加各场景 wav 时长定块偏移，而不是按场景编号顺序拼。
@@ -64,7 +65,7 @@ version: 3.60.0
 | 平台 | 存草稿操作 |
 |------|-----------|
 | B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） |
-| 抖音 | 点击「暂存离开」或直接关闭标签页（视频自动保存） |
+| 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿） |
 | 视频号 | 点击「保存草稿」按钮 |
 | 公众号 | 点击「保存为草稿」按钮 |
 
@@ -3243,11 +3244,12 @@ browser_run_code_unsafe("""async (page) => {
 | 组件 | 定位与操作 |
 |------|-----------|
 | 视频上传 | `wujie-app input[type=file]`（`.ant-upload` 内）——**setInputFiles 直传 file input**，无需点「上传」按钮（filechooser 监听在 shadow 内不触发） |
+| 合集 | 点 `.post-album-display` 展开 → `.post-album-wrap .option-item`，**真实鼠标坐标点击**（JS `.click()` 对这层 Vue 组件无效，v3.61.0 坑 293） |
+| 视频标注（AI 声明） | `.mark-tag-select` → 点 `.select-display` 展开 → 坐标点 **`Contains AI-generated content`**（选项全英文，无中文「AI生成」控件，v3.61.0 坑 292） |
 | 封面上传 | `.single-cover-uploader-wrap input[type=file]`（Playwright CSS 可穿 open shadow，locator 直接 setInputFiles） |
 | 描述 | `.input-editor`（contenteditable）——evaluate 内 `shadowRoot.querySelector` → dispatchEvent mousedown/click → focus → `page.keyboard.type` |
 | 短标题 | `input[placeholder*="短标题"]`（**Vue 受控 input**，不是 contenteditable）——原生 setter 清空 + focus + `page.keyboard.type` |
-| 合集 | 点「选择合集」→ `.option-item` 按「羊报AI周刊」前缀匹配点击 |
-| 封面确认 | 封面弹窗内 `button.weui-desktop-btn_primary`「确认」（个人主页卡片 3:4 裁剪） |
+| 封面确认 | 封面弹窗内 `button.weui-desktop-btn_primary`「确认」（个人主页卡片 3:4 裁剪）；JS 查不到时取可见 `.weui-desktop-dialog__wrp` 内「确认」rect 做坐标点击（v3.61.0 坑 294） |
 
 **shadow 内 contenteditable / input 操作模板**：
 ```javascript
@@ -3360,11 +3362,33 @@ browser_wait_for(time=15)
 
 #### 13.5 选择合集
 
-按 13.1 shadow 协议：点「选择合集」→ 等下拉展开 → evaluate 内在 shadowRoot 找 `.option-item`，按「羊报AI周刊」前缀匹配点击（勿硬编码全名，防大小写差异）。仅旧 iframe 结构时才用坐标法。
+按 13.1 shadow 协议：点 `.post-album-display` 展开 → 等 `.post-album-wrap .option-item` 渲染 → 取目标项 `getBoundingClientRect` 中心 `page.mouse.click(x,y)`。**JS `el.click()` 对这层 Vue 组件不生效（返回成功但 display 文案不变，v3.61.0 坑 293）**。选项文案形如「今日羊报Al」+「共N个作品」；**注意小写 `l` 不是大写 `I`**。回读以 `.post-album-display` 文本为准。仅旧 iframe 结构时才用坐标估算兜底。
+
+#### 13.5b 视频标注（AI 合成内容声明，v3.61.0 / 2026-10-23 实测，坑 292）
+
+**🔴 控件名叫「视频标注」，不是中文「AI生成」勾选框。** wujie shadowRoot 里根本不存在 `/AI生成|人工智能生成/` 的 checkbox，任何按中文关键词匹配或遍历 `input[type=checkbox]` 的写法恒返回 `absent`。
+
+**真实 DOM 链路**：`.mark-tag-select` 容器 → 点其内 `.select-display` 展开 → `.mark-tag-options` 下选项列表 → **真实鼠标坐标点击**目标项（同 13.5 的 Vue 组件限制）。
+
+**选项文案全英文**（照抄，别猜）：
+
+| 选项 | 用途 |
+|------|------|
+| `No label needed` | 无需标注（默认） |
+| `Contains AI-generated content` | **本流水线必选**（合规要求） |
+| `Fictional storyline for entertainment only` | 虚构剧情 |
+| `Personal opinion for reference only` | 个人观点 |
+| `Content contains ads` | 含广告 |
+| `Self-recorded content` | 自行录制 |
+| `Content is reposted` | 转载 |
+
+**验收**：回读 `.select-display` 文本必须等于 `Contains AI-generated content`；`absent` / `No label needed` 均判失败。
 
 #### 13.6 上传封面（shadow 协议优先）
 
 **🔴 `hasWujie=true`（当前默认）**：按 13.1 字段表操作——`.single-cover-uploader-wrap input[type=file]` `setInputFiles` → 弹窗 `button.weui-desktop-btn_primary`「确认」。短标题走 13.4 Vue input，**不是** `.edit-shorttitle-content`。
+
+**🔴 封面对话框（`.vertical-img-wrap .edit-btn` → 标题「编辑个人主页卡片」→ 取消/确认）的上传必须用 Playwright locator，不能取 ElementHandle（v3.61.0 坑 294）**：`page.evaluate_handle(...).as_element().set_input_files(path)` 必抛 `Cannot set input files to detached element`（shadow 内节点在取句柄到设文件之间被重渲染）；改用 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(path)`（locator 每次动作前重新解析）。确认按钮 JS 常从错误 wrapper 查 `.weui-desktop-btn_primary` 得空 → 取可见 `.weui-desktop-dialog__wrp` 内「确认」的 rect 做坐标点击。弹窗有开关状态机（坑 280）：每次操作前先 Esc 清残留再重开。
 
 **封面尺寸**：
 - 个人主页卡片：3:4（1152×1536）→ `vertical-3-4.png`
@@ -3479,6 +3503,27 @@ news-pipeline/
 **月报输入**：`data/monthly/{YYYY-MM}.md`（项目根 data 目录，由 linuxdo-daily v13 生成，**不在 news-pipeline 下**）。
 
 ## 已知坑与经验教训
+
+### 🔴 视频号标注/合集新 DOM + 抖音恢复令牌六坑：英文标注下拉 / 坐标点击 / detached input / 一次性横幅 / 竖封面入口 / 合集最小面积（v3.61.0 / 2026-10-23 实测，坑 292-297）
+
+**问题**：1023 期视频号 AI 标注始终读不到、合集选不中、封面上传元素 detached；抖音核验一次后草稿凭空消失、竖封面按钮点不动、合集误点整个下拉容器。
+
+**根因**（六个独立坑）：
+- **坑 292 视频号标注控件是英文下拉**：wujie shadowRoot 里根本没有「AI生成」中文勾选框，AI 合规标注的真实载体是「视频标注」下拉 `.mark-tag-select`（`.select-display` + `.mark-tag-options`），选项文案全英文；任何 `/AI生成|人工智能生成/` 的中文正则或 checkbox 遍历都会返回 `ai declare: absent`。
+- **坑 293 视频号合集新版 DOM + Vue 只认坐标点击**：合集入口由旧 `.option-item` 直选变成 `.post-album-display`（显示当前值）→ 展开 `.post-album-wrap .option-item`；且这层 Vue 组件对 JS `el.click()` 无响应（调用成功、display 文案不变），必须真实鼠标事件。
+- **坑 294 wujie 内 ElementHandle 必 detached**：shadowRoot 里 `evaluate_handle(...).as_element().set_input_files()` 抛 `Cannot set input files to detached element`；同一元素换成 Playwright locator 形式即成功——区别在 locator 是每次动作前重新解析，handle 是取到即绑定。
+- **坑 295 抖音「继续编辑」= 一次性消费令牌**（坑 290 第三形态）：抖音没有草稿列表页（`/content/manage?tab=draft` 是空壳），唯一恢复入口是发布页横幅；「暂存」语义是写入服务端**待恢复槽位**而非创建持久草稿记录，槽位被读取即清空。新开标签点横幅→读→关标签 = 消费掉且不回写，草稿彻底消失。
+- **坑 296 抖音竖封面入口**：`get_by_role('button', name='设置竖封面')` 常是 `disabled` 的提示位，`click()` 必超时；真入口是**悬停竖槽位**后浮现的「编辑封面」。弹窗 `.dy-creator-content-modal-body` 内 6 个 file input，只有 `.selectArea-BCIYQD input[type=file]` 是封面，其余是模板/贴纸选择器——**喂错静默无报错**。另「竖封面缺失」在 AI 推荐封面生成期会瞬时为真，`grep` 文本判封面会假阴性。
+- **坑 297 抖音合集匹配命中下拉容器**：`/^「?今日羊报/` + `/共\s*\d+\s*个作品/` 同时匹配容器节点，其 `textContent` 是把所有选项拼起来的整串（`请选择合集不选择合集「虢礫緙嘞」共4个作品「羊报AI月报」…`），点容器 = 没选。
+
+**解决**：
+1. **视频号 AI 标注**：点 `.mark-tag-select` 的 `.select-display` 展开 → 按 bounding box 真实坐标点 `Contains AI-generated content` → 回读 `.select-display` 文本断言。**不要找中文「AI生成」**，那是旧版控件。
+2. **视频号合集**：点 `.post-album-display` → 等 `.post-album-wrap .option-item` 渲染 → 取目标项 `getBoundingClientRect` 中心 `page.mouse.click(x,y)`（**JS `.click()` 无效**）→ 回读 display 文本为 `今日羊报Al`（注意是**小写 l**，不是大写 I）。
+3. **wujie 内文件上传**：一律 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(path)`；**禁用 `evaluate_handle().as_element()`**。弹窗确认按钮同理走坐标点击（先取可见 `.weui-desktop-dialog__wrp` 内 `确认` 的 rect，再 `mouse.click`）。
+4. **抖音端到端一次跑完**：`upload → meta → 双封面 → 合集 → 暂存#1 → 同标签「继续编辑」回读 → 暂存#2 → 终态确认`。核验**绝不新开标签点横幅**；外部标签只准读 `body.innerText` 里的横幅文本。参考 `news-pipeline/2026-10-23/scripts/douyin_finish_1023.py`。
+5. **抖音双封面**：横槽 `.coverControl-CjlzqC[0]` 直接传 1536×1152；竖槽 `[1]` 先 `hover()` 再点浮现的「编辑封面」（**不要**点 disabled 的「设置竖封面」），弹窗内用 `.selectArea-BCIYQD input[type=file]` 传 1152×1536；验收用 `img.naturalWidth/naturalHeight` 读槽位实图，**不用文本 grep**。
+6. **抖音合集**：候选约束 `^「?今日羊报` + `共\s*\d+\s*个作品` + `textContent.length ≤ 40` + `rect.height ∈ [10,90]`，排序取**面积最小**节点点击；回读「添加合集」段确认目标合集名与「共N个作品」。
+7. 视频号封面确认后必须回读 3:4 槽位图；「编辑个人主页卡片」弹窗每次操作前先 Esc 清残留再重开（坑 280 状态机纪律在 1023 仍适用）。
 
 ### 🔴 四平台上传链四坑：登录探针隔离 context / wujie 空壳重挂 / 抖音暂存被吞 / B站视频 input（v3.60.0 / 2026-10-22 实测，坑 288-291）
 
@@ -3919,7 +3964,7 @@ if (checkbox) checkbox.click();
 
 ### 🔴 微信视频号合集选择器
 **问题**：合集选择器在 wujie shadow 内；页面级 locator 找不到。
-**解决（当前默认）**：按 13.1 点 shadow 内「选择合集」→ `.option-item` 前缀匹配。
+**解决（当前默认）**：按 13.5 点 `.post-album-display` 展开 → `.post-album-wrap .option-item` 取 rect 中心坐标点击（JS `.click()` 无效，v3.61.0 坑 293）；回读 `.post-album-display` 文本。
 **旧 UI 兜底（仅 `hasWujie=false`）**：坐标点选项（约 x=860, y=180）；失败则手动。
 
 ### 🔴 微信视频号保存草稿限制
@@ -4162,6 +4207,10 @@ browser_run_code_unsafe("""async (page) => {
 **入口差异**：
 - **首次投稿页**：横封面点「完成」后，常自动弹出「设置竖封面获更多流量」→ 点「设置竖封面」
 - **草稿编辑页**（`post/video?enter_from=draft`）：「设置竖封面」弹窗**经常不出现**，必须**再点竖封面 3:4 区域**单独打开编辑器
+
+**🔴 竖封面真入口 = 悬停槽位 → 点「编辑封面」（v3.61.0 / 2026-10-23 实测，坑 296）**：`get_by_role('button', name='设置竖封面')` 常是 `disabled` 的**提示位**（点了必 `Timeout 30000ms / element is not enabled`），**不要把它当主路径**。正确姿势 = `page.locator('.coverControl-CjlzqC').nth(1).hover()` 等「编辑封面」浮现后坐标点击（该按钮同样是 Vue 组件，坐标点击最稳）。弹窗 `.dy-creator-content-modal-body` 内**有 6 个 file input**，只有 **`.selectArea-BCIYQD input[type=file]`** 是封面槽，其余 4–5 个是模板/贴纸选择器，**喂错静默无报错**。
+
+**🔴 封面槽位按 `.coverControl-CjlzqC` 下标 + 实图断言（v3.61.0，坑 296）**：`[0]`=横封面 4:3、`[1]`=竖封面 3:4。验收**只认槽位内 `img.naturalWidth/naturalHeight`**（正确 = 横 1536×1151、竖 1150×1535），**不要 grep 页面文本**——「竖封面缺失」/「双封面缺失」在 AI 推荐封面还在生成时会**瞬时为真**，grep 文本判封面必假阴性。
 
 **🔴 封面上传图标被 SVG 拦截（v3.23.0 / 2026-08-29 实测）**：点封面上传图标时 click 被 SVG 子元素截获（"element intercepts pointer events"）→ 改点上传容器本体 `.semi-upload.upload-BvM5FF`（+ waitForEvent('filechooser') + setFiles）。
 
@@ -4436,6 +4485,33 @@ browser_snapshot(depth=5)
 browser_click(target={ref编号})
 ```
 
+**🔴 前缀匹配会命中整个下拉容器，必须用最小面积法（v3.61.0 / 2026-10-23 实测，坑 297）**
+
+`/^「?今日羊报/` + `/共\s*\d+\s*个作品/` 同时匹配**容器节点**——容器的 `textContent` 是所有选项拼起来的整串（实测 `请选择合集不选择合集「虢礫緙嘞」共4个作品「羊报AI月报」…`），点容器等于**没选**，且回读看着像选上了。
+
+```javascript
+// 正确：三重约束 + 最小面积
+const picked = page.evaluate(() => {
+  const cands = [];
+  for (const o of document.querySelectorAll('li, div, span, p, [class*=option], [class*=item]')) {
+    const t = (o.textContent || '').trim();
+    if (!o.offsetParent) continue;
+    if (!/^「?今日羊报/.test(t)) continue;
+    if (!/共\s*\d+\s*个作品/.test(t)) continue;
+    if (t.length > 40) continue;                    // ① 排除整块容器
+    const r = o.getBoundingClientRect();
+    if (r.height < 10 || r.height > 90) continue;   // ② 排除 0 高/超大节点
+    cands.push({t, area: r.width * r.height, el: o});
+  }
+  if (!cands.length) return null;
+  cands.sort((a, b) => a.area - b.area);            // ③ 最小面积 = 真正的选项
+  cands[0].el.click();
+  return cands[0].t.slice(0, 40);
+});
+```
+
+回读「添加合集」段确认目标合集名 + 「共N个作品」（1023 命中 `「今日羊报Al」共132个作品`）。
+
 #### 14.8 设置自主声明
 
 ```
@@ -4556,21 +4632,31 @@ browser_run_code_unsafe("""async (page) => {
 # 方法2：如果没有「暂存离开」，直接关闭标签页（视频已自动保存）
 ```
 
-**🔴 草稿落库验收（v3.9.0 / 2026-07-20 实测 — 不可省略）**
+**🔴 草稿落库验收（v3.9.0 / 2026-07-20 实测 — 不可省略；v3.61.0 重写口径）**
 
 仅点「暂存离开」**不够**。0720 首次上传后用户在创作者中心**看不到草稿**，必须重传。
 
-**成功信号（满足其一即可记 ✅）**：
-1. 回到上传页出现 **「继续编辑」** / 「上次未发布」类恢复入口
-2. 直接导航 `https://creator.douyin.com/creator-micro/content/publish/record?tab=draft`（**不要**去 `content/manage`——那页只显示已发布，看不到草稿，会误判上传失败），列表可见当日标题关键词（如 `Fable` / `通义` / `2026-07-20`）
-3. 打开 `post/video?enter_from=draft` 时**表单非空**（标题长度 > 0，有视频预览）
+**🔴 抖音没有草稿列表页（v3.61.0 / 2026-10-23 实测，坑 295）**：`content/manage?tab=draft` 与 `content/publish/record?tab=draft` 都是空壳（只显示已发布作品）。**唯一恢复入口 = 发布页 `creator-micro/content/upload` 的「你还有上次未发布的视频，是否继续编辑？」横幅里的「继续编辑」。** 旧版本条里写的「导航到 publish/record?tab=draft 看列表」已失效。
+
+**🔴 「继续编辑」横幅是一次性消费令牌（坑 295，坑 290 第三形态）**：抖音「暂存」= 把编辑器状态写入服务端一个**待恢复槽位**，不是创建持久草稿记录；槽位被读取即清空。所以：
+
+- ✅ 正确：`暂存离开` → **同标签**点「继续编辑」回读表单 → **再点一次「暂存离开」** → 终态确认「按钮消失 + 横幅重新出现」
+- ❌ 错误：为核验**新开标签**点「继续编辑」→ 读表单 → 关标签。草稿从此消失，之后任何标签横幅都不再现，草稿箱也查不到
+- ❌ 错误：外部标签点完横幅点「放弃」——直接丢弃
+- ✅ 外部标签只准**读** `body.innerText` 里的横幅文本（不点击），用于判断"草稿确实存在"
+
+**成功信号（当前口径）**：
+1. 「暂存离开」按钮消失 **且** 恢复横幅出现（双信号，坑 290）
+2. 同标签恢复后表单回读：`title == publish.json.platform.douyin.title`、`descLen > 100`、话题数、声明文本、封面槽位实图尺寸全对
+3. 恢复回读后**已再次暂存**，且终态仍是「按钮消失 + 横幅出现」
 
 **失败信号 → 必须整段重传（视频+标题+双封面+暂存）**：
-- 内容管理无当日条目
-- 上传页无「继续编辑」
-- `enter_from=draft` 打开是空表单（标题 0/30）
+- 上传页无「继续编辑」横幅
+- 同标签恢复后是空表单（标题 0/30、无 video）
 
 **竖封面文件**：只使用本期 `news-pipeline/{date}/vertical-3-4.png`（含日期+品牌）。用户指定该文件时**禁止**用 scene 图或其它日期文件替代。
+
+**参考实现**：`news-pipeline/2026-10-23/scripts/douyin_finish_1023.py`（合集 → 暂存#1 → 同标签恢复回读 → 暂存#2 → 终态，一次跑完）。
 
 #### 14.10b 暂存离开 + 草稿落库验收（v3.18.0 / 2026-08-18 实测）
 
@@ -4588,10 +4674,10 @@ await page.locator('button:has-text("暂存离开")').click({ force: true });
 browser_handle_dialog(accept=true)
 ```
 
-**草稿落库验收信号**（满足其一即 ✅）：
-1. 回到上传页出现 **「继续编辑」** / 「上次未发布」恢复入口
-2. 内容管理 / 草稿列表可见当日标题关键词
-3. `post/video?enter_from=draft` 表单非空（标题长度 > 0，有视频预览）
+**草稿落库验收信号**（v3.61.0 口径，坑 290 + 坑 295）：
+1. **双信号**：「暂存离开」按钮消失 **且**「继续编辑」恢复横幅出现（缺一即失败）
+2. **同标签恢复回读**：点「继续编辑」→ 表单回读 title/descLen/话题/声明/封面槽位实图全对 → **再点一次「暂存离开」**（否则草稿被消费掉）
+3. 外部标签只准**读**横幅文本，**禁点击**（坑 295：点一次就毁稿）
 
 #### 🔴 抖音违规审核与处理（v3.15.0 新增，2026-07-31 实测）
 
@@ -5881,6 +5967,43 @@ st = page.evaluate('''() => {
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.61.0（2026-10-23 日报实测，视频号标注/合集新 DOM 与抖音恢复令牌六坑 292-297）
+基于 **2026-10-23 日报全流程**（全量抓取完成；成片 128.128s/3842 帧/1920×1080/14,178,371B 锚点 0.7110 容差内；封面本地 PIL 对齐 2026-10-21 海报模板；四平台全草稿）实测，吸收坑 292-297：
+
+**坑 292：视频号 AI 标注真控件是「视频标注」英文下拉**
+- wujie shadowRoot 内不存在中文「AI生成」勾选框，`/AI生成|人工智能生成/` 正则与 checkbox 遍历恒返回 `ai declare: absent`
+- 真控件 = `.mark-tag-select`（`.select-display` + `.mark-tag-options`），选项全英文：`No label needed` / `Contains AI-generated content` / `Fictional storyline for entertainment only` / `Personal opinion for reference only` / `Content contains ads` / `Self-recorded content` / `Content is reposted`
+- 合规必须选 `Contains AI-generated content`
+- 修法：点 `.select-display` 展开 → 真实坐标点目标项 → 回读 `.select-display` 断言
+
+**坑 293：视频号新版合集 DOM + wujie 内 Vue 组件只认坐标点击**
+- 旧 `.option-item` 前缀匹配返回 False；新链路 `.post-album-display` → `.post-album-wrap .option-item`
+- JS `el.click()` 对这层 Vue 组件不生效（返回成功、display 不变）
+- 修法：取 `getBoundingClientRect` 中心 `page.mouse.click(x,y)`；回读 display 为 `今日羊报Al`（小写 l）
+
+**坑 294：wujie shadowRoot 内 file input 用 ElementHandle 必 detached**
+- `evaluate_handle(...).as_element().set_input_files()` 报 `Cannot set input files to detached element`
+- 修法：Playwright locator 形式 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(...)`（locator 每次动作前重新解析元素）
+- 弹窗确认按钮同理：JS 在错误 wrapper 里查 `.weui-desktop-btn_primary` 得空 → 取可见 dialog 内 `确认` 的 rect 后坐标点击
+
+**坑 295：抖音「继续编辑」是一次性消费令牌（坑 290 第三形态）**
+- 抖音无草稿列表页（`/content/manage?tab=draft` 空壳），唯一入口是发布页横幅
+- 「暂存」= 写入服务端待恢复槽位，不是创建持久草稿；槽位被读取即清空
+- 新开标签点横幅 → 读表单 → 关标签 = 消费掉且不回写，草稿彻底消失，此后任何标签横幅都不再现
+- 修法：暂存#1 → **同标签**点「继续编辑」回读 → **再点一次「暂存离开」** → 终态「按钮消失 + 横幅出现」；外部标签只准**读**横幅文本，**禁点击**
+
+**坑 296：抖音竖封面真入口是悬停槽位→「编辑封面」**
+- `get_by_role('button', name='设置竖封面')` 常 `disabled`（只是提示位），`click()` 必超时
+- 弹窗内 6 个 file input，只有 `.selectArea-BCIYQD input[type=file]` 是封面，其余为模板/贴纸选择器，喂错**静默无报错**
+- 封面槽位按下标断言：`.coverControl-CjlzqC[0]`=横 4:3、`[1]`=竖 3:4，用 `img.naturalWidth/naturalHeight` 判 1536×1151 / 1150×1535
+- 「竖封面缺失」在 AI 推荐封面生成期会瞬时为真，**禁只 grep 文本判封面**
+
+**坑 297：抖音合集选项匹配必须最小面积法**
+- `/^「?今日羊报/` + `/共\s*\d+\s*个作品/` 同时命中整个下拉容器（`请选择合集不选择合集「虢礫緙嘞」共4个作品「羊报AI月报」…`），点它等于没选
+- 修法：加 `textContent.length ≤ 40` + `rect.height ∈ [10,90]` 约束后**取面积最小**节点点击；本期命中 `「今日羊报Al」共132个作品`（第133集）
+
+**正例固化**：1023 四平台全草稿——B站 `人工智能` 分区 + 7 标签 + 合集「今日羊报 AI」；公众号 appmsgid 已生成 / bodyLen 1179 / 占位符 0 / 封面 hasQpic / 标题 60 字 / 合集已选；视频号描述 + 短标题 + 合集「今日羊报Al」+ AI 标注 `Contains AI-generated content` + 3:4 封面；抖音标题 + descLen 157 + 5 话题 + 声明「内容为个人观点或见解」+ 双封面 1536×1151 / 1150×1535 + 合集「今日羊报Al」第 133 集。**用户随后手动发布全部四平台 → 坑 215 生效，停止一切平台操作（含核验）**。
 
 ### v3.60.0（2026-10-22 日报实测，登录探测与空壳重挂四坑 288-291）
 基于 **2026-10-22 日报全流程**（日报 387 帖/387 全带正文；TTS 112.38s 锚点 0.7073 容差内；成片 112.512s/3374 帧/1920×1080；四平台全草稿：B站分区声明 7 标签全过、公众号零占位符全绿、视频号 wujie 全链、抖音双信号暂存验收过；抖音合集下拉乱码干扰）实测，吸收坑 288-291：
