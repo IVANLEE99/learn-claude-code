@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.61.0
+version: 3.62.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.61.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.62.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.62.0 核心改进（2026-10-24 日报返工，字幕「跨场景错位」两坑 298-299）**：**坑 283 只解决了「块平移」，没解决「块重分配」——用户二次反馈「1:34 还是对不上」的真因是字幕按场景编号序落盘（坑 298）**。1024 期 `play_order=[1,2,3,5,4,6]`，`captions.json` 里 MoE 文案（script scene4）占着 84.4–112.9s、程序员节文案（script scene5）占着 113.5–143.9s——**整块互换而非平移**。当晚第一次修复用了 `realign_captions_1024.py`，它只在「字幕已归属的那个场景」内部做重新锚定与缩放，**从不重新推导每条字幕属于哪个场景**，所以互换原样保留、重渲后现象不变，白渲一次。**根治写法：按 `voiceover-texts.json` 的每场景正文长度做字符累加，把 captions 精确切成 6 组（归一化后 188/205/179/192/214/26 字符，累计 1004 与脚本完全相等即可断言），再按 `play_order` 累加各场景 wav 时长定块起点，块内用「该场景自己的 wav」的词级 ASR 重新计时**——不能复用一个全局 ASR 流，否则跨场景边界处会拿到相邻场景的时间。**坑 299：验证必须对渲染后的 mp4 做，不能对源 wav 做**。当晚第一轮「验证通过」是拿 `voiceover/sceneN.wav` 按播放序拼 `full_play.wav` 跑的 ASR——那个文件本来就是按播放序拼的，**必然通过，等于没测**；真正的证据只能从成片里取：`ffmpeg -i out.mp4 -vn -ar 16000 -ac 1 mp4_audio.wav` → faster-whisper 词级，再抽帧看烧录字幕。实测流程：mp4 音频 84–114s 确是程序员节、114–144s 确是 MoE（音频顺序本来就对），而 95/100/105/110s 的帧烧的却是 MoE 文案——**「音频对、字幕错」是块互换的指纹**。验收量化用「首 3 字锚定 + 取最近出现位置」：lead 中位数 +0.205s、最大 +0.71s、最小 −0.17s（54/64 条可测）；**禁用全文字符流 SequenceMatcher 直接量偏差**，长片会把累积插入/删除摊到每条上，得到「全部 64 条都 >0.5s」的假信号（实测中位 1.31s，纯属对齐器假象）。另：场景尾行字幕要比发声晚收 0.3s 左右，`offset` 实测 scene4 末条 gap 0.308s、scene6 0.298s → 尾行 `endMs` 补到静音起点即可。
 > **🔴 v3.61.0 核心改进（2026-10-23 日报实测，视频号标注/合集新 DOM + 抖音恢复令牌六坑 292-297）**：**视频号 AI 标注真控件是「视频标注」下拉，不是中文勾选框（坑 292）**——wujie shadowRoot 内找「AI生成」/`input[type=checkbox]` 永远 `ai declare: absent`；真控件 = `.mark-tag-select` 的 `.select-display` + `.mark-tag-options`，选项全英文 `No label needed` / `Contains AI-generated content` / `Fictional storyline for entertainment only` / `Personal opinion for reference only` / `Content contains ads` / `Self-recorded content` / `Content is reposted`，**合规须选 `Contains AI-generated content`**；回读以 `.select-display` 文本为准。**视频号新版合集 DOM 变了，且 wujie 内 Vue 组件只认真实鼠标坐标点击（坑 293）**——旧 `.option-item` 前缀匹配返回 False；新链路 = 点 `.post-album-display` 展开 → `.post-album-wrap .option-item` 选项；**JS `.click()` 对这层 Vue 组件不生效（返回成功但 display 不变）**，必须取 `getBoundingClientRect` 中心后 `page.mouse.click(x,y)`；选项文案带「共N个作品」（本期 132/4/22/4）。**wujie shadowRoot 内 file input 用 `evaluate_handle().as_element()` 必 detached（坑 294）**——视频号封面对话框（`.vertical-img-wrap .edit-btn` → 标题「编辑个人主页卡片」→ 取消/确认）上传时，`as_element().set_input_files()` 报 `Cannot set input files to detached element`；改用 Playwright locator 形式 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(...)` 一次过；确认按钮同样 JS 查不到（`.weui-desktop-btn_primary` 从错误 wrapper 取空），走真实坐标点击。**抖音「继续编辑」是一次性消费令牌，核验后必须同标签再暂存（坑 295，坑 290 第三形态）**——抖音**没有草稿列表页**（`/content/manage?tab=draft` 空壳），唯一恢复入口是发布页横幅；为核验新开标签点「继续编辑」→ 读表单 → 关标签，**草稿就此消失**（此后任何标签横幅都不再出现）。正确 = 端到端一次跑完：暂存 → **同标签**点「继续编辑」回读 → **再点一次「暂存离开」** → 终态「按钮消失 + 横幅出现」；外部标签只准**读**横幅文本，**禁点击**。**抖音竖封面真入口是悬停槽位→「编辑封面」，弹窗内正确 input 是 `.selectArea-BCIYQD input[type=file]`（坑 296）**——`get_by_role('button', name='设置竖封面')` 常 `disabled`（只是提示位），点它必超时；弹窗内 6 个 file input 中其余 4–5 个是模板/贴纸选择器，喂错**静默无报错**。封面槽位按 `.coverControl-CjlzqC` 下标断言：`[0]`=横 4:3、`[1]`=竖 3:4，用 `img.naturalWidth/naturalHeight` 判 1536×1151 / 1150×1535；「竖封面缺失」文案在 AI 推荐封面生成期会**瞬时为真**，**禁只 grep 文本判封面**。**抖音合集选项匹配必须最小面积法排除下拉容器（坑 297）**——`/^「?今日羊报/` + `/共\s*\d+\s*个作品/` 会同时命中整个下拉容器（文本 `请选择合集不选择合集「虢礫緙嘞」共4个作品…` 整块），点它等于没选；约束 `textContent.length ≤ 40` + `rect.height ∈ [10,90]` 后**取面积最小的节点**点击，本期命中 `「今日羊报Al」共132个作品`。1023 正例：日报全量抓取完成；成片 128.128s/3842 帧/1920×1080/14,178,371B 锚点 0.7110；封面本地 PIL 对齐 2026-10-21 海报模板（横 1536×1152/竖 1152×1536）；四平台全草稿（B站 人工智能 分区+7 标签+合集、公众号 appmsgid+bodyLen1179+占位符0、视频号 描述+短标题+合集「今日羊报Al」+AI标注英文选项+3:4 封面、抖音 标题+desc157+5 话题+声明+双封面+第133集）。
 > **🔴 v3.60.0 核心改进（2026-10-22 日报实测，登录探测与空壳重挂四坑 288-291）**：**登录探测必须用 default context 新开页（坑 288）**——`connect_over_cdp()` 返回的是 Browser 不是 context，直接 `ctx.new_page()` 等价 `browser.new_page()` 自建**隔离 context 不共享 cookies**，四平台（B站/抖音/视频号/公众号）登录探测全误判 `login_required`，而旧 tab 明明停在登录后 URL、新开页却跳扫码页；正确写法=`browser.contexts[0].new_page()` 取 default context 再开页，goto 上传页 wait 4s 后按 v3.52 判据读表单元素（B站「上传/投稿」、抖音「作品描述」、视频号 url 无 `login.html`、公众号「新的创作」）判定，**禁用隔离模式做登录探测**。**wujie 空壳重挂要开全新标签而非旧标签 goto（坑 289）**——空壳判据 `wujie-app` 存在但 shadowRoot 内 `input/button/[contenteditable]` 计数=0（appKids=1、inShadow=0）；旧标签上 `page.goto('/platform/post/video')` 只改 URL 不触发 wujie 重挂载、仍是空壳，`Page.reload` 多次亦无效；正确=`pg.close()` + `browser.contexts[0].new_page()`（新标签必须走 default context 才共享登录态，同坑 288）+ goto `/platform/post/create` 一次挂载成功（实测 1201 节点 + file input 就绪），此后每步前先断言 `hasWujie && inShadow>0` 再动上传区/表单。**抖音「暂存离开」点击可能被吞，必须双信号验收（坑 290）**——点击回执（`locator.click()` 返回）**不等于**草稿落库，偶发点后表单未关闭、内容随页面关闭丢失；验收=轮询到「暂存离开」按钮消失 `hasZancun=false` **且**「继续编辑」恢复横幅出现，两者齐才算成功（坑 14.10 单信号验收的补强），缺一即重做上传+meta+封面后 JS 直点按钮，**不得只凭点击回执汇报草稿已存**。**B站视频上传直接对 accept 含 video 的 input `set_input_files`（坑 291）**——新版投稿页 `expect_file_chooser` 点击「上传视频」必超时（不触发原生 chooser），改为遍历 `input[type=file]` 按 `accept` 过滤（含 `video`/`mp4` → 视频；含 `image` → 封面弹窗内的图，坑 218 复用）后直接 `set_input_files`，**禁用索引定位**（页面上 `.mp4`×2 / `.txt` / `.zip` / 封面 image 共存，按 `inputs[1]`/`inputs[-1]` 会喂错 input 且全程静默无报错）。1022 正例：日报 387 帖全带正文；TTS 112.38s 锚点 0.7073 容差内；成片 112.512s/3374 帧/1920×1080；四平台全草稿（B站分区/声明/7 标签、公众号零占位符、视频号 wujie 全链、抖音双信号验收过）；场景图 API 写实版换图后仅重渲染即交付（无需重跑 TTS/字幕）。
 > **🔴 v3.59.0 核心改进（2026-10-21 日报实测，合规软化 + 视频号专版 + 正文原位重贴四坑 284-287）**：**视频号无资质账号过审红线=时政外事叙事，对策=删敏感场景出「专版」而非改主版（坑 284）**——1021 主版含 OpenAI 窃听案 scene3（涉外司法叙事+庭审/监控类画面+「窃听器」措辞）反复拒审；主版与其他平台一律不动（坑 215），建临时目录 `video-channel/`（删减口播 texts + voiceover 符号链接复用主版 wav + 按新播放顺序重算字幕），共享工程改前先 `cp` 备份主版 captions（`captions-main-5scene-backup.json`），Composition `sceneConfig`/Root `SCENE_DURS` 临时改删减版渲染，**渲染完立即还原 5 场景配置**（坑 269 纪律）；成片命名加「【视频号专版】」前缀交用户手动传；**删中段场景后锚点必须重算**（本例删 scene3 后 101.074/124.893=0.8093 → 65.754/89.728=0.7328 仍落 [0.70,0.80]），交付前字幕+口播 grep 敏感词（窃听/监控/反代）零残留。**公众号正文原位全量替换（正文含图）唯一可靠方案=DOM 清空+合成 paste（坑 285）**——改稿重传时 `mouse.click` 编辑区中心落在 img 上→Meta+A/Backspace/V 键盘事件全不达编辑器；合成 `ClipboardEvent('paste')` 在非空正文上是**追加**（ProseMirror 用自身 state 光标，不理 DOM Selection，fix2 得 2342 字全双份）；正确流程=① `removeChild` 逐个清空 `.ProseMirror` 子节点（触发 mutation 同步进 state）→ ② 空正文上合成 paste 追加=等效全量替换 → ③ 回读断言 markers 全中+唯一标记 `count==1` → ④ save 后 appmsgid 原位保留（更新稿不新建草稿）。**body 步后 placeholders=N 是正常态，禁当失败判据（坑 286）**——占位符由图片步回填，重贴校验若写「无 PLACEHOLDER」则明明成功也报 FAILED（fix3 假阴性 ×3）；校验只看 markers+去重。**合规冲突处置=停上传→问用户→按选择软化原位更新（坑 287）**——涉具体个人未决案件/未证实指控的绝对化陈述（人名+国籍+「嫌疑人」定性）会触发合规拦截（工具侧与平台侧同理，属合理约束）；正确动作=立即停传、给用户 A（照传）/B（软化后传）/C（删段落）选项，选 B 后按「据媒体报道/疑似/以官方披露为准 + 括注（据 XX，帖 ID；以官方信息为准）」模板软化口播与图文，**原位 update 草稿不新建**；不自作主张删内容。小坑备查：`python3 -I` 断 site-packages（PIL 不可用）→ 跑封面/图像脚本去掉 -I；import 无条件 `main()` 的派生模块前先 `sys.argv=['x','noop']` 垫参；derive 重跑会覆盖手工修复→修复直接 Edit 目标文件再 grep 验证；派生内嵌 NEW_CHECKS 含 `\n` 转义会成真换行→用 `chr(10)`。1021 正例：日报 466 帖/475 全正文 33 批；TTS 124.893s 锚点 0.8093 容差内；成片 125.056s/3750 帧/14.3MB；公众号 appmsgid=100001636 软化原位更新 markers 全中；专版 89.728s/2690 帧/11MB 锚点 0.7328。
@@ -3504,6 +3505,26 @@ news-pipeline/
 
 ## 已知坑与经验教训
 
+### 🔴 字幕跨场景互换：play_order 重排后的「块重分配」（v3.62.0 / 2026-10-24 实测，坑 298-299）
+
+**问题**：1024 期用户两次反馈「1:25 后字幕和音频对不上」，第一次修复重渲后用户仍说「1:34 还是对不上」。
+
+**根因**：`play_order=[1,2,3,5,4,6]`，但 `captions.json` 里 **script scene4（MoE）的文案占着 84.4–112.9s、script scene5（程序员节）的文案占着 113.5–143.9s**——两块是**互换**，不是平移。第一次修复脚本 `realign_captions_1024.py` 只在「字幕已被分配到的那个场景」内部重锚定与缩放（按 marker 找场景起点、按场景 wav 时长线性缩放），**从不重新推导一条字幕该属于哪个场景**，所以互换完好无损。坑 283 当年修的是「块平移」，这次是「块重分配」，不同缺陷。
+
+**判定指纹**：成片音频顺序正确、烧录字幕错位。用 `ffmpeg -i out.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 mp4_audio.wav` 取音频做词级 ASR，同时抽帧看字幕：若 84–114s 音频是 scene5 内容而画面烧的是 scene4 文案，就是块互换（而非漂移、也非音频问题）。**只查源 wav 会得到全绿假象**——按播放序把 `voiceover/sceneN.wav` 拼起来的文件本来就是对的。
+
+**修复（可复用）**：
+1. **切组**：`voiceover-texts.json` 每场景正文归一化后逐条累加字符数，把 `captions` 切成 6 组；断言总字符数与脚本完全相等（1024：188/205/179/192/214/26 = 1004，逐组精确命中，零余量）。
+2. **定块起点**：按 `play_order` 累加各场景 **wav 实测时长**（84.231 / 114.837 …），块起点 = 前面所有场景时长之和。
+3. **块内重计时**：**逐场景单独跑 faster-whisper 词级 ASR**（不是拼一条全局流），把该组每条字幕的起止对齐到本场景词级时间；相邻两条边界取静音中点，首行留 `MARGIN≈0.10s` 预卷，尾行 `endMs` 补到该场景语音 offset（1024 实测尾行差 0.298–0.308s）。
+4. **写两处**：`captions/captions.json` + `video-project/public/captions.json`（Remotion 读后者），并校验单调（`startMs<endMs` 且 `prev.endMs ≤ next.startMs`）。
+5. **重渲** → 回到「判定指纹」用 **新 mp4** 复验（抽 84/90/106/113/115/120/130/140s 帧比对烧录字幕）。
+
+**验收量化（坑 299 补充）**：**不要**用全文字符流 `SequenceMatcher` 一次对齐所有字幕再算偏差——长片累积的插入/删除会被摊到每条上，1024 实测给出「64 条全部 >0.5s、中位 1.31s」的假信号。正确做法 = **首 3 字锚定**：`stream.find(key[:3])` 取全部出现位置，选离该条 `startMs` 最近的那个，再看时间差。1024 结果：54/64 条可测，lead 中位 **+0.205s**、最大 +0.71s、最小 −0.17s（lead 为正即字幕略早于 ASR 检出，属预期余量）。另外中文字数会被 ASR 写成「十/二/十/四」或罗马数字，归一化时把 〇一二三四五六七八九 映射到 0–9 能多救回若干条。
+
+**Why:** 场景顺序与播放顺序是两套编号；任何「在已归属场景内调整时间」的修法都无法纠正归属本身。而验证若不用成片，测的是「我拼的输入」而不是「用户看到的输出」。
+**How to apply:** 只要 `play_order ≠ [1..N]`，字幕必须**按场景成组重分配**再落时间轴；修复前先跑「成片指纹」确认是块互换还是漂移；修完必须对新 mp4 复验，源 wav 验证一律不作为放行依据。
+
 ### 🔴 视频号标注/合集新 DOM + 抖音恢复令牌六坑：英文标注下拉 / 坐标点击 / detached input / 一次性横幅 / 竖封面入口 / 合集最小面积（v3.61.0 / 2026-10-23 实测，坑 292-297）
 
 **问题**：1023 期视频号 AI 标注始终读不到、合集选不中、封面上传元素 detached；抖音核验一次后草稿凭空消失、竖封面按钮点不动、合集误点整个下拉容器。
@@ -3637,6 +3658,8 @@ cp horizontal-4-3.png wechat-images/cover.png
 # 4. 按句聚合：首句 start=0，末句 end=场景 ffprobe 时长；场景间累加偏移
 #    ↑ 切行器已废弃：split_sentences 把 ，。；！？：、 所有标点一视同仁
 ```
+
+**v3.62.0 硬约束（坑 298）**：`templates/gen_captions.py` 的 `load_scenes` 末尾必须调 `apply_play_order()`——当 `voiceover-texts.json` 带 `play_order` 时，场景按播放序返回，`scene_offset` 才会按真实播放顺序累加。此前按编号顺序累加会让不同场景的字幕块**互换位置**（1024 期 `[1,2,3,5,4,6]` 的 4/5 互换，重渲两次才对）。改这个函数后必须回归：`python3 -c "load_scenes(...)"` 打印的顺序要与 `play_order` 完全一致。
 
 **v3.25.0 方案（当前默认，2026-08-31 月报实测）**：语义 `group_caps` 先切行 + whisper 词级对齐（`templates/gen_captions.py`）
 ```python
@@ -5967,6 +5990,26 @@ st = page.evaluate('''() => {
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.62.0（2026-10-24 日报返工，字幕跨场景互换两坑 298-299）
+
+基于 **2026-10-24 日报**（用户两次反馈「1:25 后字幕对不上」→ 第二次「1:34 还是对不上」→ 定位为块互换并重渲）实测，吸收坑 298-299：
+
+**坑 298：play_order 重排后字幕要「块重分配」，不是「块平移」**
+- 1024 `play_order=[1,2,3,5,4,6]`；`captions.json` 中 script scene4（MoE）文案占 84.4–112.9s、script scene5（程序员节）文案占 113.5–143.9s，**两块互换**
+- 第一次修复脚本只在「字幕已归属的场景」内部重锚定与缩放，从不重新推导归属 → 互换原样保留，重渲无效
+- 修法：按 `voiceover-texts.json` 各场景正文归一化字符数把 captions 切成 6 组（1024: 188/205/179/192/214/26=1004，与脚本精确相等），按 `play_order` 累加 wav 实测时长定块起点，**块内用该场景自己的 wav 单独跑词级 ASR** 重计时
+- 尾行 `endMs` 补到该场景语音 offset：1024 实测 scene4 差 0.308s、scene6 差 0.298s
+
+**坑 299：验证必须对渲染后的 mp4，不能对源 wav**
+- 按播放序拼接 `voiceover/sceneN.wav` 得到的 `full_play.wav` 本来就正确，**拿它做 ASR 必然全绿，等于没测**
+- 正确证据链 = `ffmpeg -i out.mp4 -vn -ar 16000 -ac 1 mp4_audio.wav` → faster-whisper 词级 ASR + 抽帧看烧录字幕
+- 「音频顺序对、烧录字幕错」是块互换的指纹；音频本身错才是 TTS/拼接问题
+- 量化用**首 3 字锚定**（`stream.find(key[:3])` 多命中取最近），1024 结果 lead 中位 +0.205s / max +0.71s / min −0.17s（54/64 可测）
+- **禁用全文字符流 SequenceMatcher 直接量偏差**：长片累积插入/删除摊到每条，1024 得到「64 条全部 >0.5s、中位 1.31s」的假信号
+- ASR 会把中文数字写成一二三四，归一化时映射 〇一二三四五六七八九 → 0–9 可多救回若干条
+
+**正例固化**：1024 二次修复后成片 148.288s / 4447 帧 / 1920×1080 / 15,779,934B；抽帧 84.3s=程序员节、90.3s=谷歌、106.5s=模型能力、113s=白名单、114.9s=刚才说MiniMax、120–140s=MoE、146s=CTA 全部与口播一致。
 
 ### v3.61.0（2026-10-23 日报实测，视频号标注/合集新 DOM 与抖音恢复令牌六坑 292-297）
 基于 **2026-10-23 日报全流程**（全量抓取完成；成片 128.128s/3842 帧/1920×1080/14,178,371B 锚点 0.7110 容差内；封面本地 PIL 对齐 2026-10-21 海报模板；四平台全草稿）实测，吸收坑 292-297：

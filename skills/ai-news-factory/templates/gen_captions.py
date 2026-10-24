@@ -310,7 +310,28 @@ def load_scenes(report_dir: Path):
         if not ap.exists():
             ap = pub_dir / f'scene{sid}.wav'
         out.append({'id': sid, 'text': text, 'audio': str(ap), 'duration': 0.0})
-    return out
+    return apply_play_order(out, report_dir)
+
+
+def apply_play_order(scenes, report_dir: Path):
+    """坑 298：play_order 决定音频播放顺序，字幕必须按同一顺序累加时间偏移。
+
+    scenes-meta.json 与 dict 形式的 voiceover-texts.json 都是按场景编号排的，
+    直接顺序累加会把不同场景的字幕块互换位置（1024: [1,2,3,5,4,6] 的 4/5 互换）。
+    """
+    vt_path = report_dir / 'scripts' / 'voiceover-texts.json'
+    if not vt_path.exists():
+        return scenes
+    vt = json.loads(vt_path.read_text(encoding='utf-8'))
+    order = vt.get('play_order') if isinstance(vt, dict) else None
+    if not order:
+        return scenes
+    by_id = {sc['id']: sc for sc in scenes}
+    ordered = [by_id[i] for i in order if i in by_id]
+    ordered += [sc for sc in scenes if sc['id'] not in set(order)]
+    if [sc['id'] for sc in ordered] != [sc['id'] for sc in scenes]:
+        print(f'  play_order applied: {[sc["id"] for sc in ordered]}')
+    return ordered
 
 
 def whisper_words(model, audio_path):
