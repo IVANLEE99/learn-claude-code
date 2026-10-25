@@ -90,7 +90,7 @@
 ### 3.2 封面铁律（视频号 + 建议全平台）
 
 - 🚫 写实真人主播、假演播室新闻脸（易肖像/虚假）
-- ✅ **v3.31.0 主路径**：极简中文科技资讯海报（浅灰蓝底 + 蓝引号 + 发布标题排版 + 右下小羊水印）。横/竖封面都按 `templates/cover-prompt.md`，文字源 = `publish.json.title`
+- ✅ **v3.35.0 主路径**：极简中文科技资讯海报（浅灰蓝底 + 蓝引号 + 大字排版 + 小羊水印）。横/竖封面都按 `templates/cover-prompt.md`，**画面文字源 = 脚本「对应封面大字」**（Hook 原词，1 句冲突 + 1 个数字两行）；`publish.json.title` 整条发布标题**禁止印上画面**（v3.35.0 坑 203），只作 B站/公众号列表标题与渲染文件名
 - ✅ 抽象芯片 / 产品 UI / logo 拼贴 / 纯信息卡片（仅封面 API 失败、本地兜底时）
 - ✅ 日期单独一行水平居中；水印品牌 + 小羊图标（禁止微信气泡）
 - 🔴 生成封面 prompt **禁止** `male/female news anchor` 写实人像（v3.13 起）；**禁止**再用演播室空镜英文 prompt 当封面
@@ -148,7 +148,7 @@
 
 ### 封面与 AI
 - [ ] 封面无写实真人主播
-- [ ] 视频号将开启 AI 生成标识
+- [ ] 视频号 AI 标注走「视频标注」下拉：`.mark-tag-select` → **先 `scrollIntoView({block:'center'})` 再重取 rect** → 点开 → **断言 `.mark-tag-options` 的 `getComputedStyle(...).display === 'block'`** → 选 `Contains AI-generated content` → 回读 `.select-display` 文本（坑 292 / 坑 303：视口外点击静默失效；无中文「AI生成」控件）
 - [ ] 音画相关
 
 ### 画面与场景图（v3.14）

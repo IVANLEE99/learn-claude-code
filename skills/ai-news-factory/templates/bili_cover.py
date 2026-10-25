@@ -86,7 +86,10 @@ def main():
           const empty = document.querySelector('.cover-empty');
           const img = document.querySelector('.cover-img');
           const bg = img ? getComputedStyle(img).backgroundImage : '';
-          return { emptyVisible: !!(empty && empty.offsetParent), bg: bg.slice(0, 120) };
+          return { emptyVisible: !!(empty && empty.offsetParent
+                                    && empty.getBoundingClientRect().width > 0
+                                    && empty.getBoundingClientRect().height > 0),
+                   bg: bg.slice(0, 120) };
         }''')
         print('pre-check:', pre)
         if not pre['emptyVisible'] and ('biliimg' in pre['bg'] or 'bfs/archive' in pre['bg']):
@@ -167,9 +170,13 @@ def main():
           const empty = document.querySelector('.cover-empty');
           const img = document.querySelector('.cover-img');
           const bg = img ? getComputedStyle(img).backgroundImage : '';
+          const visible = e => { const r = e.getBoundingClientRect();
+                                 return r.width > 0 && r.height > 0; };
+          // 坑 302/303 同类：offsetParent 非空 ≠ 可见——弹窗关闭后容器仍留在 DOM 且 rect 0×0
           return { dialogOpen: Array.from(document.querySelectorAll('*'))
-                     .some(e => (e.textContent || '').trim() === '封面制作' && e.offsetParent),
-                   emptyVisible: !!(empty && empty.offsetParent), bg: bg.slice(0, 160) };
+                     .some(e => (e.textContent || '').trim() === '封面制作' && e.offsetParent && visible(e)),
+                   emptyVisible: !!(empty && empty.offsetParent && visible(empty)),
+                   bg: bg.slice(0, 160) };
         }''')
         shot(page, 'after')
         ok = (not after['dialogOpen']) and (not after['emptyVisible']) \

@@ -8,7 +8,7 @@
 
 - **频道名称**: 「羊报AI月报」
 - **副标题**: 「AI 月度盘点」
-- 所有图片中如需显示台标，统一使用「羊报AI月报」，副标题使用「AI 月度盘点」，分两行显示在右上角，充当背景。
+- 所有图片中**不要**把台标写进画面——**禁止**「分两行显示在右上角，充当背景」这类尾巴（v3.33.0 坑：诱发整段伪中文/英文文案烧进画面，scene2/scene4 报废重制）。品牌「羊报AI月报」/「AI 月度盘点」由 Remotion 标题栏叠加。
 - **日期字段**: `{YYYY-MM}`（如 2026-06），不是 YYYY-MM-DD
 
 ---
@@ -18,7 +18,8 @@
 ### 通用风格
 - 所有图片保持统一的风格（暗色调科技感、强烈的蓝红对比灯光、现代新闻演播室）
 - 所有图片保持统一的构图（主播在画面中央或偏左，背景为科技感大屏幕）
-- **16:9 比例**（1536x1024）用于通用场景
+- **16:9 横屏**用于通用场景——画幅由 prompt 结尾的 `Wide 16:9 horizontal cinematic composition, full-frame landscape framing.` 保证，**不靠 `size` 参数**（坑 301：`size:'auto'` 无构图句会出方图）。
+- **`size` 按端点运行时决定，禁止硬编码字面量**（坑 300）：rainflow 传 `"auto"`，其余端点传 `"1536x1024"`；派生脚本的日期替换会误伤裸字面量（`1536x1024`→`1536x1025`）。**判 rainflow 用 URL 域名子串 `"rainflow" in url`，不要按 `_000/_001/_002` 后缀判**——后缀编号会漂移（坑 304）。
 
 ### 场景 Prompt 结构
 
@@ -30,8 +31,10 @@
 ### Prompt 模板
 
 ```
-A professional Chinese AI news studio scene {场景编号}. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens showing: {本月该趋势相关的视觉元素，如 OpenAI/Codex logo、智谱 GLM 标识、Anthropic Claude 图标、AI编程工具拼贴，勿放可识别真人}. The studio has dramatic blue and red neon lighting. In the top right corner, display the text "羊报AI月报" on the first line and "AI 月度盘点" on the second line in large white Chinese characters. In the bottom center, display the month "{YYYY-MM}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting, 16:9 aspect ratio. No people, no faces.
+A professional Chinese AI news studio scene {场景编号}. Empty modern curved news desk, NO human presenter, NO realistic human face or news anchor. Behind the desk are multiple large display screens showing: {本月该趋势相关的视觉元素，如 OpenAI/Codex logo、智谱 GLM 标识、Anthropic Claude 图标、AI编程工具拼贴，勿放可识别真人}. The studio has dramatic blue and red neon lighting. In the bottom center, display the month "{YYYY-MM}" in large white bold text. Professional broadcast news photography style, photorealistic environment, highly detailed, cinematic lighting. Wide 16:9 horizontal cinematic composition, full-frame landscape framing. No people, no faces, no text, no letters, no Chinese characters, no watermark.
 ```
+
+> **🔴 结尾这两句是强制项（v3.63.0 坑 301 / v3.33.0）**：构图句 `Wide 16:9 horizontal cinematic composition, full-frame landscape framing.` 缺了就出方图（rainflow 端点 `size:'auto'` 只靠 prompt 定画幅，实测 1254×1254）；**只写 `16:9 aspect ratio` 不算**。台标尾巴已从上式删除——**禁止**再加回去（会烧出整段伪中文），品牌由 Remotion 标题栏叠加。
 
 ---
 
@@ -60,8 +63,8 @@ JSON 格式：
   {
     "scene": 1,
     "content": "Hook 文本",
-    "prompt": "完整英文 prompt...",
-    "size": "1536x1024"
+    "prompt": "完整英文 prompt（结尾必须带 Wide 16:9 horizontal cinematic composition, full-frame landscape framing.）",
+    "size": "auto 或 1536x1024（按端点运行时决定，不写死）"
   }
 ]
 ```

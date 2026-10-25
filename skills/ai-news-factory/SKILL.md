@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.63.0
+version: 3.64.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.63.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.64.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.64.0 核心改进（2026-10-25 开工前自检，两处「证据对、结论错」的判据坑 304-305）**：**端点身份按 `_000/_001` 后缀判会静默判错（坑 304）**——1025 实测 `settings.json` 是 `GEN_IMG_API_URL`=rainflow、`_000`=prism.uno、`_001/_002`=elysiver，而同期 `To_Learn.md` 备忘写的是 `_003`=rainflow、本体=prism.uno，**两份记录编号完全不同**；按下标判「是不是 rainflow」会让 size 传错、网关回「不支持的图片比例」，症状与坑 300 一模一样极易混。**修法：一律按 URL 域名子串判**（`"rainflow" in api_url`），fallback 顺序也按域名排，开工前先打印 `{后缀: 域名}` 一览核对。**终态验收的判据没做空白归一化，证据与结论自相矛盾（坑 305）**——`final_verify` 把证据 `draftSec` 归一化后打印（`t.slice(...).replace(/\s+/g,' ')`），却拿**未归一化**的 `t` 跑 `/Kimi K3\.1/`；首页卡片把标题折成 `Kimi\nK3.1`，于是**同一条日志里打印的证据明明含 `【2026-10-25】Kimi K3.1 Pro …`，结论却是 `draftHasToday: false`**。**铁律：判据和证据必须用同一份归一化文本**（先 `const t = raw.replace(/\s+/g,' ')`，之后只碰 `t`）；**「打印的证据命中、结论却是 false」就是这个坑的指纹**，见到先查判据，别怀疑平台。
 > **🔴 v3.63.0 核心改进（2026-10-25 日报实测，生图 size 派生污染与两处视口外静默点击四坑 300-303）**：**derive 的日期替换会污染尺寸字面量（坑 300）**——`'1024' → '1025'` 全串替换把生图脚本里硬编码的 `size: '1536x1024'` 改成 `'1536x1025'`，rainflow 回「不支持的图片比例」；排查指纹 = 网关报比例不支持但比例明明没问题 → 先 grep 尺寸字面量有没有被日期吃掉；修法 = **尺寸不硬编码，按端点运行时算**（rainflow 用 `auto`，其他 `1536x1024`）。**`size:'auto'` 会返回方图，必须在 prompt 写死横构图（坑 301）**——rainflow 的 `auto` 在无构图提示时返回 1254×1254，塞 1920×1080 被裁两侧；prompt 末尾加 `Wide 16:9 horizontal cinematic composition, full-frame landscape framing.` 后 6/6 得 1672×940/941（1.78）。**B站分区真选择器是 `.drop-list-v2-item`，且在视口外时坐标点击静默无效（坑 302）**——旧脚本按通用 `li,div,span,p` 文本匹配命不中，分区停在默认「音乐」；`人工智能` 项在 y=759 超出 769 视口，`mouse.click` / `el.click()` / `dispatchEvent` **全部静默失败不报错**；修法 = `locator('.drop-list-v2-item').filter(has_text=...).first.scroll_into_view_if_needed()` 后 `click(force=True)`。**视频号 `.mark-tag-select` 同样初始在视口外（坑 303）**——rect.y=1208 时 `mouse.click` 返回成功但 `.mark-tag-options` 仍 `display:none`、选项查询返回 `[]`（看着像「下拉里没有 AI 选项」）；修法 = `scrollIntoView({block:'center'})` → 重取 rect → 点击 → **先断言 `display === 'block'` 再查选项**。与坑 302 同根：**任何 `mouse.click` 前必须确认目标 rect 在当前视口内**。小坑：视频号 `edit-cover-dialog-container` 关闭后仍留在 DOM 且 rect 为 0×0，「容器存在」判弹窗未关是假阳性（改判 `rect.width>0 && rect.height>0`，或直接回读槽位 `img.naturalWidth/naturalHeight`）；封面喂图后必须等预览图出现目标尺寸再点确认；B站标签可能被平台单独拒收（本期 `AI大模型` 未入 chips，6/7），断言写成「记录缺失但不阻塞」。1025 正例：日报 370 帖 / 成片 163.392s / 4900 帧 / 16,361,460B / 锚点 0.7657；字幕块重分配六块起点 Δ 全 0ms，mp4 音频验证 lead 中位 **+0.097s** / 离群 0（57/72 可测）；四平台全草稿。
 > **🔴 v3.62.0 核心改进（2026-10-24 日报返工，字幕「跨场景错位」两坑 298-299）**：**坑 283 只解决了「块平移」，没解决「块重分配」——用户二次反馈「1:34 还是对不上」的真因是字幕按场景编号序落盘（坑 298）**。1024 期 `play_order=[1,2,3,5,4,6]`，`captions.json` 里 MoE 文案（script scene4）占着 84.4–112.9s、程序员节文案（script scene5）占着 113.5–143.9s——**整块互换而非平移**。当晚第一次修复用了 `realign_captions_1024.py`，它只在「字幕已归属的那个场景」内部做重新锚定与缩放，**从不重新推导每条字幕属于哪个场景**，所以互换原样保留、重渲后现象不变，白渲一次。**根治写法：按 `voiceover-texts.json` 的每场景正文长度做字符累加，把 captions 精确切成 6 组（归一化后 188/205/179/192/214/26 字符，累计 1004 与脚本完全相等即可断言），再按 `play_order` 累加各场景 wav 时长定块起点，块内用「该场景自己的 wav」的词级 ASR 重新计时**——不能复用一个全局 ASR 流，否则跨场景边界处会拿到相邻场景的时间。**坑 299：验证必须对渲染后的 mp4 做，不能对源 wav 做**。当晚第一轮「验证通过」是拿 `voiceover/sceneN.wav` 按播放序拼 `full_play.wav` 跑的 ASR——那个文件本来就是按播放序拼的，**必然通过，等于没测**；真正的证据只能从成片里取：`ffmpeg -i out.mp4 -vn -ar 16000 -ac 1 mp4_audio.wav` → faster-whisper 词级，再抽帧看烧录字幕。实测流程：mp4 音频 84–114s 确是程序员节、114–144s 确是 MoE（音频顺序本来就对），而 95/100/105/110s 的帧烧的却是 MoE 文案——**「音频对、字幕错」是块互换的指纹**。验收量化用「首 3 字锚定 + 取最近出现位置」：lead 中位数 +0.205s、最大 +0.71s、最小 −0.17s（54/64 条可测）；**禁用全文字符流 SequenceMatcher 直接量偏差**，长片会把累积插入/删除摊到每条上，得到「全部 64 条都 >0.5s」的假信号（实测中位 1.31s，纯属对齐器假象）。另：场景尾行字幕要比发声晚收 0.3s 左右，`offset` 实测 scene4 末条 gap 0.308s、scene6 0.298s → 尾行 `endMs` 补到静音起点即可。
 > **🔴 v3.61.0 核心改进（2026-10-23 日报实测，视频号标注/合集新 DOM + 抖音恢复令牌六坑 292-297）**：**视频号 AI 标注真控件是「视频标注」下拉，不是中文勾选框（坑 292）**——wujie shadowRoot 内找「AI生成」/`input[type=checkbox]` 永远 `ai declare: absent`；真控件 = `.mark-tag-select` 的 `.select-display` + `.mark-tag-options`，选项全英文 `No label needed` / `Contains AI-generated content` / `Fictional storyline for entertainment only` / `Personal opinion for reference only` / `Content contains ads` / `Self-recorded content` / `Content is reposted`，**合规须选 `Contains AI-generated content`**；回读以 `.select-display` 文本为准。**视频号新版合集 DOM 变了，且 wujie 内 Vue 组件只认真实鼠标坐标点击（坑 293）**——旧 `.option-item` 前缀匹配返回 False；新链路 = 点 `.post-album-display` 展开 → `.post-album-wrap .option-item` 选项；**JS `.click()` 对这层 Vue 组件不生效（返回成功但 display 不变）**，必须取 `getBoundingClientRect` 中心后 `page.mouse.click(x,y)`；选项文案带「共N个作品」（本期 132/4/22/4）。**wujie shadowRoot 内 file input 用 `evaluate_handle().as_element()` 必 detached（坑 294）**——视频号封面对话框（`.vertical-img-wrap .edit-btn` → 标题「编辑个人主页卡片」→ 取消/确认）上传时，`as_element().set_input_files()` 报 `Cannot set input files to detached element`；改用 Playwright locator 形式 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(...)` 一次过；确认按钮同样 JS 查不到（`.weui-desktop-btn_primary` 从错误 wrapper 取空），走真实坐标点击。**抖音「继续编辑」是一次性消费令牌，核验后必须同标签再暂存（坑 295，坑 290 第三形态）**——抖音**没有草稿列表页**（`/content/manage?tab=draft` 空壳），唯一恢复入口是发布页横幅；为核验新开标签点「继续编辑」→ 读表单 → 关标签，**草稿就此消失**（此后任何标签横幅都不再出现）。正确 = 端到端一次跑完：暂存 → **同标签**点「继续编辑」回读 → **再点一次「暂存离开」** → 终态「按钮消失 + 横幅出现」；外部标签只准**读**横幅文本，**禁点击**。**抖音竖封面真入口是悬停槽位→「编辑封面」，弹窗内正确 input 是 `.selectArea-BCIYQD input[type=file]`（坑 296）**——`get_by_role('button', name='设置竖封面')` 常 `disabled`（只是提示位），点它必超时；弹窗内 6 个 file input 中其余 4–5 个是模板/贴纸选择器，喂错**静默无报错**。封面槽位按 `.coverControl-CjlzqC` 下标断言：`[0]`=横 4:3、`[1]`=竖 3:4，用 `img.naturalWidth/naturalHeight` 判 1536×1151 / 1150×1535；「竖封面缺失」文案在 AI 推荐封面生成期会**瞬时为真**，**禁只 grep 文本判封面**。**抖音合集选项匹配必须最小面积法排除下拉容器（坑 297）**——`/^「?今日羊报/` + `/共\s*\d+\s*个作品/` 会同时命中整个下拉容器（文本 `请选择合集不选择合集「虢礫緙嘞」共4个作品…` 整块），点它等于没选；约束 `textContent.length ≤ 40` + `rect.height ∈ [10,90]` 后**取面积最小的节点**点击，本期命中 `「今日羊报Al」共132个作品`。1023 正例：日报全量抓取完成；成片 128.128s/3842 帧/1920×1080/14,178,371B 锚点 0.7110；封面本地 PIL 对齐 2026-10-21 海报模板（横 1536×1152/竖 1152×1536）；四平台全草稿（B站 人工智能 分区+7 标签+合集、公众号 appmsgid+bodyLen1179+占位符0、视频号 描述+短标题+合集「今日羊报Al」+AI标注英文选项+3:4 封面、抖音 标题+desc157+5 话题+声明+双封面+第133集）。
@@ -50,7 +51,7 @@ version: 3.63.0
 >
 > **🔴 v3.34.0 核心改进（2026-09-17 日报实测）**：**上传 daemon 必须用日常 Chrome，禁止 Chrome for Testing**（坑 198）。Playwright driver 不能当 daemon 持有浏览器——弹窗协议错误会把 driver+浏览器一起打死（坑 199）。B站「存草稿」是 `span.submit-draft` 不是 `button`，点错 5 次草稿箱一直空（坑 200）；失败禁止 `goto` 草稿箱，表单页会被冲掉（坑 201）。公众号英文 UI 登录判据补 `New creation`；`navigator.clipboard.write` 成功 ≠ 正文进去，必须坐标点击正文再 Meta+V，以 `bodyLen>800` 为准（坑 202）。
 >
-> **🔴 v3.33.0 核心改进（2026-09-16 日报实测）**：**上传阶段浏览器必须常驻**——脚本化 Playwright 严禁把 `launch_persistent_context` 放进 `with sync_playwright()`（脚本退出含异常即杀浏览器、表单状态全丢、整轮重传；0916 期连丢 3 次）；先用守护进程持有浏览器（CDP 9222），后续脚本 `connect_over_cdp` 只附着不断连（坑 193）。B站新版投稿页**分区是级联面板**：`人工智能` 是 `科技数码` 的子分区，老的「点开下拉→JS 点选项」不再命中（坑 194）。公众号登录判据 = **页面出现「新的创作」**（登录页文案是「微信扫一扫」，搜「扫码」会漏判）（坑 195）。生图 prompt 里的中文水印尾巴会诱发画面大面积乱码中文，须删掉并显式加 `no text`；主站欠费时 `_003` prism `gpt-image-2` 为实测可用兜底（坑 196）。
+> **🔴 v3.33.0 核心改进（2026-09-16 日报实测）**：**上传阶段浏览器必须常驻**——脚本化 Playwright 严禁把 `launch_persistent_context` 放进 `with sync_playwright()`（脚本退出含异常即杀浏览器、表单状态全丢、整轮重传；0916 期连丢 3 次）；先用守护进程持有浏览器（CDP 9222），后续脚本 `connect_over_cdp` 只附着不断连（坑 193）。B站新版投稿页**分区是级联面板**：`人工智能` 是 `科技数码` 的子分区，老的「点开下拉→JS 点选项」不再命中（坑 194）。公众号登录判据 = **页面出现「新的创作」**（登录页文案是「微信扫一扫」，搜「扫码」会漏判）（坑 195）。生图 prompt 里的中文水印尾巴会诱发画面大面积乱码中文，须删掉并显式加 `no text`；主站欠费时 prism `gpt-image-2` 为实测可用兜底（坑 196；原文写作「`_003` prism」，**该后缀编号已漂移，勿照抄下标**，按 URL 域名判端点，见坑 304）。
 
 **核心原则：语义 `group_caps` 先切行，再以真实音频为锚——faster-whisper 词级时间戳 + SequenceMatcher 对齐。字幕内容 100% 来自原始脚本、时间 100% 来自音频真实发音时刻。禁止逐标点切行，禁止按字硬切，禁止按字数比例切时间轴。**
 
@@ -922,11 +923,11 @@ Avoid:
 
 [新闻核心地点] with [主要人物/物体], [他们在做的关键动作]. [标志性环境细节], [时间/天气/光线]. [情绪与氛围描述]. [新闻摄影/编辑插图风格], photorealistic, highly detailed, shot on [镜头焦段] — no text, no watermark.
 
-16:9 aspect ratio
-「今日羊报 AI」
-「AI 新闻」
-分两行显示在右上角,充当背景
+Wide 16:9 horizontal cinematic composition, full-frame landscape framing. absolutely no text, no letters, no Chinese characters, no watermark.
 ```
+
+> **🔴 结尾这行构图句是强制项（v3.63.0 坑 301）**：`size:'auto'` 的端点（rainflow）**只靠 prompt 决定画幅**——无构图提示时 gpt-image-2 返回方形 1254×1254，进成片必被左右裁切。1025 期补上该句后 6/6 出 1672×940/941（1.78）。**不要**只写 `16:9 aspect ratio` 就以为够了，**必须**是这条完整的 composition/framing 句。
+> **禁止**再追加「『今日羊报 AI』『AI 新闻』分两行显示在右上角充当背景」——该尾巴会诱发整段伪中文/英文文案烧进画面（v3.33.0 坑，scene2/scene4 均报废重制）。品牌由 Remotion 标题栏叠加，不进图。
 
 #### 输出格式
 
@@ -989,15 +990,29 @@ API_URL = "用户提供的 API URL"  # 如 https://ai.prism.uno
 API_KEY = "用户提供的 API Key"
 MODEL = "gpt-image-2"  # 注意：不是 gpt-image-1
 
-def generate_image(prompt, output_path):
+def size_for(api_url):
+    """🔴 坑 300：size 必须按端点运行时决定，禁止硬编码。
+    rainflow（25 张额度，优先用）只接受 'auto' —— 任何显式比例都回「不支持的图片比例」；
+    prism.uno / elysiver 等其他端点走 '1536x1024'。
+
+    🔴 判据必须是 URL 子串 'rainflow'，**不能按 _000/_001/_002 后缀判**（坑 304）：
+    端点编号会随额度漂移——1025 实测 settings.json 是 GEN_IMG_API_URL=rainflow、
+    _000=prism.uno、_001/_002=elysiver；而 To_Learn.md 的备忘写的是 _003=rainflow、
+    本体=prism.uno。用后缀判会随用户改编号而静默判错，用域名子串判永远跟得上。
+
+    画幅由 prompt 里的 16:9 构图句保证（Phase 4 / 坑 301），不靠 size 保证。"""
+    return "auto" if "rainflow" in (api_url or "") else "1536x1024"
+
+def generate_image(prompt, output_path, api_url=API_URL, api_key=API_KEY):
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
         tmp_path = tmp.name
     try:
         subprocess.run([
-            "curl", "-s", "-X", "POST", f"{API_URL}/v1/images/generations",
-            "-H", f"Authorization: Bearer {API_KEY}",
+            "curl", "-s", "-X", "POST", f"{api_url}/v1/images/generations",
+            "-H", f"Authorization: Bearer {api_key}",
             "-H", "Content-Type: application/json",
-            "-d", json.dumps({"model": MODEL, "prompt": prompt, "size": "1536x1024", "n": 1}),
+            "-d", json.dumps({"model": MODEL, "prompt": prompt,
+                              "size": size_for(api_url), "n": 1}),
             "-o", tmp_path,
             "--max-time", "120"
         ], check=True, timeout=130)
@@ -1056,7 +1071,9 @@ curl -s --resolve api.luka77.cc:443:$REAL_IP ...
 3. 如果所有 API 都不可用，提示用户提供可用的 API
 
 **注意事项**:
-- 使用 `1536x1024` (16:9 横屏)
+- **🔴 size 按端点运行时决定，禁止硬编码（v3.63.0 坑 300）**：rainflow 传 `"auto"`、其余端点传 `"1536x1024"`。1025 期派生脚本做 `'1024'→'1025'` 日期替换时，把硬编码字面量 `'1536x1024'` 一起改成了 `'1536x1025'`，rainflow 直接回「不支持的图片比例」——**任何写进请求体的 size 都不能是裸字面量**，必须由 `size_for(api_url)` 这类函数算出来。
+- **🔴 端点身份按 URL 子串判，不按 `_000`/`_001` 后缀判（v3.63.0 坑 304，1025 实测）**：额度优先级是 **rainflow（25 张额度）先用 → 额度不够再用 prism.uno → elysiver `_001/_002` 兜底**，但**后缀编号会漂移**：1025 实测 `settings.json` 是 `GEN_IMG_API_URL=chatgpt.rainflow.foo/studio/v1`、`_000=ai.prism.uno`、`_001/_002=elysiver.h-e.top`，而 `To_Learn.md` 的备忘写的是 `_003=rainflow`、本体=`prism.uno`——**同一期两份记录编号不同**。所以：判 rainflow 用 `"rainflow" in api_url`，判 fallback 顺序按**域名**而不是按下标；开工前 `python3 -c` 打印 `{后缀: URL 域名}` 一览（key 只打 len）核一遍再写脚本。
+- **🔴 出图后必须验比例（v3.63.0 坑 301）**：每张 `PIL.Image.open(p)` 读尺寸并断言 `w/h >= 1.6`（16:9 ≈ 1.78）。接近 1.0 的方图判失败重出，**不要**把方图塞进 16:9 画面指望 Remotion 拉伸。1025 期 `auto` 无构图句时 6/6 全出 1254×1254 方图，补句后 6/6 出 1672×940/941。
 - **必须逐张生成**：API 有并发限制；**禁止**整段 7 张串行卡在一个 10 分钟 Bash 超时里——可按 scene 拆命令或仅生成缺失文件
 - **必须从 JSON 文件读取 Prompt**，不能用简化版本
 - 每张图片生成后重试一次（如果失败）
@@ -1065,8 +1082,8 @@ curl -s --resolve api.luka77.cc:443:$REAL_IP ...
 - **DNS 劫持**：如遇连接超时，用 `nslookup` + `curl --resolve` 绕过
 - **🔴 settings.env 多端点（v3.10 / 2026-07-21）**：从 `~/.claude/settings.json` 的 `env` 读取 `GEN_IMG_API_URL`/`GEN_IMG_API_KEY` 及 `_001`/`_002` fallback；日志**禁止**打印 key（只允许 set/empty/len）
 - **🔴 v3.33.0 中文水印尾巴致乱码（0916 实测）**：scene prompt 结尾的「『今日羊报 AI』『AI 新闻』分两行显示在右上角充当背景」会诱发模型把大段伪中文/整段英文文案画进画面（scene2 伪中文、scene4 整段英文，均报废重制）。修复：删掉该尾巴，追加 `absolutely no text, no letters, no Chinese characters, no watermark`；`Read` PNG 目检必须逐张过，乱码常在整段文案级别才显眼
-- **🔴 v3.33.0 端点降级顺序（0916 实测）**：主站欠费返回 `预扣费额度失败`（HTTP 200 包 error）时，`_003`（prism `gpt-image-2`）为实测可用兜底；重试脚本应把**上一张成功的端点提到循环最前**，避免每张都先撞欠费主站浪费 2 次×超时
-- **🔴 部分成功续跑**：已存在且 >5KB 的 `sceneN.png` 跳过；失败端点记 http 状态后切下一端点
+- **🔴 v3.33.0 端点降级顺序（0916 实测，端点身份见坑 304）**：主站欠费返回 `预扣费额度失败`（HTTP 200 包 error）时，换到 prism / elysiver 端点承接；重试脚本应把**上一张成功的端点提到循环最前**，避免每张都先撞欠费主站浪费 2 次×超时。**不要说「`_003` 是 prism」，后缀编号会漂移**（1025：`_000`=prism、`_001/_002`=elysiver、本体=rainflow）——按域名判，见坑 304。
+- **🔴 部分成功续跑**：已存在、**且 >20000 字节、且严格 PIL 解码通过、且比例 ≥1.6** 的 `sceneN.png` 才跳过（坑 254 三合一门禁——只验字节数会把「坏但够大」的文件永远跳过）；失败端点记 http 状态后切下一端点
 - **scene CTA 兜底**：最后 1 张若全端点失败，可用昨日同结构 CTA 图或 scene1 临时顶替，**封面竖图禁止**此兜底
 
 ### Phase 5.5: 异步生成封面（与 TTS 并行）
@@ -1097,18 +1114,24 @@ MODEL = "gpt-image-2"
 # 禁止用 publish.json.title 整条发布标题当画面文字（坑 203）
 COVER_PROMPT_FILE = "templates/cover-prompt.md"
 COVER_TEXT = "OpenAI把降智取消了\n五分钟后直接不给你用"   # 例：Hook 原词，主文案一行 + 数字短句一行
-# 竖版 ratio=3:4 size 优先 1024x1536（接口不认再 1152x1536）
-# 横版 ratio=4:3 size 优先 1536x1152（接口不认再 1536x1024）
-# 端点：settings.json GEN_IMG_API_URL 起，失败走 _001/_002/_003；日志禁打印 key
+# 🔴 size 不写裸字面量（坑 300 / 坑 304）：rainflow 端点传 "auto"，其余端点传下方目标尺寸；
+#    判「是不是 rainflow」用 URL 域名子串，不要按 _000/_001 后缀判（编号会漂移）
+# 竖版 ratio=3:4 目标 1152x1536（1024x1536 是 2:3 不是 3:4，别用）
+# 横版 ratio=4:3 目标 1536x1152（1536x1024 是 3:2，接口不认时走本地 PIL 兜底，别将就）
+# 端点：settings.json GEN_IMG_API_URL 起，失败按域名顺序 fallback（rainflow → prism → elysiver）；日志禁打印 key
+def size_for(api_url, target_size):
+    """坑 300/304：rainflow 只吃 'auto'（画幅靠 prompt 的 16:9 构图句），其余端点吃显式尺寸。"""
+    return "auto" if "rainflow" in (api_url or "") else target_size
 
-# 封面配置
+# 封面配置（size 是「非 rainflow 端点的目标值」，不是写死的请求值）
 COVERS = [
     {"name": "horizontal-4-3.png", "size": "1536x1152", "ratio": "4:3"},    # B站/通用（4:3 横版）
     {"name": "vertical-3-4.png", "size": "1152x1536", "ratio": "3:4"},   # 抖音/竖版（3:4）
 ]
 
 def generate_cover(prompt, output_path, size):
-    """生成单张封面，带重试机制"""
+    """生成单张封面，带重试机制。size 传 COVERS 里的目标值，函数内按端点换成 rainflow 的 'auto'。"""
+    req_size = size_for(API_URL, size)   # 坑 300/304：绝不把裸字面量发出去
     for attempt in range(2):  # 最多重试1次
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
             tmp_path = tmp.name
@@ -1117,7 +1140,7 @@ def generate_cover(prompt, output_path, size):
                 "curl", "-s", "-X", "POST", f"{API_URL}/v1/images/generations",
                 "-H", f"Authorization: Bearer {API_KEY}",
                 "-H", "Content-Type: application/json",
-                "-d", json.dumps({"model": MODEL, "prompt": prompt, "size": size, "n": 1}),
+                "-d", json.dumps({"model": MODEL, "prompt": prompt, "size": req_size, "n": 1}),
                 "-o", tmp_path,
                 "--max-time", "120"
             ], capture_output=True, text=True, timeout=130)
@@ -1522,11 +1545,15 @@ def group_caps(tokens, max_len=16, min_len=6, hard_max=20):
     → 复制 templates/gen_captions.py → 当期 scripts/gen_captions.py，补 jieba 专名
     → --dry-run：jieba 分词 + 语义 group_caps 切行（不加载 whisper）
     → 人工扫禁切反例（稳不稳 / 硬新闻主轴 / 规划步骤 / 编程 Agent / 终止Cursor官方直连 / Hy四连发 / 羊报AI月报 / 整月风向 / 主题近一万 / 延期；）
-    → faster-whisper(word_timestamps=True) 跑当期 wav
+    → faster-whisper(word_timestamps=True) 跑当期 wav（**逐场景单独跑**，不要拼全局流）
     → 每条字幕 SequenceMatcher 滑动窗口对齐到词级时间戳
     → merge_short_dwell(min_sec=1.0)
-    → 场景间累加偏移 → captions.json + video-project/public/captions.json
+    → 按 play_order 累加各场景 wav 时长定块起点 → captions.json + video-project/public/captions.json
 ```
+
+> **🔴 v3.62.0 铁律（坑 298）：块偏移必须按 `play_order` 累加，不能按场景编号累加。** 只要 `play_order ≠ [1..N]`，字幕就会**整块互换**（1024 期 `[1,2,3,5,4,6]` 的 4/5 互换，用户两次反馈「对不上」，白渲一遍）。`templates/gen_captions.py` 的 `load_scenes` 末尾已内置 `apply_play_order()`；派生脚本若自行拼时间轴，必须同样处理。**另：块内计时必须用「该场景自己的 wav」单独跑 ASR**，复用一个全局 ASR 流会在场景边界处拿到相邻场景的时间。
+
+> **🔴 v3.62.0 铁律（坑 299）：字幕验收只认渲染后的 mp4 音频，源 wav 验证一律不作数。** 按播放序把 `voiceover/sceneN.wav` 拼成 `full_play.wav` 再去测，那个文件本来就是按播放序拼的，**必然通过、等于没测**。正确姿势：`ffmpeg -i out.mp4 -vn -ar 16000 -ac 1 mp4_audio.wav` → 词级 ASR → **首 3 字锚定**（`stream.find(key[:3])` 多命中取最近）比对每条 `startMs`。**禁用全文字符流 `SequenceMatcher` 一次量全片偏差**——累积插入/删除会摊到每条上，1024 实测给出「64 条全部 >0.5s、中位 1.31s」的假信号（真实中位 +0.205s）。放行门禁：lead 中位 ≤0.5s 且 ≥85% 条目 |lead| ≤1.0s。
 
 **关键点**：
 - **切行先于对齐**：`group_caps` 产出字幕字符串；whisper **只**负责时间轴。禁止 `split_sentences` 逐标点切行，禁止 16 字硬墙按字符下标切开专名/动宾
@@ -1564,6 +1591,28 @@ echo "图片: $IMAGES, 音频: $AUDIO"
 1. Hook 场景是否与第一条新闻共享了图片 → 合并图片 prompt
 2. 是否有重复或多余的图片 → 删除多余图片
 3. Composition.tsx 的 imageId 是否需要调整
+
+#### Step 8.0b: 场景图比例与完整性门禁（v3.63.0 新增，坑 301/254）
+
+进渲染前必须逐张过，任一不过即回 Phase 5 重出该张——**不要**指望 Remotion 拉伸或裁切兜底：
+
+```bash
+python3 - <<'PY'
+import glob, sys
+from PIL import Image
+bad = []
+for p in sorted(glob.glob('news-pipeline/YYYY-MM-DD/images/scene*.png')):
+    im = Image.open(p); im.load()          # 严格解码，禁用 LOAD_TRUNCATED_IMAGES（坑 254）
+    w, h = im.size
+    ratio = w / h
+    ok = ratio >= 1.6                       # 16:9≈1.78；方图 1.0 直接判死（坑 301）
+    print(f'{p.split("/")[-1]:12s} {w}x{h}  {ratio:.2f}  {"OK" if ok else "FAIL"}')
+    if not ok: bad.append(p)
+sys.exit(1 if bad else 0)
+PY
+```
+
+> 1025 期正例：rainflow `auto` + 无构图句 → 6/6 出 1254×1254（1.00），补齐构图句后 6/6 出 1672×940/941（1.78）；`size` 由 `size_for(api_url)` 运行时决定（见 Phase 5 / 坑 300）。
 
 #### Step 8.1: 梳理对应关系表
 
@@ -1912,7 +1961,7 @@ MCP 不可用时由脚本接管，**严禁**每轮把 `launch_persistent_context
 3. **选页按 URL 匹配**（如 `member.bilibili.com` / `cgi-bin/appmsg`），禁止 `pages[-1]`——daemon 初始的 `about:blank` 空页会顶到最后，导致后续 `ClipboardItem undefined` / `author input not found` 一类假错
 4. **一步一截图**（`/tmp/bili_step.png` + Read 目检），存草稿前全项验收；单脚本失败先看截图诊断再改，不要盲改重跑
 5. **B站标题复核（坑 197）**：native setter + input 事件在 UI 里显示正常（截图确认过全文），但存草稿后**列表仍显示文件名**（0916 实测 `bili_upload`）——存草稿后必须开草稿复核标题字段，不对就用 `locator.fill()` 重填再存
-6. **B站新版分区是级联面板（坑 194）**：`人工智能` 是 `科技数码` 的**子分区**，老路径「点开下拉→JS click 『人工智能』」返回 `not found`（子面板未渲染）。需点「科技数码」父节点 → 等子面板渲染 → 再点「人工智能」。v3.29.0 结构化验收仍要做，但注意 0916 出现过**面板未开时的假阳性 `ok:true`**（选择器在该瞬间没找到 `科技数码` 文本）——验收前先确认面板已收起、以 `innerText` 的 `分区\n人工智能` 正则为最终判据
+6. **B站分区**：**🔴 v3.63.0/1025 实测当前 UI 已改为扁平列表** `.drop-list-v2-item`（30 项，`人工智能` 直接在内，**不需要**先点父节点）——坑 194 的级联面板路径（点「科技数码」→ 等子面板）在 1025 已不适用，只有列表里找不到时才回退试级联。无论哪种形态，**点前必须 `scroll_into_view_if_needed()`**（坑 302：`人工智能` 在 y=759 而视口 769，视口外三种点击全静默失效），v3.29.0 结构化验收仍要做（以 `innerText` 的 `分区\n人工智能` 正则为最终判据）
 7. **B站上传完成信号**：等标题输入框出现（`textarea, input[placeholder*=标题]`）即为表单就绪，勿用「上传成功」文案轮询（0916 轮了 5 分钟没命中）
 8. **🔴 B站存草稿按钮是 `span.submit-draft`（坑 200 / 0917）**：文案「存草稿」，tag=`SPAN` class=`submit-draft`，**不是** `button`。`button:has-text("存草稿")` 恒 count=0；evaluate 点 `button` 也是 no-op。必须 `page.locator('span.submit-draft').click({force:true})` 或坐标点中心。存草稿成功信号仍是草稿箱出现当日标题，**不是** URL 仍停在 `upload/video/frame`。
 9. **🔴 存草稿失败禁止 `goto` 草稿箱（坑 201 / 0917）**：表单未保存时跳去 `upload-manager/article?group=draft` 会把编辑页冲掉（0917 连丢 5 次表单）。失败时**留在表单页**截图诊断；验证草稿用**新标签页**打开草稿箱，不动编辑页。
@@ -1991,9 +2040,9 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 
 #### 11.4 选择分区「人工智能」（v3.17 新增；🔴 v3.29.0 提级为存草稿前必验收项）
 
-**🔴 分区选择器是自定义下拉框，必须用 JS evaluate。视频投稿必须选择「人工智能」分区。**
+**🔴 分区选择器是自定义下拉框，视频投稿必须选择「人工智能」分区。🔴 v3.63.0/1025 实测：选择动作必须走 locator（`.drop-list-v2-item`）+ `scroll_into_view_if_needed()` + `click(force=True)`，**禁止 JS `el.click()`/泛文本匹配/`mouse.click` 坐标点击**（坑 302：视口外三种点击全静默失效）；JS evaluate 只用于步骤 0 的结构化回读验收，不用于点击选择。**
 
-**🔴 v3.29.0 / 2026-09-02 实测坑：B站上传页「分区」字段会**默认预填「人工智能」**（snapshot 里 heading「分区」下方 paragraph 直接显示「人工智能」，无「请选择分区」占位）。此时**极易误以为"已选好"而跳过**——但这只是默认值展示，**不能替代显式选择与验收**。正确做法：无论 snapshot 是否已显示「人工智能」，都执行一遍 11.4 的显式选择（点开下拉 → JS 点击「人工智能」）+ 存草稿前验收；snapshot 文字校验用**「heading 分区 相邻 paragraph」结构定位**，勿用 `document.body.innerText.includes('人工智能')`（标签/简介里出现「人工智能」会误判通过，0902 实测 body 校验假阳性）。**
+**🔴 v3.29.0 / 2026-09-02 实测坑：B站上传页「分区」字段会**默认预填「人工智能」**（snapshot 里 heading「分区」下方 paragraph 直接显示「人工智能」，无「请选择分区」占位）。此时**极易误以为"已选好"而跳过**——但这只是默认值展示，**不能替代显式选择与验收**。正确做法：无论 snapshot 是否已显示「人工智能」，都执行一遍 11.4 的显式选择（点开下拉 → **locator `.drop-list-v2-item` + scroll_into_view + force click**，v3.63.0/坑 302，**勿用 JS 点击**）+ 存草稿前验收；snapshot 文字校验用**「heading 分区 相邻 paragraph」结构定位**，勿用 `document.body.innerText.includes('人工智能')`（标签/简介里出现「人工智能」会误判通过，0902 实测 body 校验假阳性）。**
 
 ```javascript
 // 0. 🔴 v3.29.0 结构化验收（存草稿前必跑）：heading「分区」旁的 paragraph 必须是「人工智能」
@@ -2015,25 +2064,43 @@ browser_evaluate("""() => {
 ```
 
 ```javascript
-// 1. 点击打开分区下拉框（textbox 或 当前分区占位）
+// 1. 点击打开分区下拉框（真容器 = .selector-container .select-container）
 browser_click(target=eXXX)  // 分区下拉框，通常显示「请选择分区」或当前分区
 
-// 2. 用 JS 找到并点击「人工智能」选项（必须！）
+// 2. 🔴 坑 302：按 .drop-list-v2-item 精确匹配，禁止用 li,div,span,p 泛文本匹配
 browser_evaluate("""() => {
-  const options = document.querySelectorAll('li, div, span, p');
-  for (const opt of options) {
-    const t = (opt.textContent || '').trim();
-    if (t === '人工智能' && opt.offsetParent) {
-      opt.click();
-      return 'clicked 人工智能';
-    }
-  }
-  return 'not found';
+  const items = Array.from(document.querySelectorAll('.drop-list-v2-item'));
+  const hit = items.find(e => e.textContent.trim() === '人工智能');
+  if (!hit) return `not found among ${items.length} items`;
+  hit.scrollIntoView({block: 'center'});
+  const r = hit.getBoundingClientRect();
+  return JSON.stringify({x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2),
+                         inViewport: r.top >= 0 && r.bottom <= window.innerHeight});
 }""")
 
 // 3. 校验分区已选中：用步骤 0 的结构化验收（heading「分区」相邻 paragraph），
 //    禁止用 body.innerText.includes('人工智能')（0902 实测：标签/简介含该词会假阳性）
 ```
+
+**Playwright 脚本版（v3.63.0 坑 302，1025 实测）**——`mouse.click` 在视口外**静默失效**，必须走 locator：
+
+```python
+getpart = lambda: page.evaluate(
+    "() => document.querySelector('.selector-container .select-item-cont')?.textContent.trim()")
+cur = getpart()
+if cur != PARTITION:                                   # PARTITION = '人工智能'
+    page.locator('.select-container').first.click()    # 开下拉
+    page.wait_for_timeout(1600)                        # 选项要渲染，别急着点
+    loc = page.locator('.drop-list-v2-item').filter(has_text=PARTITION).first
+    loc.scroll_into_view_if_needed()                   # 🔴 关键：先滚进视口
+    page.wait_for_timeout(300)
+    loc.click(force=True, timeout=6000)                # 🔴 force=True 绕过遮挡检测
+    page.wait_for_timeout(1500)
+    cur = getpart()
+assert cur == PARTITION, f'partition {cur!r} != {PARTITION!r}'   # 只认回读，不认点击回执
+```
+
+> **🔴 坑 302 实测细节（1025）**：下拉共 30 项，`人工智能` 位于 y=759 而视口高 769——**一半露在视口外**。此时 `page.mouse.click(x, y)`、`el.click()`、`dispatchEvent(new MouseEvent(...))` **三种点击全部返回成功、无异常、分区值仍是默认「音乐」**。只有 `scroll_into_view_if_needed()` + `click(force=True)` 走通。通用规则：**任何坐标点击前先确认目标 rect 完整在当前视口内**。
 
 **兜底**：若自定义下拉框无法展开，可尝试 `browser_run_code_unsafe` 触发点击分区元素后等待 500ms 再执行 JS 选选项。**分区未选对会导致投稿分类错误，必须验收。**
 
@@ -2130,6 +2197,7 @@ for (const c of chips) {
 }
 ```
 - **验收铁律**：每次增删后回读 `.label-item-v2-container` 的文本列表断言，**不能只信脚本打印的 "added"**（0921 打印 added 但列表里没进）。最终 chips 列表必须等于 publish.json 的 tags（允许少、不允许脏）。
+- **🔴 平台可能单独拒收某个标签（v3.63.0 坑，1025 实测）**：本期 `AI大模型` 原样重输两次、点推荐行同名 chip 也未入列，终态 6/7。**断言写成「记录缺了哪个，但不阻断存草稿」**——例如打印 `missing_tags: ['AI大模型']` 并把其余标签的到位率写进 review-checklist §15；**不要** `assert len(chips) == len(tags)` 让整条链停在存草稿前。标签缺失不触发平台杠杆（简介/分区/合集才是），为一个可选项白跑一遍上传不划算。同时**禁止**为了凑数点推荐行里的同名 chip——推荐行点击会追加**别的**标签（坑 240）。
 
 #### 11.8 加入合集（自定义下拉框）
 
@@ -2173,16 +2241,16 @@ page.locator('span.submit-draft').click({force: true})
 |------|------|----------|--------|
 | 视频上传 | file chooser | `browser_click(ref)` → `file_upload` | ✅ 高 |
 | 封面制作 | **全屏弹窗** | 点「添加封面」→ 弹窗内点「上传封面」→ **按 `accept` 取 image input** `set_input_files` → `.cover-editor-button .button.submit`（「完成」）；**禁 `expect_file_chooser`、禁按索引取 input**（坑 218） | ✅ 高（v3.38.0） |
-| 分区「人工智能」 | **自定义下拉框** | 点击展开 → **JS evaluate 点击「人工智能」**（v3.17 新增，见 11.4）；存草稿前跑结构化验收（heading「分区」相邻 paragraph，禁 body 全文 includes） | ⚠️ 必须用 JS + 验收 |
+| 分区「人工智能」 | **自定义下拉框** | `.select-container` 点开 → `locator('.drop-list-v2-item').filter(has_text=...)` + **`scroll_into_view_if_needed()`** + `click(force=True)`（坑 302）；回读 `.selector-container .select-item-cont`；存草稿前跑结构化验收（heading「分区」相邻 paragraph，禁 body 全文 includes） | ⚠️ 必须回读 |
 | 创作声明 | **自定义下拉框** | 点击 textbox → **JS evaluate 点击选项** | ⚠️ 必须用 JS |
-| 标签 | 输入框 + chips | `type` + `Enter`；**上限 10**；先清预置推荐 chips（`×` 在 `label-item-v2-container` 右缘）再补；增删后**回读 chips 文本列表断言**（坑 219） | ⚠️ 必须断言 |
+| 标签 | 输入框 + chips | `type` + `Enter`；**上限 10**；先清预置推荐 chips（`×` 在 `label-item-v2-container` 右缘）再补；增删后**回读 chips 文本列表断言**（坑 219）；**单个标签被平台拒收时记录缺失、不阻断存草稿**（坑 302 同批，1025 实测 6/7） | ⚠️ 必须断言 |
 | 简介 | **Quill 编辑器** | **JS 注入 `.ql-editor`** | ⚠️ 必须用 JS |
 | 合集 | **自定义下拉框** | 点击展开 → **JS evaluate 点击选项** | ⚠️ 必须用 JS |
 | 投稿按钮 | 按钮 | `browser_click(ref)` | ✅ 高 |
 
 **关键经验**：
 1. **`browser_click(target=ref编号)` 比 `browser_click(element=文本描述)` 更可靠**
-2. **所有自定义下拉框（分区、创作声明、合集）必须用 `browser_evaluate` + JS 点击**
+2. **所有自定义下拉框（分区、创作声明、合集）必须走真实 DOM 点击，且点前先滚进视口**——分区用 `.drop-list-v2-item` 专属选择器 + `scroll_into_view_if_needed()` + `click(force=True)`（坑 302：视口外的 `mouse.click`/`el.click()`/`dispatchEvent` 三种全静默失效）；创作声明、合集仍用 JS evaluate 取 rect 后坐标点击。**任何点击后都必须回读具体状态字段**，不能只信回执。
 3. **Quill 编辑器必须用 JS 注入 `innerHTML` + dispatch `input` 事件**
 4. **`browser_file_upload` 必须在 file chooser 对话框打开后才能调用**（🔴 v3.38.0：**B站封面已不走原生 chooser**，本条只剩视频输入适用）
 5. **🔴 封面上传（v3.38.0 改版）：点「添加封面」→ 打开「封面制作」全屏弹窗 → 弹窗内点「上传封面」→ 按 `accept` 取 image input `set_files` → 点「完成」关弹窗**。顺序不可换（先点完成只关空弹窗）；**禁 `expect_file_chooser`（必超时）、禁按索引取 input（会喂给 .mp4/.zip 且静默无报错）**。详见 11.3 与 `templates/bili_cover.py`
@@ -3246,8 +3314,8 @@ browser_run_code_unsafe("""async (page) => {
 | 组件 | 定位与操作 |
 |------|-----------|
 | 视频上传 | `wujie-app input[type=file]`（`.ant-upload` 内）——**setInputFiles 直传 file input**，无需点「上传」按钮（filechooser 监听在 shadow 内不触发） |
-| 合集 | 点 `.post-album-display` 展开 → `.post-album-wrap .option-item`，**真实鼠标坐标点击**（JS `.click()` 对这层 Vue 组件无效，v3.61.0 坑 293） |
-| 视频标注（AI 声明） | `.mark-tag-select` → 点 `.select-display` 展开 → 坐标点 **`Contains AI-generated content`**（选项全英文，无中文「AI生成」控件，v3.61.0 坑 292） |
+| 合集 | 点 `.post-album-display` 展开 → `.post-album-wrap .option-item`，**真实鼠标坐标点击**（JS `.click()` 对这层 Vue 组件无效，v3.61.0 坑 293）；选项文案是「共N个**内容**」（1025 实测 `今日羊报Al 共134个内容`），**匹配正则要同时容「内容」和「作品」** |
+| 视频标注（AI 声明） | `.mark-tag-select` → **先 `scrollIntoView({block:'center'})` 再重取 rect** → 点 `.select-display` 展开 → **断言 `.mark-tag-options` 的 `display === 'block'`** → 坐标点 **`Contains AI-generated content`**（选项全英文，无中文「AI生成」控件，v3.61.0 坑 292；视口外静默失效见 v3.63.0 坑 303） |
 | 封面上传 | `.single-cover-uploader-wrap input[type=file]`（Playwright CSS 可穿 open shadow，locator 直接 setInputFiles） |
 | 描述 | `.input-editor`（contenteditable）——evaluate 内 `shadowRoot.querySelector` → dispatchEvent mousedown/click → focus → `page.keyboard.type` |
 | 短标题 | `input[placeholder*="短标题"]`（**Vue 受控 input**，不是 contenteditable）——原生 setter 清空 + focus + `page.keyboard.type` |
@@ -3364,13 +3432,48 @@ browser_wait_for(time=15)
 
 #### 13.5 选择合集
 
-按 13.1 shadow 协议：点 `.post-album-display` 展开 → 等 `.post-album-wrap .option-item` 渲染 → 取目标项 `getBoundingClientRect` 中心 `page.mouse.click(x,y)`。**JS `el.click()` 对这层 Vue 组件不生效（返回成功但 display 文案不变，v3.61.0 坑 293）**。选项文案形如「今日羊报Al」+「共N个作品」；**注意小写 `l` 不是大写 `I`**。回读以 `.post-album-display` 文本为准。仅旧 iframe 结构时才用坐标估算兜底。
+按 13.1 shadow 协议：点 `.post-album-display` 展开 → 等 `.post-album-wrap .option-item` 渲染 → 取目标项 `getBoundingClientRect` 中心 `page.mouse.click(x,y)`。**JS `el.click()` 对这层 Vue 组件不生效（返回成功但 display 文案不变，v3.61.0 坑 293）**。选项文案形如「今日羊报Al」+「共N个内容」（1023 是「作品」，1025 实测是「内容」，**正则两者都容**）；**注意小写 `l` 不是大写 `I`**。回读以 `.post-album-display` 文本为准。仅旧 iframe 结构时才用坐标估算兜底。
+
+> **🔴 点选项前同样要确认 rect 在视口内（坑 303 同根）**：展开下拉后先读每个 option 的 `getBoundingClientRect().top`，超出 `window.innerHeight` 的要先 `scrollIntoView({block:'center'})` 再重取坐标——否则 `mouse.click` 静默失效。
 
 #### 13.5b 视频标注（AI 合成内容声明，v3.61.0 / 2026-10-23 实测，坑 292）
 
 **🔴 控件名叫「视频标注」，不是中文「AI生成」勾选框。** wujie shadowRoot 里根本不存在 `/AI生成|人工智能生成/` 的 checkbox，任何按中文关键词匹配或遍历 `input[type=checkbox]` 的写法恒返回 `absent`。
 
 **真实 DOM 链路**：`.mark-tag-select` 容器 → 点其内 `.select-display` 展开 → `.mark-tag-options` 下选项列表 → **真实鼠标坐标点击**目标项（同 13.5 的 Vue 组件限制）。
+
+**🔴 但点之前必须先把它滚进视口（v3.63.0 坑 303，1025 实测）**：`.mark-tag-select` 初始 `rect.y = 1208`，而视口只有 769 高。此时 `page.mouse.click(941, 1231)` **返回成功、无任何异常**，但 `.mark-tag-options` 仍是 `display:none`、选项查询返回 `[]`——现象酷似「下拉里根本没有 AI 选项」，极易误判成控件又改版了而去乱改选择器。
+
+```python
+# 正确顺序：滚 → 重取 rect → 点击 → 断言 display → 再查选项
+box = page.evaluate("""() => {
+  const sr = document.querySelector('wujie-app').shadowRoot;
+  const s = sr.querySelector('.mark-tag-select');
+  if (!s) return null;
+  s.scrollIntoView({block: 'center'});          // 🔴 关键，y 由 1208 → 468
+  const d = s.querySelector('.select-display');
+  const r = d.getBoundingClientRect();
+  return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)};
+}""")
+page.wait_for_timeout(500)                       # 等滚动落定，否则坐标是旧的
+page.mouse.click(box['x'], box['y'])
+page.wait_for_timeout(1400)
+shown = page.evaluate("""() => {
+  const sr = document.querySelector('wujie-app').shadowRoot;
+  const o = sr.querySelector('.mark-tag-options');
+  return o ? getComputedStyle(o).display : 'absent';
+}""")
+assert shown == 'block', f'dropdown not expanded (display={shown})'   # 🔴 先断言再查选项
+opts = page.evaluate("""() => Array.from(
+  document.querySelector('wujie-app').shadowRoot.querySelectorAll('.mark-tag-option .option-main'))
+  .filter(e => e.offsetParent)
+  .map(e => { const r = e.getBoundingClientRect();
+              return {t: e.innerText.trim(), x: Math.round(r.x+r.width/2), y: Math.round(r.y+r.height/2)}; })""")
+target = next(o for o in opts if 'AI-generated' in o['t'])
+page.mouse.click(target['x'], target['y'])
+```
+
+> **诊断口诀**：下拉「看起来没有选项」时，**先查 `display` 是不是 `none`，再查 rect 是不是在视口外**——这两者都表现为「选项数组为空」，但根因与修法完全不同。
 
 **选项文案全英文**（照抄，别猜）：
 
@@ -3391,6 +3494,10 @@ browser_wait_for(time=15)
 **🔴 `hasWujie=true`（当前默认）**：按 13.1 字段表操作——`.single-cover-uploader-wrap input[type=file]` `setInputFiles` → 弹窗 `button.weui-desktop-btn_primary`「确认」。短标题走 13.4 Vue input，**不是** `.edit-shorttitle-content`。
 
 **🔴 封面对话框（`.vertical-img-wrap .edit-btn` → 标题「编辑个人主页卡片」→ 取消/确认）的上传必须用 Playwright locator，不能取 ElementHandle（v3.61.0 坑 294）**：`page.evaluate_handle(...).as_element().set_input_files(path)` 必抛 `Cannot set input files to detached element`（shadow 内节点在取句柄到设文件之间被重渲染）；改用 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(path)`（locator 每次动作前重新解析）。确认按钮 JS 常从错误 wrapper 查 `.weui-desktop-btn_primary` 得空 → 取可见 `.weui-desktop-dialog__wrp` 内「确认」的 rect 做坐标点击。弹窗有开关状态机（坑 280）：每次操作前先 Esc 清残留再重开。
+
+**🔴 两条验收补充（v3.63.0 / 1025 实测）**：
+1. **「弹窗是否关闭」不能用「容器还在不在」判**。`edit-cover-dialog-container` 关闭后**仍留在 DOM 里**，只是 `rect` 变成 0×0——`container exists` / `offsetParent !== null` 都会给出「还开着」的**假阳性**（1025 一度以为封面没生效，截图一看早已换成本期海报）。判据改为 `rect.width > 0 && rect.height > 0`，或干脆**回读槽位实图**：`img.naturalWidth/naturalHeight === 1152/1536`。
+2. **喂图后必须等预览图长到目标尺寸比例再点「确认」**。`set_input_files` 是异步上传，立刻点确认可能确认的是**旧图**。轮询槽位 `img.naturalWidth/naturalHeight` 达到 `1152×1536`（±2px）后再点。
 
 **封面尺寸**：
 - 个人主页卡片：3:4（1152×1536）→ `vertical-3-4.png`
@@ -3506,6 +3613,35 @@ news-pipeline/
 
 ## 已知坑与经验教训
 
+### 🔴 生图 size 派生污染 + 视口外静默点击：四个「不报错但就是不对」（v3.63.0 / 2026-10-25 实测，坑 300-303）
+
+**问题**：1025 期四类故障，共同点是**全都没有抛异常**——生图端点回的是业务错误、B站分区值没变、视频号下拉显示「没有选项」、封面弹窗显示「还开着」。
+
+**根因**（四个独立坑，后两个同根）：
+- **坑 300 派生脚本的日期替换吃掉尺寸字面量**：`derive()` 里 `'1024' → '1025'` 是全串替换，把生图脚本硬编码的 `size: '1536x1024'` 改成 `'1536x1025'`，rainflow 回「不支持的图片比例」。**排查指纹：网关说比例不支持，但比例肉眼看着没问题 → 先 grep 尺寸字面量有没有被日期吃掉。**
+- **坑 301 `size:'auto'` 返回方图**：rainflow 只接受 `auto`（不收任何显式比例），而 `auto` 在**没有构图提示**时给方形 1254×1254；塞进 1920×1080 会被裁掉两侧。`size` 本身不能表达画幅，画幅只能写进 prompt。
+- **坑 302 B站分区在视口外，三种点击全部静默失败**：真选择器是 `.drop-list-v2-item`（30 项），`人工智能` 排在 y=759 而视口高 769——`page.mouse.click()` / `el.click()` / `dispatchEvent(new MouseEvent)` 三种都**返回成功、无异常、值不变**，分区停在默认「音乐」。
+- **坑 303 视频号 AI 标注同根**：`.mark-tag-select` 初始 rect.y=1208，`mouse.click(941,1231)` 回执成功但 `.mark-tag-options` 仍 `display:none`，选项查询返回 `[]`，**看起来像「下拉里根本没有 AI 选项」**，极易误判成控件改版而去改选择器。
+- **坑 304 端点身份按后缀判会静默判错**：本期复盘时发现 `settings.json` 实际是 `GEN_IMG_API_URL`=rainflow、`_000`=prism.uno、`_001/_002`=elysiver，而 `To_Learn.md` 的备忘写的是 `_003`=rainflow、本体=prism.uno——**同一期的两份记录编号完全不同**。按 `suf == ''` 或 `_003` 判「是不是 rainflow」会随用户改编号而静默判错（size 传错 → 「不支持的图片比例」）；按 `"rainflow" in api_url` 判永远跟得上。
+- **坑 305 终态验收判据没做空白归一化，证据与结论自相矛盾**：`final_verify` 把证据 `draftSec` 归一化后打印（`t.slice(..).replace(/\s+/g,' ')`），却用**未归一化**的 `t` 跑判据 `/Kimi K3\.1/`——打印出的证据明明含 `【2026-10-25】Kimi K3.1 Pro …` 而 `draftHasToday: false`。打印片段是 `t` 前缀的 collapse 版，它命中而原文不命中 ⇒ 该跨度内必含 `\s` 类字符（卡片把 `Kimi` 与 `K3.1` 折断）。**证据与结论矛盾本身就是这个坑的指纹**，见到就该查判据用的是不是另一份文本。
+
+**解决**：
+1. **生图 size 绝不硬编码**：写 `size_for(api_url)`——rainflow 返回 `"auto"`，其余端点返回 `"1536x1024"`；任何写进请求体的 size 都必须是函数算出来的，不允许裸字面量（Phase 5 已内联该函数）。
+2. **画幅靠 prompt**：每条 scene prompt 末尾固定追加 `Wide 16:9 horizontal cinematic composition, full-frame landscape framing.`；出图后 `PIL` 断言 `w/h >= 1.6`，方图判失败重出（Phase 4 / Phase 5 / Phase 8 Step 8.0b 三处已立门禁）。
+3. **B站分区**：`locator('.drop-list-v2-item').filter(has_text=PARTITION).first.scroll_into_view_if_needed()` → `click(force=True)`；回读用 `.selector-container .select-item-cont` 的 `textContent`。
+4. **视频号 AI 标注**：`s.scrollIntoView({block:'center'})` → **重取** `getBoundingClientRect`（y 由 1208 变 468）→ `mouse.click` → **先断言 `getComputedStyle(.mark-tag-options).display === 'block'`** 再查 `.mark-tag-option .option-main`。
+5. **通用规则（本坑最重要的沉淀）**：**任何 `mouse.click(x, y)` 之前，必须先确认目标 rect 完整落在当前视口内**——`scrollIntoView` 后重取 rect 再用。视口外的坐标点击不报错、不生效，是最难定位的一类失败。同理，**点击后必须断言状态真的变了**（display / textContent / value），不能只信点击回执。
+
+**同批小坑**：
+- 视频号 `edit-cover-dialog-container` 关闭后仍留在 DOM 且 rect 为 0×0——「容器存在 / `offsetParent` 非 null」判「弹窗没关」是**假阳性**；改判 `rect.width>0 && rect.height>0`，或直接回读槽位 `img.naturalWidth/naturalHeight`。
+- 视频号封面喂图后必须**等预览图达到目标尺寸 1152×1536** 再点「确认」，否则可能确认了旧图。
+- B站标签可能被平台**单独拒收**（本期 `AI大模型` 未入 chips，终态 6/7）——断言写成「记录缺失但不阻塞」，不要 `assert len(tags)==7`。
+- 视频号合集选项文案本期是「共N个**内容**」而非「共N个作品」（`今日羊报Al 共134个内容`），匹配正则要两者都容。
+- **终态验收的空白归一化（坑 305）**：`innerText` 里卡片标题会换行，`【2026-10-25】Kimi\nK3.1 Pro …` 直接跑 `/Kimi K3\.1/` 必不匹配。**判据和证据必须用同一份归一化文本**：先 `const t = raw.replace(/\s+/g,' ')`，再拿 `t` 既做判据又做打印。见到「打印的证据明明命中、结论却是 false」先查这个。
+
+**Why:** 四个坑的失败模式一致——**接口回执成功 ≠ 状态生效**。日期替换污染 size 是把「参数」当「文本」改；视口外点击是把「事件派发」当「用户点击」；`display:none` 的下拉是把「没展开」当「没这个选项」；未归一化的判据是把「换行」当「不存在」。
+**How to apply:** 生图参数一律运行时计算并回验出图比例；所有坐标点击前 `scrollIntoView` + 重取 rect + 点击后断言具体状态字段；派生脚本做日期替换后，**grep 一遍所有被替换位置**确认没有误伤数字字面量；页面文本判据统一 `replace(/\s+/g,' ')` 后再匹配，且**证据与判据同源**。
+
 ### 🔴 字幕跨场景互换：play_order 重排后的「块重分配」（v3.62.0 / 2026-10-24 实测，坑 298-299）
 
 **问题**：1024 期用户两次反馈「1:25 后字幕和音频对不上」，第一次修复重渲后用户仍说「1:34 还是对不上」。
@@ -3539,12 +3675,12 @@ news-pipeline/
 - **坑 297 抖音合集匹配命中下拉容器**：`/^「?今日羊报/` + `/共\s*\d+\s*个作品/` 同时匹配容器节点，其 `textContent` 是把所有选项拼起来的整串（`请选择合集不选择合集「虢礫緙嘞」共4个作品「羊报AI月报」…`），点容器 = 没选。
 
 **解决**：
-1. **视频号 AI 标注**：点 `.mark-tag-select` 的 `.select-display` 展开 → 按 bounding box 真实坐标点 `Contains AI-generated content` → 回读 `.select-display` 文本断言。**不要找中文「AI生成」**，那是旧版控件。
+1. **视频号 AI 标注**：**先 `scrollIntoView({block:'center'})` 并重取 rect**（坑 303：初始 y=1208 在视口外，不滚则点击静默失效）→ 点 `.mark-tag-select` 的 `.select-display` 展开 → **断言 `.mark-tag-options` 的 `display === 'block'`** → 按 bounding box 真实坐标点 `Contains AI-generated content` → 回读 `.select-display` 文本断言。**不要找中文「AI生成」**，那是旧版控件。
 2. **视频号合集**：点 `.post-album-display` → 等 `.post-album-wrap .option-item` 渲染 → 取目标项 `getBoundingClientRect` 中心 `page.mouse.click(x,y)`（**JS `.click()` 无效**）→ 回读 display 文本为 `今日羊报Al`（注意是**小写 l**，不是大写 I）。
 3. **wujie 内文件上传**：一律 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(path)`；**禁用 `evaluate_handle().as_element()`**。弹窗确认按钮同理走坐标点击（先取可见 `.weui-desktop-dialog__wrp` 内 `确认` 的 rect，再 `mouse.click`）。
 4. **抖音端到端一次跑完**：`upload → meta → 双封面 → 合集 → 暂存#1 → 同标签「继续编辑」回读 → 暂存#2 → 终态确认`。核验**绝不新开标签点横幅**；外部标签只准读 `body.innerText` 里的横幅文本。参考 `news-pipeline/2026-10-23/scripts/douyin_finish_1023.py`。
 5. **抖音双封面**：横槽 `.coverControl-CjlzqC[0]` 直接传 1536×1152；竖槽 `[1]` 先 `hover()` 再点浮现的「编辑封面」（**不要**点 disabled 的「设置竖封面」），弹窗内用 `.selectArea-BCIYQD input[type=file]` 传 1152×1536；验收用 `img.naturalWidth/naturalHeight` 读槽位实图，**不用文本 grep**。
-6. **抖音合集**：候选约束 `^「?今日羊报` + `共\s*\d+\s*个作品` + `textContent.length ≤ 40` + `rect.height ∈ [10,90]`，排序取**面积最小**节点点击；回读「添加合集」段确认目标合集名与「共N个作品」。
+6. **抖音合集**：候选约束 `^「?今日羊报` + `共\s*\d+\s*个(作品|内容)` + `textContent.length ≤ 40` + `rect.height ∈ [10,90]`，排序取**面积最小**节点点击；回读「添加合集」段确认目标合集名与「共N个作品 / 共N个内容」（**两种文案都存在，正则必须都容**：1023 抖音 `「今日羊报Al」共132个作品`，1025 视频号 `今日羊报Al 共134个内容`）。
 7. 视频号封面确认后必须回读 3:4 槽位图；「编辑个人主页卡片」弹窗每次操作前先 Esc 清残留再重开（坑 280 状态机纪律在 1023 仍适用）。
 
 ### 🔴 四平台上传链四坑：登录探针隔离 context / wujie 空壳重挂 / 抖音暂存被吞 / B站视频 input（v3.60.0 / 2026-10-22 实测，坑 288-291）
@@ -4345,60 +4481,52 @@ browser_run_code_unsafe("""async (page) => {
 # 步骤4：打开竖封面编辑器
 browser_run_code_unsafe("""async (page) => {
   await page.waitForTimeout(800);
-  const btn = page.getByRole('button', { name: '设置竖封面' });
-  if (await btn.count() && await btn.first().isVisible().catch(() => false)) {
-    await btn.first().click();
-    return 'clicked 设置竖封面 popup';
-  }
-  // 草稿页：标签「竖封面3:4」上方封面框
-  const r = await page.evaluate(() => {
+  // 🔴 坑 296：不要先试 getByRole('设置竖封面')——它常是 disabled 提示位，click() 必超时。
+  //    直接走真入口：竖槽位 [1] 悬停 → 「编辑封面」叶子（坐标点击）。
+  const slot = await page.evaluate(() => {
+    const cs = Array.from(document.querySelectorAll('.coverControl-CjlzqC')).filter(e => e.offsetParent);
+    if (cs.length < 2) return null;
+    const v = cs[1];                       // [0]=横 4:3, [1]=竖 3:4
+    v.scrollIntoView({block: 'center'});
+    const r = v.getBoundingClientRect();
+    return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2), n: cs.length};
+  });
+  if (!slot) return 'vertical slot missing';
+  await page.mouse.move(slot.x, slot.y);
+  await page.waitForTimeout(900);
+  const hit = await page.evaluate(() => {
     for (const el of document.querySelectorAll('*')) {
-      if ((el.textContent || '').trim() === '竖封面3:4' && el.offsetParent) {
-        const rect = el.getBoundingClientRect();
-        return { x: rect.x + 40, y: Math.max(rect.y - 70, 120), labelY: rect.y };
-      }
+      if ((el.textContent||'').trim() !== '编辑封面' || !el.offsetParent || el.children.length > 1) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 20 || r.height < 8) continue;
+      return {x: Math.round(r.x+r.width/2), y: Math.round(r.y+r.height/2)};
     }
     return null;
   });
-  if (!r) return 'vertical label not found';
-  await page.mouse.click(r.x, r.y);
-  await page.waitForTimeout(400);
-  await page.mouse.click(r.x, r.y + 25);
-  // 同卡「选择封面」再兜底一次
-  await page.evaluate(() => {
-    for (const el of document.querySelectorAll('*')) {
-      if ((el.textContent || '').trim() === '竖封面3:4' && el.offsetParent) {
-        let p = el.parentElement;
-        for (let i = 0; i < 6 && p; i++, p = p.parentElement) {
-          const sel = Array.from(p.querySelectorAll('*'))
-            .find(n => (n.textContent || '').trim() === '选择封面');
-          if (sel) { sel.click(); return; }
-        }
-      }
-    }
-  });
-  return 'opened vertical near ' + JSON.stringify(r);
+  await page.mouse.click(hit ? hit.x : slot.x, hit ? hit.y : slot.y);
+  return 'vertical editor opened via hover';
 }""")
 
-# 步骤5：竖封面上传（必须确认打开了「设置竖封面」或出现「上传封面」）
+# 步骤5：竖封面上传（弹窗内只认 .selectArea-BCIYQD input[type=file]，坑 296）
 browser_run_code_unsafe("""async (page) => {
   const path = 'news-pipeline/YYYY-MM-DD/vertical-3-4.png';
   const open = await page.evaluate(() =>
     document.body.innerText.includes('设置竖封面')
     || document.body.innerText.includes('上传封面'));
   if (!open) return 'editor not open — re-click vertical box';
+  // 🔴 坑 296：弹窗内 6 个 file input，只有 .selectArea-BCIYQD 内那个是封面槽。
+  //    按索引取（inputs[last]）会喂给模板/贴纸选择器 —— 静默无报错、封面不变。
+  const cover = page.locator('.selectArea-BCIYQD input[type=file]').first();
   try {
-    const [chooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 6000 }),
-      page.locator('text=上传封面').first().click({ force: true })
-    ]);
-    await chooser.setFiles(path);
-    return 'v chooser ok';
+    await cover.waitFor({ state: 'attached', timeout: 8000 });
+    await cover.setInputFiles(path);
+    return 'v setInput via selectArea';
   } catch (e) {
+    // 兜底：按 accept 过滤（禁止索引）
     const inputs = await page.$$('input[type="file"]');
-    if (inputs.length) {
-      await inputs[inputs.length - 1].setInputFiles(path);
-      return 'v setInput ok';
+    for (const i of inputs) {
+      const acc = await i.getAttribute('accept') || '';
+      if (acc.includes('image')) { await i.setInputFiles(path); return 'v setInput via accept'; }
     }
     return 'v fail';
   }
@@ -4470,7 +4598,7 @@ browser_run_code_unsafe("""async (page) => {
 **🔴 关键经验（v3.5.0 / v3.6.0 实测）**：
 1. **语义定位 > 硬编码坐标**：先找「横封面4:3」/「竖封面3:4」再点同卡「选择封面」  
 2. **「上传封面」必须 `force: true`**，否则 SVG 拦截  
-3. **草稿页没有「设置竖封面」弹窗是常态**；用标签 `getBoundingClientRect` 点 **y = label.y - 70**  
+3. **草稿页没有「设置竖封面」弹窗是常态**；真入口永远走 `.coverControl-CjlzqC[1]` 悬停 → 「编辑封面」（坑 296），不要靠标签坐标推算
 4. **完成 ≠ getByRole('button')**：用 `locator('text=完成').last()` 或 evaluate 点底部主按钮  
 5. **setFiles 后必须等 1.5–3s** 再点完成，否则封面未写入状态  
 6. **验收三件套**：无「竖封面缺失」+ 无「双封面缺失」+ 无「设置竖封面」弹窗 → 再「暂存离开」  
@@ -4505,7 +4633,7 @@ browser_run_code_unsafe("""async (page) => {
 browser_snapshot(depth=5)
 # 🔴 合集名大小写陷阱（v3.22.0 / 2026-08-28 实测）：抖音合集名可能与 B站/公众号不同
 # 实测「「今日羊报Al」」是小写 L（非大写 I）+ 「共80个作品」——勿硬编码精确合集名
-# 修复：探测下拉框可见文本，匹配「今日羊报」前缀（不分大小写）+ 「共N个作品」的选项点击；snapshot 验收按前缀模糊匹配
+# 修复：探测下拉框可见文本，匹配「今日羊报」前缀（不分大小写）+ 「共N个作品/共N个内容」的选项点击；snapshot 验收按前缀模糊匹配
 browser_click(target={ref编号})
 ```
 
@@ -4521,7 +4649,7 @@ const picked = page.evaluate(() => {
     const t = (o.textContent || '').trim();
     if (!o.offsetParent) continue;
     if (!/^「?今日羊报/.test(t)) continue;
-    if (!/共\s*\d+\s*个作品/.test(t)) continue;
+    if (!/共\s*\d+\s*个(?:作品|内容)/.test(t)) continue;   // 1025 实测文案是「共N个内容」
     if (t.length > 40) continue;                    // ① 排除整块容器
     const r = o.getBoundingClientRect();
     if (r.height < 10 || r.height > 90) continue;   // ② 排除 0 高/超大节点
@@ -4534,7 +4662,7 @@ const picked = page.evaluate(() => {
 });
 ```
 
-回读「添加合集」段确认目标合集名 + 「共N个作品」（1023 命中 `「今日羊报Al」共132个作品`）。
+回读「添加合集」段确认目标合集名 + 「共N个作品 / 共N个内容」（1023 命中 `「今日羊报Al」共132个作品`，1025 命中 `今日羊报Al 共134个内容`——**两种文案都存在，正则必须都容**）。
 
 #### 14.8 设置自主声明
 
@@ -5026,6 +5154,8 @@ ls -la news-pipeline/YYYY-MM-DD/*.png | wc -l
 
 ## 注意事项
 
+- **🔴 点击类操作通用铁律（v3.63.0，坑 302/303 共同根因）**：**任何 `mouse.click(x, y)` 之前必须先确认目标 rect 完整落在当前视口内**——取 rect → 若 `top<0 || bottom>innerHeight` 先 `scrollIntoView({block:'center'})` → **等 300–500ms 让滚动落定** → **重取 rect** → 再点。视口外的坐标点击**不报错、不生效**，是最难定位的一类失败。同理：**点击后必须回读具体状态字段**（`display` / `textContent` / `value` / `img.naturalWidth`），不能只信点击回执。
+- **🔴 页面文本判据必须先归一化空白（v3.63.0 坑 305，1025 实测）**：`innerText` 按渲染折行输出，卡片标题常被拆成 `【2026-10-25】Kimi\nK3.1 Pro …`。拿原始 `t` 跑 `/Kimi K3\.1/` 必假阴性，拿 `t.replace(/\s+/g,' ')` 才命中。**铁律：判据和证据必须用同一份归一化文本**——先算一次 `const t = raw.replace(/\s+/g,' ')`，判据和打印都只用 `t`。**「打印的证据明明含目标串、结论却是 false」就是这个坑的指纹**，见到不要怀疑平台，改判据。
 - **权限预授权是第一步**，覆盖内容生成 + 全部平台上传，一次确认后全程不再询问
 - 每个 Phase 完成后向用户展示中间结果，确认后继续
 - 图片生成失败时自动重试一次
@@ -5531,7 +5661,7 @@ await inputs[1].setInputFiles('horizontal-4-3.png');   // ⛔ v3.38.0 起禁用
 
 ### 🔴 抖音合集名大小写陷阱（v3.22.0 / 2026-08-28）
 **问题**：硬搜「今日羊报AI」返回 not found——实测抖音合集名是「「今日羊报Al」」（小写 L，非大写 I）+ 「共80个作品」，与 B站/公众号不同。
-**解决**：探测下拉框可见文本，按「今日羊报」前缀（不分大小写）+ 「共N个作品」模糊匹配选项点击；勿硬编码精确合集名；snapshot 验收按前缀模糊匹配。
+**解决**：探测下拉框可见文本，按「今日羊报」前缀（不分大小写）+ 「共N个作品 / 共N个内容」模糊匹配选项点击（**两种文案都存在**，1025 抖音仍是「作品」、视频号已是「内容」）；勿硬编码精确合集名；snapshot 验收按前缀模糊匹配。
 **Why:** 0828 实测硬编码精确名 not found，合集选择卡住。
 **How to apply:** Phase 14.7
 
@@ -5900,7 +6030,7 @@ r = page.evaluate('''() => {
 
 ### 🔴 场景图默认走接口，本地 PIL 抽象图只是兜底（v3.43.0 / 2026-10-09 实测，坑 237）
 **问题**：1009 场景图直接用 `gen_scenes_local.py`（Pillow 抽象色块）渲染进片，用户指出「视频图片是本地生成的」并要求改接口重渲。Phase 5.6 的本地化是**兜底**，被当成了默认路径。
-**解决**：场景图默认走 Phase 5 的 `gpt-image-2`（`GEN_IMG_API_URL`/`GEN_IMG_API_KEY`，size `1536x1024`，prompt 显式 `no text, no letters, no logos, no watermarks, no faces`），提示词落盘 `prompts/image-prompts.json`，原图保留 `images/sceneN_api.png`，转 1920×1080 JPEG 再进 Remotion。本地 PIL **只在接口全挂时**启用，且必须在汇报里标明「场景图为本地兜底」。**封面不在此列**：中文日期/品牌名的像素级准确仍走本地 PIL（坑 225），不重试接口。
+**解决**：场景图默认走 Phase 5 的 `gpt-image-2`（`GEN_IMG_API_URL`/`GEN_IMG_API_KEY`，size 由 `size_for(api_url)` 运行时决定——rainflow 传 `auto`、其余传 `1536x1024`，坑 300/304；prompt 显式 `no text, no letters, no logos, no watermarks, no faces` + 结尾 16:9 构图句），提示词落盘 `prompts/image-prompts.json`，原图保留 `images/sceneN_api.png`，转 1920×1080 JPEG 再进 Remotion。本地 PIL **只在接口全挂时**启用，且必须在汇报里标明「场景图为本地兜底」。**封面不在此列**：中文日期/品牌名的像素级准确仍走本地 PIL（坑 225），不重试接口。
 **Why:** 抽象色块没有新闻信息量；用户要的是能看懂场景的画面。封面文字准确性与场景图表现力是两个不同的约束，不能用同一条「API 不可靠」一刀切。
 **How to apply:** Phase 5 / 5.6；审核清单第 6 节记场景图来源（接口 / 本地兜底）。
 
@@ -5992,6 +6122,26 @@ st = page.evaluate('''() => {
 
 ## 更新日志
 
+### v3.64.0（2026-10-25 开工前自检，两处「证据对、结论错」的判据坑 304-305）
+
+基于 **2026-10-25 日报产物复核**（非流程事故，是两条判据逻辑本身的缺陷；当期四平台草稿全部正常）实测，吸收坑 304-305：
+
+**坑 304：端点身份按 `_000/_001` 后缀判会静默判错**
+- 1025 实测 `settings.json` 的 env：`GEN_IMG_API_URL` = `chatgpt.rainflow.foo/studio/v1`（rainflow，25 张额度，先用）、`_000` = `ai.prism.uno`、`_001`/`_002` = `elysiver.h-e.top`（grok-imagine 兜底）
+- 同期 `To_Learn.md` 的备忘写的是 `_003` = rainflow、本体 = prism.uno——**同一期的两份记录编号完全相反**
+- 因此 `size = 'auto' if suf == '' else '1536x1024'` 这类**按下标判身份**的写法不可靠：用户改一次编号，size 就传错，网关回「不支持的图片比例」，症状与坑 300（日期替换污染尺寸）**一模一样**，极易误诊
+- 修法：**按 URL 域名子串判**（`"rainflow" in api_url` → `auto`，其余 → `1536x1024`）；fallback 优先级也按域名排（rainflow → prism.uno → elysiver），不看下标；开工前先 `python3 -c` 打印 `{后缀: 域名}` 一览（key 只打 len）核对再写脚本
+
+**坑 305：终态验收的判据没做空白归一化，证据与结论自相矛盾**
+- `/tmp/final_verify_safety.py` 里：证据 `draftSec` 走 `t.slice(di, di+200).replace(/\s+/g,' ')`（归一化后打印），判据 `draftHasToday` 却是 `/Kimi K3\.1/.test(t)`（**未归一化的原文**）
+- 首页卡片把标题折行成 `【2026-10-25】Kimi\nK3.1 Pro 参数堆到 2.8T…`，`Kimi` 与 `K3.1` 之间是 `\s`，`/Kimi K3\.1/` 要求普通空格 → **不匹配** → `draftHasToday: false`
+- 于是同一条日志里出现自相矛盾：打印的 `draftSec` 明明含 `【2026-10-25】Kimi K3.1 Pro …`，结论却是「当日无草稿」——**草稿实际完好**（`appmsgid` 编辑页、`近期草稿` 首条、`更新于 00:49` 三处均可交叉验证）
+- 修法：**判据和证据必须用同一份归一化文本**——先 `const t = raw.replace(/\s+/g,' ')`，判据和打印都只用 `t`；同类判据（`hasTodayTitle` / `hasTodayShort` / `hasToday`）一并检查
+- **诊断指纹：打印的证据命中目标串、结论却是 false** → 先查判据读的是不是另一份文本，不要怀疑平台或去重跑上传
+
+**Why:** 两条坑都属「逻辑正确但判据错位」——304 是把「编号」当「身份」，305 是把「原文」当「归一化文本」。它们的共同危害是**给出一个看似专业、实则反证的结论**，比直接报错更难识别。
+**How to apply:** 端点身份一律按域名子串判，不按下标；页面文本判据先归一化空白，且判据与打印共用同一个变量；验收日志里出现「证据与结论矛盾」时，先停下来查判据，不要按结论去重跑。
+
 ### v3.63.0（2026-10-25 日报实测，生图 size 派生污染与两处视口外静默点击四坑 300-303）
 
 基于 **2026-10-25 日报全流程**（日报 370 帖/386 抓取；成片 163.392s / 4900 帧 / 1920×1080 / 16,361,460B 锚点 0.7657；四平台全草稿）实测，吸收坑 300-303：
@@ -5999,7 +6149,7 @@ st = page.evaluate('''() => {
 **坑 300：derive 的日期替换会污染生成参数里的尺寸字面量**
 - `_derive_1025.py` 把 `'1024' → '1025'` 做全串替换，把生图脚本里硬编码的 `size: '1536x1024'` 改成了 `'1536x1025'`——rainflow 回「不支持的图片比例」，第一反应以为是网关不支持该比例，实际是**尺寸字符串被日期替换污染**
 - 排查指纹：网关报「不支持的图片比例」而你确认比例没问题 → 先 `grep -n "x[0-9]\{3,4\}"` 看尺寸字面量有没有被日期替换吃掉
-- 修法：**尺寸不做字面量硬编码，按端点算**（`size = 'auto' if suf == '' else '1536x1024'`，运行时拼 `ep['size']`）；derive 的替换对 `\d{4}` 年份形态一律用带边界的锚点，别裸替换四位数
+- 修法：**尺寸不做字面量硬编码，按端点算**（`size_for(api_url)`：`"rainflow" in url` → `'auto'`，其余 → `'1536x1024'`）；derive 的替换对 `\d{4}` 年份形态一律用带边界的锚点，别裸替换四位数。**注意别用 `suf == ''` 判端点**——那是按下标判身份，坑 304（v3.64.0）实测后缀编号会漂移
 
 **坑 301：gpt-image-2 的 `size:'auto'` 会返回方图，必须在 prompt 里写死横构图**
 - rainflow 只接受 `1024x1024` / `1024x1536` / `auto`；`auto` 实测在 prompt 无构图提示时返回 **1254×1254 方图**（比例 1.00），塞进 1920×1080 画布会被裁掉两侧
@@ -6017,11 +6167,15 @@ st = page.evaluate('''() => {
 - 修法：`s.scrollIntoView({block:'center'})` → 重取 rect（y 变 468）→ `mouse.click` → 先断言 `getComputedStyle(.mark-tag-options).display === 'block'` 再查选项
 - 与坑 302 同根：**任何 `mouse.click` 前必须确认目标 rect 在当前视口内**，否则失败是静默的
 
+**坑 304 / 305**（端点身份按下标判、验收判据未归一化）同属 1025 开工前自检暴露，详见上方 v3.64.0 段，不在此重复。
+
 **小坑备查：**
 - **视频号封面对话框 `edit-cover-dialog-container` 关闭后仍留在 DOM，rect 为 0×0**——用「容器存在 / `offsetParent` 非空」判「弹窗未关」是**假阳性**；判据改用 `rect.width > 0 && rect.height > 0`，或直接回读槽位 `img.naturalWidth/naturalHeight`
 - 封面上传后**必须等预览图出现目标尺寸再点确认**（`img.naturalWidth===1152 && nh===1536`），否则确认点在上传渲染完成前，槽位仍是原视频帧
 - B站标签可能被平台拒收单个词（本期 `AI大模型` 两次键入 + 推荐行点击均未入 chips，最终 6/7）；断言写成「缺失项记录但不阻塞」，别为凑满 7 个卡死上传
 - 1025 字幕块重分配实测复核（坑 298 修复后的正向样本）：72 条 / 六块起点 Δ 全 0ms（0 / 34219 / 69797 / 94603 / 124998 / 159045）；mp4 音频验证 lead 中位 **+0.097s**、max +0.662s、min −0.197s、离群 0（57/72 可测）
+
+### v3.62.0（2026-10-24 日报返工，字幕「跨场景错位」两坑 298-299）
 
 基于 **2026-10-24 日报**（用户两次反馈「1:25 后字幕对不上」→ 第二次「1:34 还是对不上」→ 定位为块互换并重渲）实测，吸收坑 298-299：
 
@@ -6270,6 +6424,11 @@ st = page.evaluate('''() => {
 **内嵌模板语法（坑 274）**
 - `"""docstring"""` 必须独占一行，禁止与 `import` 同行（必 SyntaxError）
 - 派生后对新脚本跑 `py_compile`，过语法再跑内容断言（坑 241 三层不变）
+
+**日期替换副作用（坑 300）**
+- `'1024' → '1025'` 这类全串日期替换会**误伤数字字面量**：1025 期把生图脚本的 `size: '1536x1024'` 改成 `'1536x1025'`，rainflow 回「不支持的图片比例」，脚本本身不报错
+- 派生后必做：`grep -n "1536x\|1024\|size"` 逐个核对被替换位置；**尺寸一律改成运行时计算**（`size_for(api_url)`：rainflow → `'auto'`，其余 → `'1536x1024'`），不留裸字面量给替换器咬
+- 同类风险字面量：分辨率（`1920x1080`）、日期形式的版本号、`10-24` 形态的区间端点——替换后都要 grep 复核
 
 **死代码同步（坑 275）**
 - `SCENES_ONLY=True` 时 COVER 云端模板不执行，但其中的封面大字/日期/水印仍须同步换成当期，否则下次翻转即错版

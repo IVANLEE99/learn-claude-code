@@ -46,6 +46,13 @@ def settle(page, tries=20):
     return ''
 
 
+def norm(t):
+    """坑 305：innerText 按渲染折行输出，卡片标题常被拆成「Kimi\nK3.1」。
+    判据和证据必须用同一份归一化文本，否则会出现
+    「打印的证据明明命中、结论却是 false」的自相矛盾。"""
+    return re.sub(r'\s+', ' ', t or '')
+
+
 def main():
     with sync_playwright() as pw:
         browser = pw.chromium.connect_over_cdp('http://localhost:9222')
@@ -70,16 +77,19 @@ def main():
         token = m.group(1)
         print('token:', token)
 
-        # --- 草稿箱（URL 直达，不点侧栏：坑 213）---
-        page.goto('https://mp.weixin.qq.com/cgi-bin/appmsg'
-                  f'?begin=0&count=12&t=media/appmsg_list&type=10&action=list_card&token={token}&lang=zh_CN',
-                  wait_until='domcontentloaded', timeout=60000)
-        page.wait_for_timeout(6000)
-        dtext = settle(page)
+        # --- 草稿箱：只认首页「近期草稿」（坑 221 两次假阴性 / 坑 267 需 reload）---
+        # 🔴 禁止再用 appmsg?type=10&action=list_card：它只展示历史图文素材（2018–2020），
+        #    不含 type=77 新草稿，空结果永远是假阴性，照它排查会触发重建、产出重复稿。
+        htext = home
+        if KEYWORD and KEYWORD not in norm(htext):
+            page.evaluate('() => location.reload()')     # 坑 267：刚存的草稿需 reload 才见
+            page.wait_for_timeout(9000)
+            htext = settle(page)
         page.screenshot(path='/tmp/wx_draftbox.png', full_page=True)
         print('[shot] /tmp/wx_draftbox.png  URL:', page.url[:140])
-        titles = re.findall(r'【[^】]*】[^\n]{0,80}', dtext)
-        print('草稿箱标题候选:', json.dumps(titles[:20], ensure_ascii=False))
+        dtext = norm(htext)
+        di = dtext.find('近期草稿')
+        print('近期草稿:', dtext[di:di + 200] if di >= 0 else '(未找到「近期草稿」区块)')
         in_draft = bool(KEYWORD and KEYWORD in dtext)
 
         # --- 发表记录（坑 212：已发表时草稿箱查不到，必须同查这里）---
@@ -87,7 +97,7 @@ def main():
                   f'?sub=list&begin=0&count=10&token={token}&lang=zh_CN',
                   wait_until='domcontentloaded', timeout=60000)
         page.wait_for_timeout(6000)
-        ptext = settle(page)
+        ptext = norm(settle(page))
         page.screenshot(path='/tmp/wx_publishlist.png', full_page=True)
         print('[shot] /tmp/wx_publishlist.png  URL:', page.url[:140])
         in_pub = bool(KEYWORD and KEYWORD in ptext)
@@ -96,16 +106,19 @@ def main():
             print('--- 判定 ---')
             print(json.dumps({
                 'date': DATE,
-                'in_draft_box': in_draft,
+                'in_recent_drafts': in_draft,
                 'in_publish_record': in_pub,
-                'verdict': ('已发表（草稿箱无条目属正常，禁止重建）' if in_pub and not in_draft
+                'verdict': ('已发表（近期草稿无条目属正常，禁止重建）' if in_pub and not in_draft
                             else '仅草稿' if in_draft and not in_pub
                             else '草稿+已发表' if in_draft and in_pub
-                            else '两处均无 — 需排查'),
+                            else '两处均无 — 查 appmsgid 编辑页直达后再定性'),
             }, ensure_ascii=False))
+            if not in_draft and not in_pub:
+                print('⚠️ 铁律：此结论不等于「草稿丢失」——先按 appmsgid 编辑页直达验证，'
+                      '不可重建（撞「appmsgid 出现即禁止重建」）')
         else:
-            print('--- 草稿箱 body (first 1200) ---')
-            print(dtext[:1200])
+            print('--- 近期草稿 (first 1200) ---')
+            print(htext[:1200])
 
         browser.close()
 

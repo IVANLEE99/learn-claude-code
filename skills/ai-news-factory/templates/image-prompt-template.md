@@ -61,11 +61,12 @@ Avoid:
 
 [新闻核心地点] with [主要人物/物体], [他们在做的关键动作]. [标志性环境细节], [时间/天气/光线]. [情绪与氛围描述]. [新闻摄影/编辑插图风格], photorealistic, highly detailed, shot on [镜头焦段] — no text, no watermark.
 
-16:9 aspect ratio
-今日羊报 AI
-AI News 
-分两行显示在右上角,充当背景
+Wide 16:9 horizontal cinematic composition, full-frame landscape framing. absolutely no text, no letters, no Chinese characters, no watermark.
 ```
+
+> **🔴 最后一行构图句是强制项（v3.63.0 坑 301）**：rainflow 端点必须传 `size:'auto'`（其余端点传 `1536x1024`；**按 URL 域名判端点，不按 `_000` 后缀判**，坑 304），而 `auto` **只靠 prompt 决定画幅**——缺这句时 gpt-image-2 返回方形 1254×1254，塞进 1920×1080 会裁掉两侧。1025 期补上后 6/6 出 1672×940/941（1.78）。只写 `16:9 aspect ratio` 不够。
+>
+> **禁止**再追加「今日羊报 AI / AI News 分两行显示在右上角充当背景」——该尾巴会诱发整段伪中文/英文烧进画面（v3.33.0 坑，scene2/scene4 报废重制）。品牌由 Remotion 标题栏叠加。
 
 
 ## 避坑指南
@@ -81,10 +82,10 @@ AI News
 
 - [ ] 主体清晰，一眼能看懂
 - [ ] 新闻核心信息点已视觉化
-- [ ] 「今日羊报 AI」品牌可见（如需要）
-- [ ] 16:9 比例，适合横屏视频
+- [ ] 结尾带 `Wide 16:9 horizontal cinematic composition, full-frame landscape framing.`（坑 301，缺则出方图）
+- [ ] 出图后 `PIL` 实测 `w/h >= 1.6`，方图判失败重出
 - [ ] 写实风格，非过度幻想
-- [ ] 无文字/水印污染画面
+- [ ] 无文字/水印污染画面（`absolutely no text, no letters, no Chinese characters, no watermark`）
 - [ ] 情绪与脚本匹配
 
 ---
