@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.64.0
+version: 3.65.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.64.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.65.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.65.0 核心改进（2026-10-25 W42 周报全程实测，raw CDP 迁移与三处「静默失效」坑 306-309）**：**`playwright.connect_over_cdp` 会整体挂起，SSE 端点却健康（坑 306）**——`curl http://127.0.0.1:9222/json/version` 正常返回、`/json` 列得出 25 个 target，但 `connect_over_cdp` 在 `ws connected` 之后**既不返回也不报错**（timeout 从 25s 加到 90s 一样），四个平台探针全部空转。**铁律：CDP 探针先看 HTTP 端点，端点健康而 playwright 挂起 → 立刻切 raw CDP，不要加大超时、不要重启 Chrome**。raw CDP 三件套（直接复用 `templates/cdp_helper.py`）：① `websockets.connect(..., proxy=None)`——不带 `proxy=None` 会走环境 SOCKS 代理，报 `python-socks is required to use a SOCKS proxy`；② `Runtime.evaluate` 的表达式**必须包进 async IIFE**（`(async () => JSON.stringify(await (async () => { return (EXPR); })()))()`），顶层裸写 `await` 报 `ReferenceError: await is not defined`，而 `JSON.stringify(await (FUNC)())` 直接返回 `undefined`——两种写法都静默给空值；③ `eval` 结果统一 `JSON.parse`，并在 `send()` 里对断线重连一次（wujie 长页面会偶发断开，报 `ConnectionClosedError: no close frame`）。**公众号正文的 `Meta+A` 会选中刚 focus 的标题而不是正文（坑 307）**——先点标题区键入标题、再点正文执行 `Meta+A` 替换，结果正文被标题串覆盖成 3 遍（`bodyLen` 1347 → 120），而 `placeholders=0` 让验收误判通过。**修法：标题与正文是两个独立 ProseMirror，操作正文前必须重新 `window.scrollTo(0,0)` + 坐标点击正文区 + 断言 `document.activeElement` 是第 2 个 ProseMirror**；覆盖后只能「清空 → 重新 `execCommand('insertHTML')`」，不要试图增量修。**视频号「保存草稿」点击返回成功但不落库（坑 308）**——短标题/描述分离写入、AI 标注选中、合集选中、双封面全部就位，点「保存草稿」后 `draftListManager` 仍是 4 条旧稿、页面无 toast、无 fetch 记录，`save` 状态只能报 `clicked` 不能报 `true`。**铁律：任何「保存草稿」的成功判据只能是「列表计数 +1 / 目标标题出现」，点击回执不算数**；连续两次失败就停下来报告用户，不要换选择器硬试。**B站分区误点与抖音草稿的时序坑（坑 309）**——B站 `.select-controller` 点击后要等 ≥2.5s 下拉才渲染出 30 个 `.drop-list-v2-item`，**没等就按文本找选项会命中预置值**（本期分区误落「科技数码」）；抖音必须在 `uploading` 变 false **且** 出现「暂存离开」按钮后才填表，否则标题被吞。修法见下方 v3.65.0 段。
 > **🔴 v3.64.0 核心改进（2026-10-25 开工前自检，两处「证据对、结论错」的判据坑 304-305）**：**端点身份按 `_000/_001` 后缀判会静默判错（坑 304）**——1025 实测 `settings.json` 是 `GEN_IMG_API_URL`=rainflow、`_000`=prism.uno、`_001/_002`=elysiver，而同期 `To_Learn.md` 备忘写的是 `_003`=rainflow、本体=prism.uno，**两份记录编号完全不同**；按下标判「是不是 rainflow」会让 size 传错、网关回「不支持的图片比例」，症状与坑 300 一模一样极易混。**修法：一律按 URL 域名子串判**（`"rainflow" in api_url`），fallback 顺序也按域名排，开工前先打印 `{后缀: 域名}` 一览核对。**终态验收的判据没做空白归一化，证据与结论自相矛盾（坑 305）**——`final_verify` 把证据 `draftSec` 归一化后打印（`t.slice(...).replace(/\s+/g,' ')`），却拿**未归一化**的 `t` 跑 `/Kimi K3\.1/`；首页卡片把标题折成 `Kimi\nK3.1`，于是**同一条日志里打印的证据明明含 `【2026-10-25】Kimi K3.1 Pro …`，结论却是 `draftHasToday: false`**。**铁律：判据和证据必须用同一份归一化文本**（先 `const t = raw.replace(/\s+/g,' ')`，之后只碰 `t`）；**「打印的证据命中、结论却是 false」就是这个坑的指纹**，见到先查判据，别怀疑平台。
 > **🔴 v3.63.0 核心改进（2026-10-25 日报实测，生图 size 派生污染与两处视口外静默点击四坑 300-303）**：**derive 的日期替换会污染尺寸字面量（坑 300）**——`'1024' → '1025'` 全串替换把生图脚本里硬编码的 `size: '1536x1024'` 改成 `'1536x1025'`，rainflow 回「不支持的图片比例」；排查指纹 = 网关报比例不支持但比例明明没问题 → 先 grep 尺寸字面量有没有被日期吃掉；修法 = **尺寸不硬编码，按端点运行时算**（rainflow 用 `auto`，其他 `1536x1024`）。**`size:'auto'` 会返回方图，必须在 prompt 写死横构图（坑 301）**——rainflow 的 `auto` 在无构图提示时返回 1254×1254，塞 1920×1080 被裁两侧；prompt 末尾加 `Wide 16:9 horizontal cinematic composition, full-frame landscape framing.` 后 6/6 得 1672×940/941（1.78）。**B站分区真选择器是 `.drop-list-v2-item`，且在视口外时坐标点击静默无效（坑 302）**——旧脚本按通用 `li,div,span,p` 文本匹配命不中，分区停在默认「音乐」；`人工智能` 项在 y=759 超出 769 视口，`mouse.click` / `el.click()` / `dispatchEvent` **全部静默失败不报错**；修法 = `locator('.drop-list-v2-item').filter(has_text=...).first.scroll_into_view_if_needed()` 后 `click(force=True)`。**视频号 `.mark-tag-select` 同样初始在视口外（坑 303）**——rect.y=1208 时 `mouse.click` 返回成功但 `.mark-tag-options` 仍 `display:none`、选项查询返回 `[]`（看着像「下拉里没有 AI 选项」）；修法 = `scrollIntoView({block:'center'})` → 重取 rect → 点击 → **先断言 `display === 'block'` 再查选项**。与坑 302 同根：**任何 `mouse.click` 前必须确认目标 rect 在当前视口内**。小坑：视频号 `edit-cover-dialog-container` 关闭后仍留在 DOM 且 rect 为 0×0，「容器存在」判弹窗未关是假阳性（改判 `rect.width>0 && rect.height>0`，或直接回读槽位 `img.naturalWidth/naturalHeight`）；封面喂图后必须等预览图出现目标尺寸再点确认；B站标签可能被平台单独拒收（本期 `AI大模型` 未入 chips，6/7），断言写成「记录缺失但不阻塞」。1025 正例：日报 370 帖 / 成片 163.392s / 4900 帧 / 16,361,460B / 锚点 0.7657；字幕块重分配六块起点 Δ 全 0ms，mp4 音频验证 lead 中位 **+0.097s** / 离群 0（57/72 可测）；四平台全草稿。
 > **🔴 v3.62.0 核心改进（2026-10-24 日报返工，字幕「跨场景错位」两坑 298-299）**：**坑 283 只解决了「块平移」，没解决「块重分配」——用户二次反馈「1:34 还是对不上」的真因是字幕按场景编号序落盘（坑 298）**。1024 期 `play_order=[1,2,3,5,4,6]`，`captions.json` 里 MoE 文案（script scene4）占着 84.4–112.9s、程序员节文案（script scene5）占着 113.5–143.9s——**整块互换而非平移**。当晚第一次修复用了 `realign_captions_1024.py`，它只在「字幕已归属的那个场景」内部做重新锚定与缩放，**从不重新推导每条字幕属于哪个场景**，所以互换原样保留、重渲后现象不变，白渲一次。**根治写法：按 `voiceover-texts.json` 的每场景正文长度做字符累加，把 captions 精确切成 6 组（归一化后 188/205/179/192/214/26 字符，累计 1004 与脚本完全相等即可断言），再按 `play_order` 累加各场景 wav 时长定块起点，块内用「该场景自己的 wav」的词级 ASR 重新计时**——不能复用一个全局 ASR 流，否则跨场景边界处会拿到相邻场景的时间。**坑 299：验证必须对渲染后的 mp4 做，不能对源 wav 做**。当晚第一轮「验证通过」是拿 `voiceover/sceneN.wav` 按播放序拼 `full_play.wav` 跑的 ASR——那个文件本来就是按播放序拼的，**必然通过，等于没测**；真正的证据只能从成片里取：`ffmpeg -i out.mp4 -vn -ar 16000 -ac 1 mp4_audio.wav` → faster-whisper 词级，再抽帧看烧录字幕。实测流程：mp4 音频 84–114s 确是程序员节、114–144s 确是 MoE（音频顺序本来就对），而 95/100/105/110s 的帧烧的却是 MoE 文案——**「音频对、字幕错」是块互换的指纹**。验收量化用「首 3 字锚定 + 取最近出现位置」：lead 中位数 +0.205s、最大 +0.71s、最小 −0.17s（54/64 条可测）；**禁用全文字符流 SequenceMatcher 直接量偏差**，长片会把累积插入/删除摊到每条上，得到「全部 64 条都 >0.5s」的假信号（实测中位 1.31s，纯属对齐器假象）。另：场景尾行字幕要比发声晚收 0.3s 左右，`offset` 实测 scene4 末条 gap 0.308s、scene6 0.298s → 尾行 `endMs` 补到静音起点即可。
@@ -65,12 +66,12 @@ version: 3.64.0
 - 用户可在各平台草稿箱中检查后手动发布
 
 **各平台存草稿方式**：
-| 平台 | 存草稿操作 |
-|------|-----------|
-| B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） |
-| 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿） |
-| 视频号 | 点击「保存草稿」按钮 |
-| 公众号 | 点击「保存为草稿」按钮 |
+| 平台 | 存草稿操作 | 成功判据（**点击回执不算数**） |
+|------|-----------|------------------------|
+| B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） | URL 跳到 `upload-manager/article?group=draft`，且草稿箱标题匹配 |
+| 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿） | 按钮消失 **且**「继续编辑」横幅出现；同标签回读标题 + `video` 元素数 > 0 |
+| 视频号 | 点击「保存草稿」按钮 | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4） |
+| 公众号 | 点击「保存为草稿」按钮 | URL 出现 `appmsgid=`，且 `bodyLen` / 占位符数 / 封面 `hasQpic` 回读一致 |
 
 ### 🔴 浏览器与 Profile 全局铁律（v3.7.0 / 2026-07-18 实测）
 
@@ -84,6 +85,53 @@ version: 3.64.0
    **处理**：所有探测与操作放进**一次** `browser_run_code_unsafe`；返回前 `page.goto('https://www.baidu.com')` 离开双 body 页；文件选择器用脚本内 `waitForEvent('filechooser') + setFiles`，勿拆成单独 `browser_file_upload`。
 4. **beforeunload**：从编辑页离开时弹「将此次编辑保留？」→ 先 `browser_handle_dialog(accept=true)` 或脚本内点「保存/不保存」，否则 `net::ERR_ABORTED`。
 5. 独立脚本结束若用户要核对 UI，可**不** `context.close()`，改为提示用户手动关窗（用户明确要求「不要关太快」时）。
+
+### 🔴 浏览器驱动选择铁律（v3.65.0，坑 306）
+
+**判定顺序固定，不许跳步**：
+1. `curl -s http://127.0.0.1:9222/json/version` —— HTTP 端点不通 ⇒ daemon 死了，报告用户，不要自己重开带登录态的窗口。
+2. `curl -s http://127.0.0.1:9222/json | jq length` —— 能列出 target ⇒ **Chrome 侧完全健康**，问题一定在 playwright。
+3. 此时 `connect_over_cdp` 若在 `ws connected` 之后超时（25s / 90s 都一样），**立刻切 raw CDP，禁止再做以下三件事**：加大 timeout、重启 Chrome、`pkill` 任何进程。
+
+**raw CDP 最小可用骨架**（复制 `templates/cdp_helper.py` 到本次工作目录再 import，勿手搓）：
+```python
+# ① 一定带 proxy=None —— 否则走环境 SOCKS，报 python-socks is required
+ws = await websockets.connect(target['webSocketDebuggerUrl'],
+                              max_size=64*1024*1024, ping_interval=None, proxy=None)
+# ② 表达式必须包进 async IIFE 再 JSON.stringify
+#    错的：(async () => JSON.stringify(await (EXPR)()))        → 返回 undefined
+#    错的：JSON.stringify(await (FUNC)())                      → ReferenceError: await is not defined
+#    对的：(async () => JSON.stringify(await (async () => { return (EXPR); })()))()
+# ③ 断线重连一次（wujie 长页面会偶发 ConnectionClosedError: no close frame）
+```
+**代价提醒**：raw CDP 没有 `locator` / `set_input_files` 的便利，文件上传要走
+`Runtime.evaluate` 取 `input[type=file]` 的 `objectId` → `DOM.setFileInputFiles({files, objectId})`；
+先 `DOM.enable`，且 shadowRoot 内的 input 必须先 `Array.from(shadowRoot.querySelectorAll(...))`
+拿到数组 objectId，再用 `Runtime.getProperties` 按下标取 node objectId（直接 `querySelector` 会拿到 null）。
+
+### 🔴 标题与正文是两个独立编辑区（v3.65.0，坑 307）
+
+公众号编辑器有**两个 `.ProseMirror`**：`[0]` 是标题、`[1]` 是正文，另有一个隐藏的 `#title` 输入框同步标题。
+
+**事故模式**：先点标题输入标题 → 不换焦点直接对正文发 `Meta+A` → 实际选中的是标题 → 粘贴正文时把标题串覆盖进正文，
+`bodyLen` 从 1347 掉到 120，而「占位符 = 0」让图片验收误判通过（占位符本来就没了）。
+
+**铁律**：
+1. 写标题：`window.scrollTo(0,0)` → 坐标点击 `.ProseMirror[0]` → 断言 `document.activeElement` 是它 → `Input.insertText`；
+2. 写正文：**重新**点 `.ProseMirror[1]` → 断言 `activeElement` 是它 → 再 `Meta+A` + 粘贴/`execCommand('insertHTML')`；
+3. 每次替换正文后立刻回读 `bodyLen` **和** 首个正文段落的前 20 字，两者都对才算写成；
+4. 正文被覆盖只能「全选删除 → 重新插入整段 HTML」，**不要增量修补**。
+
+### 🔴 「保存草稿」的成功判据只能是落库（v3.65.0，坑 308）
+
+视频号本期实测：短标题与描述分离写入、AI 标注选中、合集选中、双封面就位，
+点「保存草稿」后**页面无 toast、无 fetch、`draftListManager` 计数仍是 4**——脚本若以 `clicked` 报成功，
+汇报就是假的。
+
+**铁律**：
+- 每个平台的保存步，**必须**在另一入口回读落库证据（见上方「存草稿方式」表的第三列），点击回执只是「发起了点击」；
+- 视频号连续两次落库失败 → **停下来报告用户**（附：点击位置、页面文案快照、草稿箱计数），不要换选择器反复硬试；
+- 汇报措辞按事实：未落库就写「未落库」，不要把 `clicked` 写成 `✅`。
 
 ## ⚡ 权限预授权（必须在执行前完成）
 
@@ -228,6 +276,19 @@ version: 3.64.0
 ### 周报封面提示词模板
 
 **🔴 v3.35.0**：周报横/竖封面与日报共用海报风模板，**画面文字源 = 本周深聊大事件对应的「封面大字」短句**（Hook 原词，1 句冲突 + 1 个数字，两行；`publish.json.title` 仍作列表标题不进画面）。完整提示词见 `templates/cover-prompt.md`，水印品牌 `羊报AI周刊`，日期 `{YYYY-MM-DD} ~ {YYYY-MM-DD}`。禁止再用演播室空镜英文 prompt。
+
+### 周报段落字数上限（v3.65.0 实测口径）
+
+日报的「每段 ≤80 字」在周报里**偏紧**：深聊要在一段里同时装下 4 格时间线 + 3W，压到 80 会把信息挤掉。
+W42 实测可用区间：**S1 Hook 20 字；S2–S8 单段 70–95 字；S9 锚点豁免；S10 CTA 48–78 字**。
+
+- 硬门槛仍是**去标点 ≥650**（坑 244），目标 **680–720**；
+- **锚点占比是比总字数更难得的那一关**：锚点在 S9，其后只有 S10，所以
+  `anchor_ratio = (S1..S8 字数) / 总字数`，**S1–S8 越长占比越高、S10 越长占比越低**。
+  W42 实测：把 S10 从 63 字拉到 78 字，占比从 0.8109 降到 0.7942 才进窗；
+- 调占比的正确顺序：**先改后段（S6–S10），不要动 S2–S5**——动前段会连锁把占比推得更高；
+- 每改一次都必须重算，不要凭感觉。用 `gen_script_w42.py` 那种「脚本即数据源」的写法：
+  段落写成一个 list，跑一次就打印 `total / anchor_start / ratio`，比在 md 里手改再数字符快得多。
 
 ### 周报过滤规则
 
@@ -6121,6 +6182,47 @@ st = page.evaluate('''() => {
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.65.0（2026-10-25 W42 周报全程实测，raw CDP 迁移 + 三处静默失效坑 306-309）
+
+基于 **2026-10-25 W42 周报全链**（周聚合 2739 → 2644；周报 MD/PDF；成片 **113.856s / 11,624,908B / 1920×1080 / 30fps**，锚点实测 **0.7752**，字幕 55 条尾差 0.624s；B站/抖音/公众号三平台草稿成功，视频号保存未落库）实测，吸收坑 306-309。
+
+**坑 306：`playwright.connect_over_cdp` 整体挂起，HTTP 端点却完全健康**
+- 症状：`curl http://127.0.0.1:9222/json/version` 正常、`/json` 列出 25 个 target，而 `connect_over_cdp` 的调用日志停在 `ws connected` 之后，**既不返回也不报错**；timeout 25s 加到 90s 结果完全一样
+- 后果：B站/抖音/视频号/公众号四个探针全空转，状态文件里 `upload: running` 却没有真实进展
+- 根因判定：**Chrome 侧健康 + playwright 挂在 WS 握手之后 ⇒ 是驱动侧问题，不是浏览器问题**
+- 修法：立刻切 raw CDP。三个必踩的细节：
+  1. `websockets.connect(ws_url, proxy=None)` —— 不带 `proxy=None` 会走环境里的 SOCKS 代理，报 `ImportError: python-socks is required to use a SOCKS proxy`；
+  2. `Runtime.evaluate` 的表达式**必须包进 async IIFE**：`(async () => JSON.stringify(await (async () => { return (EXPR); })()))()`。两种错误写法都**静默返回空值**——`(async () => JSON.stringify(await (EXPR)()))()` 在 `EXPR` 是函数表达式时返回 `undefined`；`JSON.stringify(await (FUNC)())` 顶层裸 `await` 报 `ReferenceError: await is not defined`；
+  3. `send()` 里对 `ConnectionClosedError` 重连一次（wujie 长页面会偶发断开，重连后同会话可继续）
+- 代价：raw CDP 没有 `locator` / `set_input_files`。文件上传走 `Runtime.evaluate` 拿 `input[type=file]` 的 `objectId` → `DOM.setFileInputFiles({files, objectId})`；**shadowRoot 内的 input 必须先 `Array.from(shadowRoot.querySelectorAll(...))` 拿数组 objectId，再用 `Runtime.getProperties` 按下标取 node objectId**，直接 `querySelector` 得 null。
+- **禁止的三种「抢救」**：加大 timeout、重启 Chrome、`pkill` 相关进程——前两个白等，第三个会丢登录态。
+
+**坑 307：公众号 `Meta+A` 选中的是刚 focus 的标题，不是正文**
+- 事故序列：`open` 打开编辑页 → `title` 步先点 `.ProseMirror[0]` 输入标题 → `images` 步未换焦点，直接对正文发 `Meta+A + V` → 实际选中标题 → 正文被替换成标题串重复 3 遍（`bodyLen` **1347 → 120**）
+- 更隐蔽的是：此时 `PLACEHOLDER_IMG_` 计数变成 **0**，图片验收的「占位符归零」判据**反而通过了**
+- 修法（三条都要）：① 每次动正文前 `window.scrollTo(0,0)` → 坐标点击 `.ProseMirror[1]` → **断言 `document.activeElement` 就是它**；② 替换后同时回读 `bodyLen` **和**首段前 20 字；③ 被覆盖只能「全选删除 → 重新 `execCommand('insertHTML')`」，不做增量修补
+- 正向样本：重建后 `bodyLen` **1176**、占位符 **0**、`img` 元素 **20**（10 张正文图 + 10 张缩略）、封面 `hasQpic=true`、标题 42 字
+
+**坑 308：视频号「保存草稿」点击成功但不落库**
+- 本期状态：短标题「羊报AI周刊 10月19日至25日」与描述**分离写入成功**（`title` 与 `.input-editor` 各自回读正确）、`.mark-tag-select` 选中英文项、合集选中、竖 3:4 / 横 4:3 双封面就位；点「保存草稿」后——
+  - 页面**无 toast**
+  - 外层 `window.fetch` hook **零命中**（请求走了 wujie 沙箱内的另一个 realm，外层 hook 抓不到，所以「无请求」不能作为根因证据）
+  - `post/draftListManager` 草稿计数**仍是 4 条**，最新三条是 10-22 期及更早
+  - 弹窗排查：`common-dialog`「将此次编辑保留?」等所有对话框 `getBoundingClientRect().height` 均为 **0**（隐藏模板），不是被遮挡
+- 结论：判定为平台侧限制，**未点「发表」**，如实报告「未落库」
+- 修法：把「保存草稿」的成功判据改成**草稿箱计数 +1 且目标短标题出现**；连续两次失败即停手报告，别换选择器硬试
+
+**坑 309：B站分区与抖音草稿的时序坑（本期各踩一次）**
+- **B站分区**：`.select-controller` 的 `click()` 返回后，`.drop-list-v2-item` 要 **≥2.5s** 才渲染出 30 项。没等就按文本找选项，会命中页面上**已经存在的预置分区文本**（本期误落「科技数码」）。正确顺序：展开 → 等 2.5s → 断言 `.drop-list-v2-item` 数量 > 0 → 目标项 `scrollIntoView({block:'center'})` → 重取 rect → 坐标点击 → **回读 `分区
+<值>` 文本**。误点后的修复入口是草稿列表的 `.bcc-cmadc-btn.edit`（URL 带 `draftId=4030830`），改完必须再存一次并回读。
+- **抖音**：`content/post/video` 页在 `uploading` 期间标题输入框存在但 `insertText` 会被吞。必须等 `uploading=false` **且**「暂存离开」按钮出现再填表；暂存后走双信号（按钮消失 + 「继续编辑」横幅），**同标签**点「继续编辑」回读（`vids>0` 且标题正确）后再暂存第二次。
+
+**小坑备查：**
+- **草稿数 ≠ 投稿数**：B站「全部稿件」计数含草稿，本期 704 是期初值，草稿另计 1 条；判定「有没有误发」要看**已发布**计数与期初是否相等，不是看总数。
+- **`websockets` 版本差异**：`proxy=None` 参数在 12+ 才有；旧版本直接 `close()` 后重建连接。
+- **同一 Chrome 里标签页会越攒越多**（本期一度 61 个），每轮脚本结束应 `close_tab`，或在开工前按 URL 去重清理一次（保留每平台 1–2 个），否则目标查找会变慢且易误命中。
+- **W42 正例固化**：周聚合 2739 → 2644（移除 95）；成片 113.856s / 11,624,908B；锚点 0.7752；TTS 实测 113.648s（预估 97s 偏差 +17%，因为逐段在词边界处拖长）；字幕 55 条、尾差 0.624s；封面 1536×1152（60KB）/ 1152×1536（49KB）均未触发字号收缩。
 
 ### v3.64.0（2026-10-25 开工前自检，两处「证据对、结论错」的判据坑 304-305）
 
