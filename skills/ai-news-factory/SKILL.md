@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.62.0
+version: 3.63.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.62.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.63.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.63.0 核心改进（2026-10-25 日报实测，生图 size 派生污染与两处视口外静默点击四坑 300-303）**：**derive 的日期替换会污染尺寸字面量（坑 300）**——`'1024' → '1025'` 全串替换把生图脚本里硬编码的 `size: '1536x1024'` 改成 `'1536x1025'`，rainflow 回「不支持的图片比例」；排查指纹 = 网关报比例不支持但比例明明没问题 → 先 grep 尺寸字面量有没有被日期吃掉；修法 = **尺寸不硬编码，按端点运行时算**（rainflow 用 `auto`，其他 `1536x1024`）。**`size:'auto'` 会返回方图，必须在 prompt 写死横构图（坑 301）**——rainflow 的 `auto` 在无构图提示时返回 1254×1254，塞 1920×1080 被裁两侧；prompt 末尾加 `Wide 16:9 horizontal cinematic composition, full-frame landscape framing.` 后 6/6 得 1672×940/941（1.78）。**B站分区真选择器是 `.drop-list-v2-item`，且在视口外时坐标点击静默无效（坑 302）**——旧脚本按通用 `li,div,span,p` 文本匹配命不中，分区停在默认「音乐」；`人工智能` 项在 y=759 超出 769 视口，`mouse.click` / `el.click()` / `dispatchEvent` **全部静默失败不报错**；修法 = `locator('.drop-list-v2-item').filter(has_text=...).first.scroll_into_view_if_needed()` 后 `click(force=True)`。**视频号 `.mark-tag-select` 同样初始在视口外（坑 303）**——rect.y=1208 时 `mouse.click` 返回成功但 `.mark-tag-options` 仍 `display:none`、选项查询返回 `[]`（看着像「下拉里没有 AI 选项」）；修法 = `scrollIntoView({block:'center'})` → 重取 rect → 点击 → **先断言 `display === 'block'` 再查选项**。与坑 302 同根：**任何 `mouse.click` 前必须确认目标 rect 在当前视口内**。小坑：视频号 `edit-cover-dialog-container` 关闭后仍留在 DOM 且 rect 为 0×0，「容器存在」判弹窗未关是假阳性（改判 `rect.width>0 && rect.height>0`，或直接回读槽位 `img.naturalWidth/naturalHeight`）；封面喂图后必须等预览图出现目标尺寸再点确认；B站标签可能被平台单独拒收（本期 `AI大模型` 未入 chips，6/7），断言写成「记录缺失但不阻塞」。1025 正例：日报 370 帖 / 成片 163.392s / 4900 帧 / 16,361,460B / 锚点 0.7657；字幕块重分配六块起点 Δ 全 0ms，mp4 音频验证 lead 中位 **+0.097s** / 离群 0（57/72 可测）；四平台全草稿。
 > **🔴 v3.62.0 核心改进（2026-10-24 日报返工，字幕「跨场景错位」两坑 298-299）**：**坑 283 只解决了「块平移」，没解决「块重分配」——用户二次反馈「1:34 还是对不上」的真因是字幕按场景编号序落盘（坑 298）**。1024 期 `play_order=[1,2,3,5,4,6]`，`captions.json` 里 MoE 文案（script scene4）占着 84.4–112.9s、程序员节文案（script scene5）占着 113.5–143.9s——**整块互换而非平移**。当晚第一次修复用了 `realign_captions_1024.py`，它只在「字幕已归属的那个场景」内部做重新锚定与缩放，**从不重新推导每条字幕属于哪个场景**，所以互换原样保留、重渲后现象不变，白渲一次。**根治写法：按 `voiceover-texts.json` 的每场景正文长度做字符累加，把 captions 精确切成 6 组（归一化后 188/205/179/192/214/26 字符，累计 1004 与脚本完全相等即可断言），再按 `play_order` 累加各场景 wav 时长定块起点，块内用「该场景自己的 wav」的词级 ASR 重新计时**——不能复用一个全局 ASR 流，否则跨场景边界处会拿到相邻场景的时间。**坑 299：验证必须对渲染后的 mp4 做，不能对源 wav 做**。当晚第一轮「验证通过」是拿 `voiceover/sceneN.wav` 按播放序拼 `full_play.wav` 跑的 ASR——那个文件本来就是按播放序拼的，**必然通过，等于没测**；真正的证据只能从成片里取：`ffmpeg -i out.mp4 -vn -ar 16000 -ac 1 mp4_audio.wav` → faster-whisper 词级，再抽帧看烧录字幕。实测流程：mp4 音频 84–114s 确是程序员节、114–144s 确是 MoE（音频顺序本来就对），而 95/100/105/110s 的帧烧的却是 MoE 文案——**「音频对、字幕错」是块互换的指纹**。验收量化用「首 3 字锚定 + 取最近出现位置」：lead 中位数 +0.205s、最大 +0.71s、最小 −0.17s（54/64 条可测）；**禁用全文字符流 SequenceMatcher 直接量偏差**，长片会把累积插入/删除摊到每条上，得到「全部 64 条都 >0.5s」的假信号（实测中位 1.31s，纯属对齐器假象）。另：场景尾行字幕要比发声晚收 0.3s 左右，`offset` 实测 scene4 末条 gap 0.308s、scene6 0.298s → 尾行 `endMs` 补到静音起点即可。
 > **🔴 v3.61.0 核心改进（2026-10-23 日报实测，视频号标注/合集新 DOM + 抖音恢复令牌六坑 292-297）**：**视频号 AI 标注真控件是「视频标注」下拉，不是中文勾选框（坑 292）**——wujie shadowRoot 内找「AI生成」/`input[type=checkbox]` 永远 `ai declare: absent`；真控件 = `.mark-tag-select` 的 `.select-display` + `.mark-tag-options`，选项全英文 `No label needed` / `Contains AI-generated content` / `Fictional storyline for entertainment only` / `Personal opinion for reference only` / `Content contains ads` / `Self-recorded content` / `Content is reposted`，**合规须选 `Contains AI-generated content`**；回读以 `.select-display` 文本为准。**视频号新版合集 DOM 变了，且 wujie 内 Vue 组件只认真实鼠标坐标点击（坑 293）**——旧 `.option-item` 前缀匹配返回 False；新链路 = 点 `.post-album-display` 展开 → `.post-album-wrap .option-item` 选项；**JS `.click()` 对这层 Vue 组件不生效（返回成功但 display 不变）**，必须取 `getBoundingClientRect` 中心后 `page.mouse.click(x,y)`；选项文案带「共N个作品」（本期 132/4/22/4）。**wujie shadowRoot 内 file input 用 `evaluate_handle().as_element()` 必 detached（坑 294）**——视频号封面对话框（`.vertical-img-wrap .edit-btn` → 标题「编辑个人主页卡片」→ 取消/确认）上传时，`as_element().set_input_files()` 报 `Cannot set input files to detached element`；改用 Playwright locator 形式 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(...)` 一次过；确认按钮同样 JS 查不到（`.weui-desktop-btn_primary` 从错误 wrapper 取空），走真实坐标点击。**抖音「继续编辑」是一次性消费令牌，核验后必须同标签再暂存（坑 295，坑 290 第三形态）**——抖音**没有草稿列表页**（`/content/manage?tab=draft` 空壳），唯一恢复入口是发布页横幅；为核验新开标签点「继续编辑」→ 读表单 → 关标签，**草稿就此消失**（此后任何标签横幅都不再出现）。正确 = 端到端一次跑完：暂存 → **同标签**点「继续编辑」回读 → **再点一次「暂存离开」** → 终态「按钮消失 + 横幅出现」；外部标签只准**读**横幅文本，**禁点击**。**抖音竖封面真入口是悬停槽位→「编辑封面」，弹窗内正确 input 是 `.selectArea-BCIYQD input[type=file]`（坑 296）**——`get_by_role('button', name='设置竖封面')` 常 `disabled`（只是提示位），点它必超时；弹窗内 6 个 file input 中其余 4–5 个是模板/贴纸选择器，喂错**静默无报错**。封面槽位按 `.coverControl-CjlzqC` 下标断言：`[0]`=横 4:3、`[1]`=竖 3:4，用 `img.naturalWidth/naturalHeight` 判 1536×1151 / 1150×1535；「竖封面缺失」文案在 AI 推荐封面生成期会**瞬时为真**，**禁只 grep 文本判封面**。**抖音合集选项匹配必须最小面积法排除下拉容器（坑 297）**——`/^「?今日羊报/` + `/共\s*\d+\s*个作品/` 会同时命中整个下拉容器（文本 `请选择合集不选择合集「虢礫緙嘞」共4个作品…` 整块），点它等于没选；约束 `textContent.length ≤ 40` + `rect.height ∈ [10,90]` 后**取面积最小的节点**点击，本期命中 `「今日羊报Al」共132个作品`。1023 正例：日报全量抓取完成；成片 128.128s/3842 帧/1920×1080/14,178,371B 锚点 0.7110；封面本地 PIL 对齐 2026-10-21 海报模板（横 1536×1152/竖 1152×1536）；四平台全草稿（B站 人工智能 分区+7 标签+合集、公众号 appmsgid+bodyLen1179+占位符0、视频号 描述+短标题+合集「今日羊报Al」+AI标注英文选项+3:4 封面、抖音 标题+desc157+5 话题+声明+双封面+第133集）。
 > **🔴 v3.60.0 核心改进（2026-10-22 日报实测，登录探测与空壳重挂四坑 288-291）**：**登录探测必须用 default context 新开页（坑 288）**——`connect_over_cdp()` 返回的是 Browser 不是 context，直接 `ctx.new_page()` 等价 `browser.new_page()` 自建**隔离 context 不共享 cookies**，四平台（B站/抖音/视频号/公众号）登录探测全误判 `login_required`，而旧 tab 明明停在登录后 URL、新开页却跳扫码页；正确写法=`browser.contexts[0].new_page()` 取 default context 再开页，goto 上传页 wait 4s 后按 v3.52 判据读表单元素（B站「上传/投稿」、抖音「作品描述」、视频号 url 无 `login.html`、公众号「新的创作」）判定，**禁用隔离模式做登录探测**。**wujie 空壳重挂要开全新标签而非旧标签 goto（坑 289）**——空壳判据 `wujie-app` 存在但 shadowRoot 内 `input/button/[contenteditable]` 计数=0（appKids=1、inShadow=0）；旧标签上 `page.goto('/platform/post/video')` 只改 URL 不触发 wujie 重挂载、仍是空壳，`Page.reload` 多次亦无效；正确=`pg.close()` + `browser.contexts[0].new_page()`（新标签必须走 default context 才共享登录态，同坑 288）+ goto `/platform/post/create` 一次挂载成功（实测 1201 节点 + file input 就绪），此后每步前先断言 `hasWujie && inShadow>0` 再动上传区/表单。**抖音「暂存离开」点击可能被吞，必须双信号验收（坑 290）**——点击回执（`locator.click()` 返回）**不等于**草稿落库，偶发点后表单未关闭、内容随页面关闭丢失；验收=轮询到「暂存离开」按钮消失 `hasZancun=false` **且**「继续编辑」恢复横幅出现，两者齐才算成功（坑 14.10 单信号验收的补强），缺一即重做上传+meta+封面后 JS 直点按钮，**不得只凭点击回执汇报草稿已存**。**B站视频上传直接对 accept 含 video 的 input `set_input_files`（坑 291）**——新版投稿页 `expect_file_chooser` 点击「上传视频」必超时（不触发原生 chooser），改为遍历 `input[type=file]` 按 `accept` 过滤（含 `video`/`mp4` → 视频；含 `image` → 封面弹窗内的图，坑 218 复用）后直接 `set_input_files`，**禁用索引定位**（页面上 `.mp4`×2 / `.txt` / `.zip` / 封面 image 共存，按 `inputs[1]`/`inputs[-1]` 会喂错 input 且全程静默无报错）。1022 正例：日报 387 帖全带正文；TTS 112.38s 锚点 0.7073 容差内；成片 112.512s/3374 帧/1920×1080；四平台全草稿（B站分区/声明/7 标签、公众号零占位符、视频号 wujie 全链、抖音双信号验收过）；场景图 API 写实版换图后仅重渲染即交付（无需重跑 TTS/字幕）。
@@ -5991,7 +5992,36 @@ st = page.evaluate('''() => {
 
 ## 更新日志
 
-### v3.62.0（2026-10-24 日报返工，字幕跨场景互换两坑 298-299）
+### v3.63.0（2026-10-25 日报实测，生图 size 派生污染与两处视口外静默点击四坑 300-303）
+
+基于 **2026-10-25 日报全流程**（日报 370 帖/386 抓取；成片 163.392s / 4900 帧 / 1920×1080 / 16,361,460B 锚点 0.7657；四平台全草稿）实测，吸收坑 300-303：
+
+**坑 300：derive 的日期替换会污染生成参数里的尺寸字面量**
+- `_derive_1025.py` 把 `'1024' → '1025'` 做全串替换，把生图脚本里硬编码的 `size: '1536x1024'` 改成了 `'1536x1025'`——rainflow 回「不支持的图片比例」，第一反应以为是网关不支持该比例，实际是**尺寸字符串被日期替换污染**
+- 排查指纹：网关报「不支持的图片比例」而你确认比例没问题 → 先 `grep -n "x[0-9]\{3,4\}"` 看尺寸字面量有没有被日期替换吃掉
+- 修法：**尺寸不做字面量硬编码，按端点算**（`size = 'auto' if suf == '' else '1536x1024'`，运行时拼 `ep['size']`）；derive 的替换对 `\d{4}` 年份形态一律用带边界的锚点，别裸替换四位数
+
+**坑 301：gpt-image-2 的 `size:'auto'` 会返回方图，必须在 prompt 里写死横构图**
+- rainflow 只接受 `1024x1024` / `1024x1536` / `auto`；`auto` 实测在 prompt 无构图提示时返回 **1254×1254 方图**（比例 1.00），塞进 1920×1080 画布会被裁掉两侧
+- 修法：每条 prompt 末尾追加 `Wide 16:9 horizontal cinematic composition, full-frame landscape framing.`，实测 6/6 返回 **1672×940/941（1.78 ≈ 16:9）**，比 `1536x1024`（1.50）更贴合画面
+- 顺序 = 先改 prompt 再重跑；只改 size 不改 prompt 无效
+
+**坑 302：B站分区下拉是 `.drop-list-v2-item`，且在视口外时坐标点击静默无效**
+- 旧脚本按 `li,div,span,p` 文本匹配 + `el.click()`，命中失败后分区停在默认「音乐」，断言 `partition verify failed: '音乐'` 才暴露
+- 真选择器 = `.selector-container .select-container` 展开 → `.drop-list-v2-item` 选项（30 个，含 `人工智能`）
+- 但下拉展开后选项列表高于视口（`人工智能` 在 y=759，视口高 769），**`page.mouse.click(x,y)` 落在视口外不报错也不生效**；`el.click()` / `dispatchEvent(MouseEvent)` 同样无效
+- 修法：`locator('.drop-list-v2-item').filter(has_text='人工智能').first.scroll_into_view_if_needed()` → `click(force=True)`。一次过，回读 `.select-item-cont` 文本即 `人工智能`
+
+**坑 303：视频号 `.mark-tag-select` 初始在视口外，同样静默失效**
+- 表单首屏渲染后 `.mark-tag-select` 的 rect.y=1208 > 视口 769；`page.mouse.click(941, 1231)` 返回成功但 `.mark-tag-options` 仍 `display:none`，选项查询返回 `[]`（看起来像「下拉没有 AI 选项」）
+- 修法：`s.scrollIntoView({block:'center'})` → 重取 rect（y 变 468）→ `mouse.click` → 先断言 `getComputedStyle(.mark-tag-options).display === 'block'` 再查选项
+- 与坑 302 同根：**任何 `mouse.click` 前必须确认目标 rect 在当前视口内**，否则失败是静默的
+
+**小坑备查：**
+- **视频号封面对话框 `edit-cover-dialog-container` 关闭后仍留在 DOM，rect 为 0×0**——用「容器存在 / `offsetParent` 非空」判「弹窗未关」是**假阳性**；判据改用 `rect.width > 0 && rect.height > 0`，或直接回读槽位 `img.naturalWidth/naturalHeight`
+- 封面上传后**必须等预览图出现目标尺寸再点确认**（`img.naturalWidth===1152 && nh===1536`），否则确认点在上传渲染完成前，槽位仍是原视频帧
+- B站标签可能被平台拒收单个词（本期 `AI大模型` 两次键入 + 推荐行点击均未入 chips，最终 6/7）；断言写成「缺失项记录但不阻塞」，别为凑满 7 个卡死上传
+- 1025 字幕块重分配实测复核（坑 298 修复后的正向样本）：72 条 / 六块起点 Δ 全 0ms（0 / 34219 / 69797 / 94603 / 124998 / 159045）；mp4 音频验证 lead 中位 **+0.097s**、max +0.662s、min −0.197s、离群 0（57/72 可测）
 
 基于 **2026-10-24 日报**（用户两次反馈「1:25 后字幕对不上」→ 第二次「1:34 还是对不上」→ 定位为块互换并重渲）实测，吸收坑 298-299：
 
