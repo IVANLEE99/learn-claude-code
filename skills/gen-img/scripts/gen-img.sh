@@ -32,6 +32,11 @@ API_URL=$(echo "$CONFIG" | sed -n '1p')
 API_KEY=$(echo "$CONFIG" | sed -n '2p')
 MODEL=$(echo "$CONFIG" | sed -n '3p')
 
+# 兼容 base URL 带或不带 /v1 两种写法（脚本自身会拼 /v1/images/generations，
+# 带 /v1 的 base 会拼成 /v1/v1 被端点拒为 unsupported_endpoint；2026-10-24 实测）
+API_URL="${API_URL%/}"
+API_URL="${API_URL%/v1}"
+
 if [ -z "$API_URL" ]; then
     echo "错误: 未找到 API URL，请在 ~/.claude/settings.json 的 env 中配置 GEN_IMG_API_URL" >&2
     exit 1
@@ -84,12 +89,40 @@ with open(os.environ['GI_BODY_FILE'], 'w', encoding='utf-8') as f:
     json.dump(body, f, ensure_ascii=False)
 PYBODY
 
-if ! curl -s --max-time 300 "${API_URL}/v1/images/generations" \
+call_api() {
+  curl -s --max-time 300 "${API_URL}/v1/images/generations" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${API_KEY}" \
-    --data-binary @"$BODY_FILE" -o "$RESP_FILE"; then
+    --data-binary @"$1" -o "$RESP_FILE"
+}
+
+if ! call_api "$BODY_FILE"; then
     echo "错误: curl 调用失败，请检查网络连接" >&2
     exit 1
+fi
+
+# 部分兼容端点（如 chatgpt.rainflow.foo/studio）不接受 output_format 字段，
+# 报 param=output_format 时去掉该字段重试一次（2026-10-24 实测）
+if grep -q '"param": *"output_format"' "$RESP_FILE" 2>/dev/null; then
+    echo "[info] 端点不支持 output_format，去掉该字段重试"
+    GI_MODEL="$MODEL" GI_PROMPT="$PROMPT" GI_SIZE="$SIZE" GI_QUALITY="$QUALITY" \
+    GI_N="$N" GI_BODY_FILE="$BODY_FILE" python3 << 'PYBODY2'
+import json, os
+body = {
+    'model': os.environ['GI_MODEL'],
+    'prompt': os.environ['GI_PROMPT'],
+    'size': os.environ['GI_SIZE'],
+    'quality': os.environ['GI_QUALITY'],
+    'n': int(os.environ['GI_N']),
+    'response_format': 'b64_json',
+}
+with open(os.environ['GI_BODY_FILE'], 'w', encoding='utf-8') as f:
+    json.dump(body, f, ensure_ascii=False)
+PYBODY2
+    if ! call_api "$BODY_FILE"; then
+        echo "错误: curl 调用失败，请检查网络连接" >&2
+        exit 1
+    fi
 fi
 
 # === 检查响应 ===
