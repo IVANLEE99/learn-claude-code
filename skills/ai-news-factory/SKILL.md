@@ -1,13 +1,14 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.65.0
+version: 3.66.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.65.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.66.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.66.0 核心改进（2026-10-26 日报全程实测：两项「验收自己骗自己」+ 合集弹窗真入口 + 一条被证伪的推断，坑 310-315）**：**公众号合集判据用 `body.innerText` 子串 = 恒真（坑 310）**——本期 `MP_VERIFY` 打出 `collection: true`，`coll_ok = COLLECTION in all_txt`，而 `COLLECTION='「今日羊报 AI」'`（带书名号）命中的是正文 `TAIL` 页脚「🔔 关注「今日羊报 AI」，每天 9 点…」。**合集实际一直是「未添加」**，是后来用 `.js_article_tags_content` 控件回读才发现的。**铁律：合集判据只认 `.js_article_tags_content` 的 textContent（挂上后为 `「今日羊报 AI」`，未挂为 `未添加`），正文/标题里的同名文本一律不算**；这与坑 255「只认独立短文本叶子」同源，但更严——**控件有专属 class 就直接用 class，别做文本搜索**。**正文图片计数被 ProseMirror 分隔符污染 = 恒假（坑 311）**——`body.querySelectorAll('img')` 返回 12 个，其中 **6 个是编辑器为每个图片块插入的 `IMG.ProseMirror-separator`**（`src` 为空、`naturalWidth=0`），于是 `all(w>100)` 恒假；真图只有 6 张（1080×608 ×5 + 1080×810 ×1）。**修法：先按 `classList.contains('ProseMirror-separator')` 与 `src` 非空双重过滤再断言尺寸**；反过来，只按 `imgCount>0` 判「图都在」同样是假阳性。**合集弹窗唯一能打开的入口是 `.allow_click_opr.js_article_tags_label`（坑 312）**——点「合集」二字（`SPAN.lbl_content`）、点行内空白、点 `.frm_checkbox_label` 整行**全部不生效且不报错**（DOM 节点数 1377→1377，无异常），随后「保存为草稿」照样成功并返回 `appmsgid`，**整条链静默失败**。真入口是「未添加」四个字所在的 DIV（约 54×22，`allow_click_opr js_article_tags_label`）；点开后弹窗容器 `.album-setting-dialog`，输入框 `input[placeholder="请选择合集"]`，选项 `.album-setting-dialog .select-opts-con` 内的 `li.select-opt-li`（本期 3 项，每项 320×36），确认是弹窗内文案精确为「确认」的 `button.weui-desktop-btn_primary`。**「同一个事实」在不同平台文案里措辞可以不同，坑 241 词表禁止跨平台复制（坑 313）**——本期抖音写「比上一代 K3 **便宜 15%**」，视频号写「约为上一代 K3 的 **85%**」，把视频号词表套到抖音直接 `AssertionError: missing issue word: 85%`。**词表必须按 `publish.json` 里该平台自己的 `description` 生成**，跨平台抄一份就必挂。**抖音话题解析器按英文句点切分，`K3.1` 会退化成 `#K3`（坑 314）**——`publish.json` 的 `douyin.tags` 写 `K3.1`，页面回读却是 `["#AI日报","#K3","#订阅计费",…]`，点号被吃掉变成**另一个话题**（不会报错、不会提示）。**要么话题里避开带点号的版本号（改写 `K3`），要么接受降级并在验收里按实际值断言**，不要断言 `#K3.1`。**「reload 丢 token」是个被证伪的推断，写进 skill 前必须复测（坑 315，元教训）**——本期首页回读一度拿到 `len=83` 的「登录超时」空页，当时的解释是「裸 `reload()` 丢了 `token=` 参数」，据此写了「必须带 token 重新 goto」。**收尾复测把这条推翻了**：`RELOAD_TEST {"before_len":1685,"after_len":1685,"after_url_has_token":true,"after_login_timeout":false}`——`reload()` 保留 token、首页完好；裸域 `goto('https://mp.weixin.qq.com/')` 也会自动 302 到带 token 的首页（1685），同样不复现。**结论：`len=83` 的真实成因未知（大概率瞬时），「reload 丢 token」不成立。** 带 token 重新 `goto()` 作为写法仍然安全可用，但**不许把它当根因写进文档**；「一次观测 + 一个顺理成章的解释」不等于已验证的因果，与坑 305（证据与判据须同源）是同族。**B站草稿箱行没有可用 `href`，要进编辑页只能点该行的「编辑」按钮（坑 316）**——`upload-manager/article?group=draft` 列表里草稿行的链接解析出来是 `null`；正确做法是从「标题叶子节点」向上逐级（≤8 层）找 `textContent === '编辑'` 的元素，取 rect 中心 `mouse.click`，通常新开标签落到 `upload/video/frame?type=draft&draftId=…`。回读分区用 `.selector-container .select-item-cont`、标签用 `.label-item-v2-container`（去掉 `×`）、封面取页面内 `naturalWidth>=400` 的最大图。
 > **🔴 v3.65.0 核心改进（2026-10-25 W42 周报全程实测，raw CDP 迁移与三处「静默失效」坑 306-309）**：**`playwright.connect_over_cdp` 会整体挂起，SSE 端点却健康（坑 306）**——`curl http://127.0.0.1:9222/json/version` 正常返回、`/json` 列得出 25 个 target，但 `connect_over_cdp` 在 `ws connected` 之后**既不返回也不报错**（timeout 从 25s 加到 90s 一样），四个平台探针全部空转。**铁律：CDP 探针先看 HTTP 端点，端点健康而 playwright 挂起 → 立刻切 raw CDP，不要加大超时、不要重启 Chrome**。raw CDP 三件套（直接复用 `templates/cdp_helper.py`）：① `websockets.connect(..., proxy=None)`——不带 `proxy=None` 会走环境 SOCKS 代理，报 `python-socks is required to use a SOCKS proxy`；② `Runtime.evaluate` 的表达式**必须包进 async IIFE**（`(async () => JSON.stringify(await (async () => { return (EXPR); })()))()`），顶层裸写 `await` 报 `ReferenceError: await is not defined`，而 `JSON.stringify(await (FUNC)())` 直接返回 `undefined`——两种写法都静默给空值；③ `eval` 结果统一 `JSON.parse`，并在 `send()` 里对断线重连一次（wujie 长页面会偶发断开，报 `ConnectionClosedError: no close frame`）。**公众号正文的 `Meta+A` 会选中刚 focus 的标题而不是正文（坑 307）**——先点标题区键入标题、再点正文执行 `Meta+A` 替换，结果正文被标题串覆盖成 3 遍（`bodyLen` 1347 → 120），而 `placeholders=0` 让验收误判通过。**修法：标题与正文是两个独立 ProseMirror，操作正文前必须重新 `window.scrollTo(0,0)` + 坐标点击正文区 + 断言 `document.activeElement` 是第 2 个 ProseMirror**；覆盖后只能「清空 → 重新 `execCommand('insertHTML')`」，不要试图增量修。**视频号「保存草稿」点击返回成功但不落库（坑 308）**——短标题/描述分离写入、AI 标注选中、合集选中、双封面全部就位，点「保存草稿」后 `draftListManager` 仍是 4 条旧稿、页面无 toast、无 fetch 记录，`save` 状态只能报 `clicked` 不能报 `true`。**铁律：任何「保存草稿」的成功判据只能是「列表计数 +1 / 目标标题出现」，点击回执不算数**；连续两次失败就停下来报告用户，不要换选择器硬试。**B站分区误点与抖音草稿的时序坑（坑 309）**——B站 `.select-controller` 点击后要等 ≥2.5s 下拉才渲染出 30 个 `.drop-list-v2-item`，**没等就按文本找选项会命中预置值**（本期分区误落「科技数码」）；抖音必须在 `uploading` 变 false **且** 出现「暂存离开」按钮后才填表，否则标题被吞。修法见下方 v3.65.0 段。
 > **🔴 v3.64.0 核心改进（2026-10-25 开工前自检，两处「证据对、结论错」的判据坑 304-305）**：**端点身份按 `_000/_001` 后缀判会静默判错（坑 304）**——1025 实测 `settings.json` 是 `GEN_IMG_API_URL`=rainflow、`_000`=prism.uno、`_001/_002`=elysiver，而同期 `To_Learn.md` 备忘写的是 `_003`=rainflow、本体=prism.uno，**两份记录编号完全不同**；按下标判「是不是 rainflow」会让 size 传错、网关回「不支持的图片比例」，症状与坑 300 一模一样极易混。**修法：一律按 URL 域名子串判**（`"rainflow" in api_url`），fallback 顺序也按域名排，开工前先打印 `{后缀: 域名}` 一览核对。**终态验收的判据没做空白归一化，证据与结论自相矛盾（坑 305）**——`final_verify` 把证据 `draftSec` 归一化后打印（`t.slice(...).replace(/\s+/g,' ')`），却拿**未归一化**的 `t` 跑 `/Kimi K3\.1/`；首页卡片把标题折成 `Kimi\nK3.1`，于是**同一条日志里打印的证据明明含 `【2026-10-25】Kimi K3.1 Pro …`，结论却是 `draftHasToday: false`**。**铁律：判据和证据必须用同一份归一化文本**（先 `const t = raw.replace(/\s+/g,' ')`，之后只碰 `t`）；**「打印的证据命中、结论却是 false」就是这个坑的指纹**，见到先查判据，别怀疑平台。
 > **🔴 v3.63.0 核心改进（2026-10-25 日报实测，生图 size 派生污染与两处视口外静默点击四坑 300-303）**：**derive 的日期替换会污染尺寸字面量（坑 300）**——`'1024' → '1025'` 全串替换把生图脚本里硬编码的 `size: '1536x1024'` 改成 `'1536x1025'`，rainflow 回「不支持的图片比例」；排查指纹 = 网关报比例不支持但比例明明没问题 → 先 grep 尺寸字面量有没有被日期吃掉；修法 = **尺寸不硬编码，按端点运行时算**（rainflow 用 `auto`，其他 `1536x1024`）。**`size:'auto'` 会返回方图，必须在 prompt 写死横构图（坑 301）**——rainflow 的 `auto` 在无构图提示时返回 1254×1254，塞 1920×1080 被裁两侧；prompt 末尾加 `Wide 16:9 horizontal cinematic composition, full-frame landscape framing.` 后 6/6 得 1672×940/941（1.78）。**B站分区真选择器是 `.drop-list-v2-item`，且在视口外时坐标点击静默无效（坑 302）**——旧脚本按通用 `li,div,span,p` 文本匹配命不中，分区停在默认「音乐」；`人工智能` 项在 y=759 超出 769 视口，`mouse.click` / `el.click()` / `dispatchEvent` **全部静默失败不报错**；修法 = `locator('.drop-list-v2-item').filter(has_text=...).first.scroll_into_view_if_needed()` 后 `click(force=True)`。**视频号 `.mark-tag-select` 同样初始在视口外（坑 303）**——rect.y=1208 时 `mouse.click` 返回成功但 `.mark-tag-options` 仍 `display:none`、选项查询返回 `[]`（看着像「下拉里没有 AI 选项」）；修法 = `scrollIntoView({block:'center'})` → 重取 rect → 点击 → **先断言 `display === 'block'` 再查选项**。与坑 302 同根：**任何 `mouse.click` 前必须确认目标 rect 在当前视口内**。小坑：视频号 `edit-cover-dialog-container` 关闭后仍留在 DOM 且 rect 为 0×0，「容器存在」判弹窗未关是假阳性（改判 `rect.width>0 && rect.height>0`，或直接回读槽位 `img.naturalWidth/naturalHeight`）；封面喂图后必须等预览图出现目标尺寸再点确认；B站标签可能被平台单独拒收（本期 `AI大模型` 未入 chips，6/7），断言写成「记录缺失但不阻塞」。1025 正例：日报 370 帖 / 成片 163.392s / 4900 帧 / 16,361,460B / 锚点 0.7657；字幕块重分配六块起点 Δ 全 0ms，mp4 音频验证 lead 中位 **+0.097s** / 离群 0（57/72 可测）；四平台全草稿。
@@ -19,7 +20,7 @@ version: 3.65.0
 > **🔴 v3.57.0 核心改进（2026-10-20 日报实测，抖音/视频号上传五坑 278-282）**：**视频号 wujie 页秒级重渲染，`set_input_files` 对 ElementHandle 必 detached（坑 278）**——1020 期 `input[type=file]` 每次 fresh-query 都能找到，但 `set` 瞬间即 `Cannot set input files to detached element`，重试 5 次全灭；修法 = 放弃 handle 直设，改 `page.expect_file_chooser` + 点上传区（视频传 `.ant-upload-drag` 中心，一次过 11.6MB）。**视频号发表动态页 ready 判据与上传页不同（坑 279）**——`删除/重新上传`文本在发表页不存在，上传成功看预览帧（OpenCode 字幕帧可现）+ 表单可填；判据必须按页面形态分别写，**截图为准**，文本轮询只做辅助。**视频号封面是"编辑→选帧+上传封面(+号/.add-icon)"弹窗结构（坑 280）**——竖 3:4（`.vertical-img-wrap`）/横 4:3（`.horizon-img-wrap`）各一个编辑入口，点编辑后弹窗含视频帧条 + `上传封面` + `.add-icon` 加号；且弹窗有关闭状态机（点确认后关闭），每次循环须 Esc 清残留→重开→校验 add-icon 可见（`offsetParent` 非空且 rect 非 [0,0]）再点，隐藏节点点下去 filechooser 永不弹。**抖音"上传失败，重新上传"可是假失败态（坑 281）**——右侧预览报失败但表单 poll `ready=True`（标题 17 字/描述/暂存离开全在）；对策 = file input 直传重传（一次轮询即就绪），不纠结预览文案；封面确认按钮须 `完成/保存/确定` 三词全覆盖（1020 首版只找"完成"漏"保存"），且按坑 229 封面不持久失败不阻塞存草稿。**视频号 tab 会跳到 `/post/list`（坑 282）**——疑似发表/保存后自动跳转或 wujie 路由漂移，脚本按 URL 精确匹配即 `channels page gone`；修法 = 按域名模糊匹配（`channels.weixin.qq.com` + `post/` 前缀），list 页先看是否草稿已存再决定回发表页。1020 正例：抖音 filechooser 重传→横竖封面保存→暂存离开→"继续编辑"横幅 True；视频号表单 evaluate 回读 desc/short/errors 全绿（assert 字符串比对中文引号转义易错，以字段分别断言为准）。
 > **🔴 v3.56.0 核心改进（2026-10-18 周报 W41 实测，周报派生链七坑 271-277）**：**`image-prompts-*.json` 有 dict/list 两种形态，派生脚本读写前先做 dict 兼容（坑 271）**——W41 的 prompts 落盘是 `{"date":..., "scenes":[...]}` dict 形态（W40 曾是顶层 list），`gen_images_w41.py` 直接 `for p in prompts` 报 `TypeError: string indices must be integers`；修法 = 读完即 `if isinstance(prompts, dict): prompts = prompts.get('scenes', [])`，**读 prompts / voiceover / concepts 三处 JSON 一律加此兼容行**（verify_w41 同样对 `scenes`/`plist`/`bank` 三处做了 dict/list 双兼容）。**derive 做日期替换时「先换日期、后加新 pattern」，extra pattern 必须写新日期形态（坑 272）**——`derive()` 内先 `s.replace(OLD_DATE, NEW_DATE)` 再应用 extra 替换，extra 里若仍写旧文件名（如 W40 的 `image-prompts-2026-10-05~2026-10-11.json`）会 `WARN pattern not found` 静默跳过、插入的兼容行挂错位置；**extra 的锚点字符串一律用 NEW_DATE 形态写**。**NewsTitle patch 必须覆盖「单日残留」形态（坑 273）**——共享工程被日报会话改过后，`PERIOD_DATE` 可能是单日值 `'2026-10-18'`（不是上期周报区间），只备 `OLD_RANGE→NEW_RANGE` 会 patch 落空；W41 的 `patch_newstitle_w41.py` 内置 5 形态全覆盖（单日 `2026-10-18` / 上期区间 / 相邻单日 / 前两周区间）+ `BRAND '今日羊报AI'→'羊报AI周刊'`，落空即 `SystemExit` 报错不静默过。**triple-quote docstring 与 `import` 写同一行必 `SyntaxError`（坑 274）**——derive 内嵌新脚本字符串时 `"""把...改成 W41 周报值。"""` 与 `import pathlib` 同行，`"""` 闭合后同行代码非法；**内嵌模板一律 docstring 独占一行**。**COVER 云端模板是死代码，`SCENES_ONLY=True` 但封面大字仍须同步更新（坑 275）**——W41 `gen_images_w41.py` 封面走本地 PIL（坑 225），`if not SCENES_ONLY` 分支永不执行，但 COVER 字符串里仍印 W40 大字/日期/水印；派生时若不同步换词，下次 SCENES_ONLY 翻转即烧错版。**derive 对 `run_all.sh` 做 VID 整行三形态替换 + `patch_newstitle_w40→w41` 文件名修正（坑 276）**——VID 行在日期替换后可能是新日期+旧标题的混合态（`【10-12~10-18】时间表先行…`），单 pattern 覆盖不全；W41 用三行 `s.replace`（混合态/全旧态/短日期态）全覆盖 + 逐项 `check` 断言（title 无 `时间表先行` 残留）；另 `run_all` 引用的 patch 文件名 `w40→w41` 必须同步改，否则调到旧期脚本。**禁词扫描作用域只限 BODY_HTML 正文段（坑 277）**——全脚本扫描会把 `BANNED_KEYWORDS` 定义行自身计为命中（W41 初版 27 误报）；**扫描对象 = BODY_HTML 常量段**，定义行/注释/verify 逻辑排除在外。正例：W41 TTS 105.994s（666 字门禁 PASS）/ 成片 106.15s 10541KB / 锚点实测 0.7486 / 尾差 0.580s（cap 105.58→wav 105.994→video 106.15，坑 234 三项可解释）/ 公众号 appid=100001605 一次过。
 
-> **🔴 v3.55.0 核心改进（2026-10-19 日报实测，产物完整性与流程坑 265-270）**：**`publish.json` 必须由脚本生成，禁止手写（坑 265）**——1019 手写精简版只填了标题/封面/视频/时长/锚点，漏了顶层 `description`/`tags`/`draft_only` 与各平台 `description`/`partition`，**`platform.channels` 段整个不存在**（视频号脚本取不到标题）。1018 的完整结构=顶层 `date/title/description/tags/draft_only/cover/video/duration/anchor/platform`，`platform` 下 `bilibili{title,partition,tags,description}` / `douyin{title,tags,description}` / `channels{title,tags,description}` / `wechat{title,collection,article,images}`。**派生后必须逐字段 diff 上期 publish.json**，缺字段即失败。**合集下拉需等 ≥2.5s 才渲染选项（坑 266，坑 255 的时效补充）**——1019 `li.select-opt-li` 在 1.2s 时是 `0 items`、2.5s 后正常渲染 3 个选项（羊报AI周刊/「今日羊报 AI」/羊报AI月报）；**坑 255 说「0 items 是没展开不是没选中」仍成立，但补一条：脚本内等待时间不足也会真的没渲染**——对策=输入关键词后轮询等待选项出现（最多 ~5s），再点选。**首页「近期草稿」需 reload 才见刚存的草稿（坑 267）**——1019 存完草稿后首页草稿区仍显示 10-12 的旧条目，`location.reload()` + 9s 后首条才变成当期的「更新于 09:50」；**验收前必须 reload 首页**，否则会误判草稿丢失。**raw CDP 打标必须是数字 1（坑 268）**——上传脚本用 `window.__wx1019 === 1` 严格比较识别编辑页，raw CDP 若写成字符串 `'1'` 则不匹配，脚本会重新开新编辑页（丢已填内容）；**跨工具打标统一用 `= 1`（数字）**。**共享 Remotion 工程 `news-pipeline/video-project` 多会话争用（坑 269）**——该目录被日报与周报（W41）共用，`src/Composition.tsx`/`Root.tsx` 是单份配置；**改前必须先确认另一会话产物已在盘**（1019 实测 W41 周报成片 10-18 22:41 已生成 → 可安全改），并先 `cp` 备份为 `.bak-w41` 再改，改完核对 `public/images/` 场景数（周报 10 场景 → 日报 7 场景要删多余 sceneN.jpg）。**heredoc 写文件前先确认 cwd（坑 270）**——1019 在 `news-pipeline/2026-10-19/scripts` 下执行 `mkdir -p ../prompts && cat > .../prompts/x.json`，因相对路径基准错位导致目录没建成、文件静默丢失（无报错）；**写产物一律用绝对路径或 Write 工具**，写完 `ls` 复核。
+> **🔴 v3.55.0 核心改进（2026-10-19 日报实测，产物完整性与流程坑 265-270）**：**`publish.json` 必须由脚本生成，禁止手写（坑 265）**——1019 手写精简版只填了标题/封面/视频/时长/锚点，漏了顶层 `description`/`tags`/`draft_only` 与各平台 `description`/`partition`，**`platform.channels` 段整个不存在**（视频号脚本取不到标题）。1018 的完整结构=顶层 `date/title/description/tags/draft_only/cover/video/duration/anchor/platform`，`platform` 下 `bilibili{title,partition,tags,description}` / `douyin{title,tags,description}` / `channels{title,tags,description}` / `wechat{title,collection,article,images}`。**派生后必须逐字段 diff 上期 publish.json**，缺字段即失败。**合集下拉需等 ≥2.5s 才渲染选项（坑 266，坑 255 的时效补充）**——1019 `li.select-opt-li` 在 1.2s 时是 `0 items`、2.5s 后正常渲染 3 个选项（羊报AI周刊/「今日羊报 AI」/羊报AI月报）；**坑 255 说「0 items 是没展开不是没选中」仍成立，但补一条：脚本内等待时间不足也会真的没渲染**——对策=输入关键词后轮询等待选项出现（最多 ~5s），再点选。**首页「近期草稿」需 reload 才见刚存的草稿（坑 267）**——1019 存完草稿后首页草稿区仍显示 10-12 的旧条目，`location.reload()` + 9s 后首条才变成当期的「更新于 09:50」；**验收前必须 reload 首页**，否则会误判草稿丢失。（v3.66.0 坑 315 复核：`location.reload()` 会保留 `token=`，此写法安全；曾一度把「登录超时空页」归因为 reload 丢 token，已复测证伪。）**raw CDP 打标必须是数字 1（坑 268）**——上传脚本用 `window.__wx1019 === 1` 严格比较识别编辑页，raw CDP 若写成字符串 `'1'` 则不匹配，脚本会重新开新编辑页（丢已填内容）；**跨工具打标统一用 `= 1`（数字）**。**共享 Remotion 工程 `news-pipeline/video-project` 多会话争用（坑 269）**——该目录被日报与周报（W41）共用，`src/Composition.tsx`/`Root.tsx` 是单份配置；**改前必须先确认另一会话产物已在盘**（1019 实测 W41 周报成片 10-18 22:41 已生成 → 可安全改），并先 `cp` 备份为 `.bak-w41` 再改，改完核对 `public/images/` 场景数（周报 10 场景 → 日报 7 场景要删多余 sceneN.jpg）。**heredoc 写文件前先确认 cwd（坑 270）**——1019 在 `news-pipeline/2026-10-19/scripts` 下执行 `mkdir -p ../prompts && cat > .../prompts/x.json`，因相对路径基准错位导致目录没建成、文件静默丢失（无报错）；**写产物一律用绝对路径或 Write 工具**，写完 `ls` 复核。
 
 > **🔴 v3.54.0 核心改进（2026-10-19 日报实测，公众号 raw CDP 兜底三坑 262-264）**：**`connect_over_cdp` 会成时段性挂起，raw CDP 是唯一兜底（坑 262）**——1019 实测 Playwright `connect_over_cdp('http://localhost:9222')` 连续 3 次 180s 超时（`<ws connected>` 后无响应），期间 `curl /json/version` 与 `/json/list` 全正常（daemon 健康、27 标签页），确认是 attach 层故障非 daemon 死亡；**同一会话内 40 分钟后自行恢复（0.5s 连上）**。对策：① 探针用 `connect_over_cdp(timeout=25000)` 快速判定，挂起即切 raw CDP；② raw CDP 客户端（裸 socket + WebSocket 手写握手 + `Runtime.evaluate`）可完成 open/body/save/verify 全链，**唯一做不到的是文件上传**（`DOM.setFileInputFiles` 不派发 change 事件；JS 构造 `File` 塞 `input.files` 被浏览器拒绝——FileList 只读）；③ 因此 attach 挂起期间**图片/视频上传必须等恢复**，其余步骤可 raw CDP 先行。**raw CDP 注入正文必须用 TextDecoder 解 UTF-8（坑 263）**——`atob(b64)` 返回 latin1 字符串，中文全乱码（`DeepSeek Harness è®¡è´¹å¼å¸¸`）；正确写法是把 Python 的 `BODY.encode('utf-8')` 转成字节数组传进 JS，再 `new TextDecoder('utf-8').decode(new Uint8Array(bytes))`。**重跑 body 不会清除已上传的图片，且 Meta+A/Meta+V 可能静默失效（坑 264）**——1019 改措辞后重跑 `body` 步，`bodyLen 984` 看似成功，但编辑器正文**仍是旧版**（`Meta+A`+`Meta+V` 未生效，焦点不在编辑器），且已上传的 5 张图**保留**（重跑 images 步直接 `no placeholders left`）。**改字必须用 TreeWalker 精确替换文本节点**（`createTreeWalker(pm, SHOW_TEXT)` 找含旧词的节点改 `nodeValue`），改完 `dispatchEvent(new Event('input'))` 再存草稿；**改后必须回读校验**（`tx.includes(旧词)===false`），不能只看 bodyLen。**验收正例**：1019 公众号 appmsgid=100001618（bodyLen 924 / 占位符 0 / 5 张有效图 / 封面 hasQpic / 标题 63 字 / 合集「今日羊报 AI」/ 无 B 档禁词），首页「近期草稿」首条标题文本匹配「更新于 09:50」，「近期发表」无当日记录=未误发表。**B 档禁词误报**：「护栏」在禁词表里针对安全审查语境，但「用量护栏」是技术用语——1019 命中后改为「用量上限」避开，**改词只改公众号正文与 article md，不动已渲染视频的 voiceover**（视频已过审核清单，重跑 TTS+渲染代价不成比例）。
 
@@ -71,7 +72,7 @@ version: 3.65.0
 | B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） | URL 跳到 `upload-manager/article?group=draft`，且草稿箱标题匹配 |
 | 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿） | 按钮消失 **且**「继续编辑」横幅出现；同标签回读标题 + `video` 元素数 > 0 |
 | 视频号 | 点击「保存草稿」按钮 | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4） |
-| 公众号 | 点击「保存为草稿」按钮 | URL 出现 `appmsgid=`，且 `bodyLen` / 占位符数 / 封面 `hasQpic` 回读一致 |
+| 公众号 | 点击「保存为草稿」按钮 | URL 出现 `appmsgid=`，且 `bodyLen` / 占位符数 / 封面 `hasQpic` / **合集 `.js_article_tags_content`** 回读一致（v3.66.0 坑 310：合集**不能**用 `body.innerText` 子串判，正文页脚恒含合集名） |
 
 ### 🔴 浏览器与 Profile 全局铁律（v3.7.0 / 2026-07-18 实测）
 
@@ -2026,6 +2027,7 @@ MCP 不可用时由脚本接管，**严禁**每轮把 `launch_persistent_context
 7. **B站上传完成信号**：等标题输入框出现（`textarea, input[placeholder*=标题]`）即为表单就绪，勿用「上传成功」文案轮询（0916 轮了 5 分钟没命中）
 8. **🔴 B站存草稿按钮是 `span.submit-draft`（坑 200 / 0917）**：文案「存草稿」，tag=`SPAN` class=`submit-draft`，**不是** `button`。`button:has-text("存草稿")` 恒 count=0；evaluate 点 `button` 也是 no-op。必须 `page.locator('span.submit-draft').click({force:true})` 或坐标点中心。存草稿成功信号仍是草稿箱出现当日标题，**不是** URL 仍停在 `upload/video/frame`。
 9. **🔴 存草稿失败禁止 `goto` 草稿箱（坑 201 / 0917）**：表单未保存时跳去 `upload-manager/article?group=draft` 会把编辑页冲掉（0917 连丢 5 次表单）。失败时**留在表单页**截图诊断；验证草稿用**新标签页**打开草稿箱，不动编辑页。
+   - **🔴 进草稿编辑页只能点行内「编辑」按钮，草稿行没有可用 `href`（v3.66.0 坑 316 / 2026-10-26 实测）**：草稿箱列表里草稿行的链接解析出来是 `null`。做法 = 从标题叶子节点向上逐级（≤8 层）找 `textContent === '编辑'` 的元素，取 `getBoundingClientRect` 中心 `mouse.click`；通常新开标签落到 `upload/video/frame?type=draft&draftId=…`。回读字段：分区 `.selector-container .select-item-cont`、标签 `.label-item-v2-container`（去 `×`）、简介 `.ql-editor` 的 `innerText.length`、封面取页面内 `naturalWidth>=400` 的最大 `img`。
 10. **🔴 B站封面已改版为「封面制作」全屏弹窗（坑 218 / 0921）**：点「添加封面」**不再触发原生 file chooser**（`expect_file_chooser` 必超时，0921 白等两轮）；路径 = 弹窗内点「上传封面」→ 取 **`accept` 含 `image` 的 input** `set_input_files` → 点 `.cover-editor-button .button.submit`（文案「完成」）。**此刻页面共 5 个 `input[type=file]`（`.mp4`×2 / `.txt` / `.zip` / 封面 image），按索引 `inputs[1]`/`inputs[-1]` 会把 png 喂给视频或 zip input——不报错、表单纹丝不动**（0921 连错两次）。可复用 `templates/bili_cover.py`；三步顺序铁律：**先上传封面 + set_files，再点「完成」**（先点完成只关空弹窗）。
 11. **🔴 B站标签上限 10 且会被推荐标签污染（坑 219 / 0921）**：投稿页自动预置「学习 / 生活记录 / 记录」等无关 chips，占满额度后新增**静默丢弃**（弹出「允许添加的标签已经达到上限了」）。先删预置再补自己的；删除 `×` 在 `label-item-v2-container` 容器**最右缘**（点文字元素或容器中心无效，0921 空转三轮）。每次增删后**回读 `.label-item-v2-container` 文本列表断言**，不要只信脚本打印的 "added"。
 12. **🔴 上传前把封面拷到日期目录根（v3.38.0）**：`gen_images.py` 把横/竖封面写进 `news-pipeline/{date}/images/`，而上传脚本读的是**日期目录根**：`cp news-pipeline/{date}/images/horizontal-4-3.png news-pipeline/{date}/images/vertical-3-4.png news-pipeline/{date}/`。漏拷即 `set_input_files` 找不到文件。
@@ -2348,7 +2350,7 @@ if ('新的创作' not in home) and ('New creation' not in home):
 1. **标题/作者/正文先行**：先确保标题、作者、正文、视频号内容就位，再处理封面——封面不稳定不得阻塞草稿（v3.5.0 降级原则）
 2. **正文图片用「本地上传」**：正文配图一律用工具栏「图片」→「本地上传」→ `setInputFiles(sceneN.png)`，不要用纯 innerHTML 注入（注入不落素材库，封面无法「从正文选择」）
 3. **封面选图路径**：先用 `horizontal-4-3.png` 插入正文 → 再「从正文选择」设封面（v3.8.0 铁律：裁剪弹窗标题「编辑封面」、确认键是 enabled「确认」非灰「确定」、禁止弹窗内 Escape、轮询 `.js_cover_preview_new{display:block; bg 含 mmbiz}`）
-4. **合集选择 try-catch 兜底**：合集失败时 `try-catch`（timeout 5000）跳过，不阻塞保存草稿（v3.3.0）
+4. **合集选择**：v3.66.0 起走 12.10 的可复现流程（真入口 `.allow_click_opr.js_article_tags_label`），**并把回读判据写成硬断言**——`.`js_article_tags_content` 必须等于合集名，`未添加` 即失败。旧版「try-catch 跳过不阻塞保存」是本期静默失败的成因之一：合集没挂上但流水线照跑、照存、照报成功（坑 310/312）
 5. **最后保存草稿**：所有项目填完后点「保存为草稿」，以 URL `appmsgid=` 为准；弹窗阻挡时 Escape 关闭上传中挡层再保存
 6. **验收**：`appmsgid=` 出现在 URL / 保存成功回执为准，勿只看「已保存」文案（常不出现）
 
@@ -3034,78 +3036,80 @@ browser_evaluate("""() => {
 - 「我已阅读并同意」checkbox 已默认勾选
 - 直接点击「确定」即可，无需手动操作其他选项
 
-#### 12.10 选择合集（已验证 v1.9.1）
+#### 12.10 选择合集（v3.66.0 重写，坑 310/312 实测修正）
 
-**🔴 合集选择器是自定义 Vue 组件，必须用 Playwright locator 精确匹配：**
+**🔴 2026-10-26 实测：这是公众号链路上最容易「静默失败」的一步。** 点不中就不开弹窗、**不抛任何异常**、随后「保存为草稿」照样成功并返回 `appmsgid`——只有回读合集控件才发现还是「未添加」。
+
+**真入口（唯一）**：`.allow_click_opr.js_article_tags_label`
+- 它是「合集」二字右侧那个「未添加」所在的 **DIV**（实测约 54×22，内含 `SPAN.lbl_content_after` 与 `I.read-more__icon__more`）
+- **无效且不报错的点法**：点 `SPAN.lbl_content`（「合集」二字）／点行内空白／点 `.frm_checkbox_label` 整行 —— 实测 DOM 节点数 1377→1377，无变化
 
 ```
-# 步骤1：点击「合集」→「未添加」打开弹窗
-browser_run_code_unsafe("""async (page) => {
-  await page.evaluate(() => {
-    const elements = document.querySelectorAll('*');
-    for (const el of elements) {
-      if (el.textContent.trim() === '未添加' && el.offsetParent !== null) {
-        const rect = el.getBoundingClientRect();
-        if (rect.y > 400 && rect.y < 600 && rect.x > 600) {
-          el.click();
-          return;
-        }
-      }
-    }
+# 步骤1：点真入口打开弹窗（先 scrollIntoView 再重取 rect，坑 302 通用规则）
+ed.evaluate("""() => {
+  const t = document.querySelector('.allow_click_opr.js_article_tags_label');
+  t.scrollIntoView({block: 'center'});
+}""")
+box = ed.evaluate("""() => { const r = document.querySelector('.allow_click_opr.js_article_tags_label').getBoundingClientRect();
+  return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)}; }""")
+ed.mouse.click(box['x'], box['y'])
+# 断言弹窗真的开了——不要用「页面文本含『选择合集』」当判据（本期该文本一直存在，恒真）
+for _ in range(10):
+    ed.wait_for_timeout(600)
+    if ed.evaluate("() => { const d = document.querySelector('.album-setting-dialog'); return !!(d && d.offsetParent); }"):
+        break
+assert ed.evaluate("() => { const d = document.querySelector('.album-setting-dialog'); return !!(d && d.offsetParent); }")
+
+# 步骤2：弹窗内输入框填关键词（daily「今日羊报」/ weekly「羊报AI周刊」/ monthly「羊报AI月报」）
+inp = ed.locator('.album-setting-dialog input[placeholder="请选择合集"]').first
+inp.click(); inp.fill('今日羊报')
+
+# 步骤3：等选项渲染，取 li.select-opt-li（本期 600ms 就出来了；仍按坑 266 轮询到出现为止）
+opts = ed.evaluate("""() => {
+  const c = document.querySelector('.album-setting-dialog .select-opts-con');
+  if (!c || c.style.display === 'none') return [];
+  return Array.from(c.querySelectorAll('li.select-opt-li')).map(e => {
+    const r = e.getBoundingClientRect();
+    return {t: (e.textContent||'').trim(), x: Math.round(r.x+r.width/2), y: Math.round(r.y+r.height/2),
+            w: Math.round(r.width), h: Math.round(r.height)};
   });
-  await page.waitForTimeout(1500);
-  return 'dialog opened';
 }""")
+# 本期实测 ["羊报AI周刊", "「今日羊报 AI」", "羊报AI月报"]，每项 320×36
 
-# 步骤2：点击输入框 focus（搜索关键词按 REPORT_MODE：daily「今日羊报」/ weekly「羊报AI周刊」/ monthly「羊报AI月报」）
-browser_run_code_unsafe("""async (page) => {
-  const input = page.getByRole('textbox', { name: '请选择合集' });
-  await input.click();
-  await page.waitForTimeout(500);
-  await input.fill('今日羊报');
-  await page.waitForTimeout(1000);
-  return 'typed';
-}""")
-# 🔴 兜底（v3.22.0 / 2026-08-28 实测）：弹窗未开时 getByRole('textbox', {name:'请选择合集'}) 30s 超时。
-# 须先 document.querySelector('.js_article_tags_content').scrollIntoView({block:'center'}) + click 开弹窗，
-# 再用 page.locator('input[placeholder="请选择合集"]') 兜底定位输入框。
+# 步骤4：精确匹配 + 坐标点击（合集名按 REPORT_MODE 从模式参数映射表读取）
+pick = [o for o in opts if o['t'].replace(' ','') == COLLECTION.replace(' ','')][0]
+ed.mouse.click(pick['x'], pick['y'])
 
-# 步骤3：hover 并点击选项（必须用 exact: true 精确匹配！合集名按 REPORT_MODE 从模式参数映射表读取）
-browser_run_code_unsafe("""async (page) => {
-  // daily 「今日羊报 AI」/ weekly 「羊报AI周刊」/ monthly 「羊报AI月报」
-  const option = page.getByText('「今日羊报 AI」', { exact: true });
-  await option.hover();
-  await page.waitForTimeout(500);
-  await option.click();
-  await page.waitForTimeout(500);
-  return 'clicked option';
+# 步骤5：弹窗内「确认」（button 文案精确为「确认」，class weui-desktop-btn_primary）
+conf = ed.evaluate("""() => {
+  const d = document.querySelector('.album-setting-dialog');
+  const b = Array.from(d.querySelectorAll('button')).find(x => (x.textContent||'').trim() === '确认' && x.offsetParent);
+  const r = b.getBoundingClientRect();
+  return {x: Math.round(r.x+r.width/2), y: Math.round(r.y+r.height/2), disabled: b.disabled};
 }""")
+ed.mouse.click(conf['x'], conf['y'])
+```
+
+**🔴 唯一可靠的成功判据（坑 310）**：回读 `.js_article_tags_content` 的 textContent。
+
+```
+coll = ed.evaluate("() => { const d = document.querySelector('.js_article_tags_content'); return d ? d.textContent.replace(/\\s+/g,' ').trim() : null; }")
+coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll     # 挂上后实测为「「今日羊报 AI」」
+```
+
+**禁止用 `body.innerText` 是否含合集名当判据**——正文 `TAIL` 页脚固定有「🔔 关注「今日羊报 AI」，每天 9 点…」，含书名号的 `「今日羊报 AI」` 会让判据**恒为真**。本期 `MP_VERIFY: {..., "collection": true}` 就是这么误报的，实际字段仍是「未添加」。
+
+**挂上后必须重新「保存为草稿」**（合集随草稿保存）。实测补挂并重存后 `appmsgid` 仍在、`bodyLen` 1877 不变、占位符 0——**重存不会破坏已有正文与图片**。
+
+**坑 255 仍然成立但不够用**：`li.select-opt-li` 计数 0 ≠ 没选中（选项只在手动展开时才渲染），所以「0 items」不能当失败信号；但反过来**也不能因为「看起来点过了」就当成功**——判据永远回到 `.js_article_tags_content`。
 
 # 🔴 v3.47.0 坑 252：合集下拉偶发「option not found (0 items)」（选项列表未加载完成），
 # 与坑 232（B站标签重输）同族——先重跑 `wechat_upload.py save` 一次再定性；
 # 1013 首跑 0 items，重跑即挂上「今日羊报 AI」。禁止据此判定合集不可用转手动。
 #
-# 🔴 v3.50.0 坑 255（2026-10-15 实测，重要修正）：**`li.select-opt-li` 计数为 0
-# 不等于合集未选中**。1015 首跑 save 报 `option not found (0 items)`，重跑 save 仍
-# `0 items`，但**编辑页回读已含「今日羊报 AI」**——说明「点 合集 label → 点未添加
-# → 点 input → 填关键词」这条链在选项列表尚未渲染时**仍会命中默认/唯一合集**，
-# 而 `li.select-opt-li` 只在用户手动展开时才出现。
-# **判定合集是否挂上的唯一可靠判据 = 编辑页回读文本含合集名**（见下方 verify 用法），
-# 绝不能用 `option not found (0 items)` 当失败信号，更不可据此重跑或转手动。
-
-# 步骤4：点击「确认」
-browser_run_code_unsafe("""async (page) => {
-  const confirmBtn = page.getByRole('button', { name: '确认' });
-  await confirmBtn.click();
-  await page.waitForTimeout(1000);
-  return 'confirmed';
-}""")
-```
-
-**关键经验（v1.9.1 验证）：**
-1. **必须用 `page.getByText('「今日羊报 AI」', { exact: true })` 精确匹配**，否则会匹配到正文中的同名文本
-2. **必须先 hover 再 click**，直接 click 可能不生效
-3. **点击「确认」用 `page.getByRole('button', { name: '确认' })`**，不要用 JS evaluate
+# 🔴 v3.50.0 坑 255（2026-10-15 实测）：**`li.select-opt-li` 计数为 0
+# 不等于合集未选中**。而 `li.select-opt-li` 只在用户手动展开时才出现。
+# 🔴 v3.66.0 坑 310 补充：它也不等于「已选中」——判据只认 `.js_article_tags_content`。
 
 #### 12.11 保存草稿
 
@@ -3154,7 +3158,7 @@ browser_run_code_unsafe("""async (page) => {
 | 封面 | 拖拽区域 | 「从图片库选择」/ 「从正文选择」 | ⚠️ 需坐标点击（图库缩略图在子 `<i>` 的 backgroundImage，非 `<img>`）|
 | 原创声明 | 弹窗 | 点击「原创」→ 确定 | ✅ 高 |
 | 赞赏 | 弹窗 | 点击「赞赏」→ 不开启 → 勾选同意 → 确定 | ✅ 高 |
-| 合集 | **自定义 Vue 组件** | 坐标点击下拉框 → 选择 → 确认 | ⚠️ 坐标方式 |
+| 合集 | **自定义 Vue 组件** | 点 `.allow_click_opr.js_article_tags_label`（**不是**「合集」二字）→ 弹窗内 `input[placeholder="请选择合集"]` 填词 → `li.select-opt-li` 精确匹配坐标点 → 弹窗内「确认」；回读 `.js_article_tags_content` | ✅ 高（v3.66.0 坑 310/312） |
 | 保存草稿 | 按钮 | `button:has-text("保存为草稿")` | ✅ 高 |
 
 **关键经验**：
@@ -3218,12 +3222,21 @@ browser_evaluate("""() => {
 }""")
 ```
 
-#### 12.7 设置合集（困难，建议手动）
+#### 12.7 设置合集（v3.66.0 已可自动化，见 12.10）
 
-**🔴 公众号合集选择器是自定义 Vue/React 组件，自动化成功率低：**
+**🔴 2026-10-26 实测更新：合集**不再是**「建议手动」**。此前判断「JS click 不稳定、成功率低」，根因是**点错了节点**——点「合集」二字或整行都不开弹窗且不报错。真入口 = `.allow_click_opr.js_article_tags_label`，完整可复现流程见 **12.10**，本期一次跑通（弹窗 `.album-setting-dialog` → 3 个 `li.select-opt-li` → 确认 → 回读 `.js_article_tags_content` = `「今日羊报 AI」`）。
 
 ```javascript
-// 方法1：尝试点击「合集 未添加」行
+// ✅ 现行方法（v3.66.0）：点「未添加」那个可点 DIV 的坐标，而不是它的父级/文本节点
+ed.evaluate("() => document.querySelector('.allow_click_opr.js_article_tags_label').scrollIntoView({block:'center'})")
+const r = ed.evaluate("() => { const b = document.querySelector('.allow_click_opr.js_article_tags_label').getBoundingClientRect(); return {x: Math.round(b.x+b.width/2), y: Math.round(b.y+b.height/2)}; }")
+ed.mouse.click(r.x, r.y)
+// 之后：.album-setting-dialog 内 input[placeholder="请选择合集"] → li.select-opt-li → 「确认」
+// 判据：.js_article_tags_content 的 textContent
+```
+
+```javascript
+// ❌ 旧方法（会静默失败，保留仅作对照）：点「合集 未添加」整行 / 点文本节点
 browser_evaluate("""() => {
   const elements = document.querySelectorAll('*');
   for (const el of elements) {
@@ -3270,7 +3283,8 @@ browser_click(target={确认按钮ref})
 1. **公众号编辑器使用 ProseMirror**，不是 Quill，注入方式不同
 2. **标题是隐藏 `#title` TEXTAREA + 可见 `.ProseMirror` 代理**（h=0，直接 click 超时）；页面两个 `.ProseMirror`：first()=标题代理、nth(1)=正文。标题填写永远放到正文注入之后（12.5b），回读 `#title.value`，禁 `textContent` 直写
 3. **图片上传到素材库成功，但不会自动插入文章**，需要手动定位光标后插入
-4. **合集选择器是自定义 Vue 组件**，JS click 不稳定，建议手动
+4. **图片完整性/封面验收的判据要排除 ProseMirror 分隔符**（v3.66.0 坑 311）——`body.querySelectorAll('img')` 里混有编辑器为每个图片块插入的 `IMG.ProseMirror-separator`（`src` 为空、`naturalWidth=0`），必须先按 class + `src` 非空过滤，否则 `all(w>100)` 恒假；反过来只数 `imgCount` 也恒真，两边都要防
+4. **合集选择器是自定义 Vue 组件**——**v3.66.0 起已可自动化，见 12.10**（旧结论「JS click 不稳定、建议手动」的根因是点错节点：点「合集」二字/整行都不开弹窗且不报错）
 5. **保存草稿前不需要完成所有设置**，可以先保存再编辑
 
 ### Phase 13: 微信视频号自动上传（Playwright MCP）
@@ -3673,6 +3687,33 @@ news-pipeline/
 **月报输入**：`data/monthly/{YYYY-MM}.md`（项目根 data 目录，由 linuxdo-daily v13 生成，**不在 news-pipeline 下**）。
 
 ## 已知坑与经验教训
+
+### 🔴 验收判据自欺 + 合集静默失败 + 一条被证伪的推断（v3.66.0 / 2026-10-26 日报实测，坑 310-316）
+
+**问题**：本期流水线全链跑完、日志全绿、`MP_VERIFY` 报 `collection: true`、文稿"看起来完美"——但公众号合集字段实际一直是「未添加」。收尾时另写了一个只看 `.js_article_tags_content` 的深度回读才发现，补挂后才真正完整。
+
+**根因**（四个独立形态 + 一条方法论教训）：
+
+- **坑 310 合集判据用正文子串 = 恒真**：`coll_ok = COLLECTION in all_txt`，而 `COLLECTION = '「今日羊报 AI」'`（含书名号）命中的是正文 `TAIL` 页脚「🔔 关注「今日羊报 AI」，每天 9 点…」。**证据（打印出来的页脚）与判据（同一个字符串搜索）看起来完全一致，所以没人怀疑。**
+- **坑 311 图片计数被 ProseMirror 分隔符污染 = 恒假**：`body.querySelectorAll('img')` = 12 个，其中 6 个是 `IMG.ProseMirror-separator`（`src` 空、`naturalWidth=0`），`all(w>100)` 恒假；真图 6 张（1080×608 ×5 + 1080×810 ×1）。
+- **坑 312 合集弹窗的唯一入口是一个约 54×22 的小 DIV**：点「合集」二字、点行内空白、点 `.frm_checkbox_label` 整行**全部不生效且不抛异常**（DOM 节点数 1377→1377）。点完照样能保存、能拿到 `appmsgid`，整条链静默失败。真入口 = `.allow_click_opr.js_article_tags_label`。
+- **坑 315「reload 丢 token」是个被证伪的推断**：首页一度读到 `len=83` 的「登录超时」空页，当时给出的解释是「裸 `reload()` 丢了 `token=` 参数」，并据此写下了「必须带 token 重新 goto」的结论。**收尾复测推翻了它**——`RELOAD_TEST {"before_len":1685,"after_len":1685,"after_url_has_token":true,"after_login_timeout":false}`，`reload()` 保留 token、首页完好；裸域 `goto('https://mp.weixin.qq.com/')` 也会 302 到带 token 的首页（同样 1685）。**真实成因至今未知（大概率瞬时）。**
+
+**解决**：
+1. **判据优先挂在专属 class 上，不要做文本搜索**：合集 → `.js_article_tags_content`；封面 → `.js_cover_preview_new` 的 `background-image`；分区 → `.selector-container .select-item-cont`。有稳定 class 时做子串搜索 = 主动引入假阳性。
+2. **图片验收必须三重过滤**：`img:not([class*=ProseMirror-separator])` + `src` 非空 + `naturalWidth/naturalHeight` 达标；**同时**别只数个数（数量对不代表加载成功）。
+3. **弹窗类控件的判断分两步**：先断言弹窗容器真的可见（`.album-setting-dialog` `offsetParent` 非空），再做下一步。**别用「页面文本含某某」当弹窗已打开的判据**——本期「选择合集」这段文本在弹窗关闭时也一直存在。
+4. **`try-catch` 跳过关键字段 = 把失败伪装成成功**：旧版 12.0 第 4 条写「合集失败时 try-catch 跳过，不阻塞保存草稿」。对**可选项**（赞赏、原创声明）可以这么做，对**需求明确要的字段**（合集）必须硬断言失败。本期就是被这条旧指导害的。
+5. **方法论（本坑最重要的沉淀）**：「一次观测 + 一个顺理成章的解释」**不等于**已验证的因果。`len=83` 是真的，`reload()` 会保留 token 也是真的——我当时的解释把两者错连在一起，还写进了文档。**凡是准备写进 skill 根因章节的因果链，落笔前必须单独复测一次**；复测不了就只记现象、注明「成因未明」。这与坑 305（证据与判据须同源）是同族：那次骗过人的是换行符，这次骗过人的是「解释力」。
+
+**同批小坑**：
+- **坑 313 跨平台复制断言词表必挂**：同一事实在不同平台文案里措辞不同——抖音「比上一代 K3 便宜 15%」，视频号「约为上一代 K3 的 85%」。把视频号词表套到抖音 → `AssertionError: missing issue word: 85%`。**词表必须按该平台自己的 `description` 生成。**
+- **坑 314 抖音话题按英文句点切分**：`publish.json` 的 `douyin.tags` 写 `K3.1`，页面回读 `["#AI日报","#K3",…]`——点号被吃掉，**变成了另一个话题**，不报错不提示。要么避开带点号的版本号，要么按实际值断言。
+- **坑 316 B站草稿行没有可用 `href`**：`upload-manager/article?group=draft` 列表里草稿行的链接解析为 `null`。要进编辑页只能点该行的「编辑」按钮——从标题叶子节点向上逐级（≤8 层）找 `textContent === '编辑'` 的元素取 rect 中心点击，通常新开标签落到 `upload/video/frame?type=draft&draftId=…`。
+- 回读公众号正文真图时，`img.naturalWidth` 为 0 但 `src` 非空 = 加载失败，是**真问题**；`src` 为空 + class 含 `ProseMirror-separator` = 分隔符，是**假问题**。两者要分开报。
+
+**Why:** 四个坑的共同点是**验收环节在骗自己**——不是平台坏了，是判据写错了，而且错的方向都是「让失败看起来像成功」（合集恒真、数量恒真）或「让成功看起来像失败」（图片恒假）。坑 315 则提醒：**错误的因果解释会以「经验」的形式沉淀下来，比没有解释更危险。**
+**How to apply:** 写任何验收判据时先问三个问题——① 这个判据**在功能真失败时会变红吗**？（反证测试）② 它在这个页面上**有没有第二个会命中的来源**？（正文/页脚/标题就是最常见的污染源）③ 有没有专属 class 可以直接读？三者过不了就换判据。**凡是准备写进 skill 的根因，落笔前单独复测一次；复测不成就只记现象。**
 
 ### 🔴 生图 size 派生污染 + 视口外静默点击：四个「不报错但就是不对」（v3.63.0 / 2026-10-25 实测，坑 300-303）
 
@@ -4096,12 +4137,7 @@ await titleInput.fill('代码偷吃SSD+豆包对标Opus｜今日羊报AI');
 ### 🔴 微信公众号合集选择器
 **问题**：公众号合集选择器是自定义 Vue/React 组件，不是标准 HTML 元素。JS click 不稳定，有时选择后不生效。
 
-**解决**：建议手动完成合集选择。如果要尝试自动化：
-1. 点击「合集 未添加」行打开对话框
-2. 点击下拉框
-3. 用 JS evaluate 找到并点击选项
-4. 点击「确认」
-5. 保存草稿后检查是否生效
+**v3.66.0 更新**：**已可稳定自动化，完整流程见 12.10**。旧结论「建议手动」的根因是**点错节点**：点「合集」二字（`SPAN.lbl_content`）/ 行内空白 / `.frm_checkbox_label` 整行都不开弹窗，且**不报错**（DOM 节点数不变），随后保存草稿照样成功。真入口 = `.allow_click_opr.js_article_tags_label`（约 54×22 的 DIV）。回读判据只认 `.js_article_tags_content`。
 
 ### 🟡 微信公众号多标签页
 **问题**：点击「文章」会打开多个新标签页（可能重复点击导致）。
@@ -6070,6 +6106,8 @@ await cover.setInputFiles('news-pipeline/YYYY-MM-DD/horizontal-4-3.png');
 
 **v3.46.0 补充（坑 248，W40 实测）**：发表记录页 `cgi-bin/publish?action=list` **直接 `goto` 会抛 `ERR_HTTP_RESPONSE_CODE_FAILURE`**，该 URL 不稳定，不能当三件套第③项的入口。替代路径：首页「近期草稿」首条（含「更新于 HH:MM」）+ `appmsgid` 编辑页直达，两件齐即可判「草稿已存且未发表」，**不要为了第③项硬刷 publish 列表**。
 
+**v3.66.0 补充（坑 315，2026-10-26 实测）**：刷新首页看新草稿这件事，**`location.reload()` 本身是安全的**——复测 `RELOAD_TEST {"before_len":1685,"after_len":1685,"after_url_has_token":true,"after_login_timeout":false}`，token 保留、首页完好；裸域 `goto('https://mp.weixin.qq.com/')` 也会自动 302 到带 token 的首页（同样 1685）。**注意：本期曾一度出现 `len=83` 的「登录超时」空页，当时归因为「reload 丢 token」，该归因已被复测推翻，成因未明（大概率瞬时）。** 遇到空页的正确处理是**重试一次或换新标签页重开**，不要基于未验证的因果去改脚本。`templates/wechat_check_draft.py` 里的 `location.reload()` 可继续使用。
+
 **v3.50.0 补充（坑 221 第二次命中，2026-10-15 实测）**：`wechat_check_draft.py 2026-10-15` 走 `type=10 list_card` 返回 `草稿箱标题候选: []` + `in_publish_record: false` → 判定文案 `两处均无 — 需排查`。**这是假阴性，不是草稿丢失**——1015 草稿 `appmsgid=100001568` 实际完好。正确动作 = **改走首页「近期草稿」入口**（点文本为「近期草稿」的节点，页面停在 `cgi-bin/home`，草稿标题直接出现在首页 DOM 里），实测首条即 `【2026-10-15】Argon测评两极…`，与 10-14/10-13/10-12 等历史草稿同列返回。**铁律复述**：`type=10 list_card` 的空结果**永远不能**作为「草稿未保存」的证据；`wechat_check_draft.py` 的 `verdict` 字段在 `in_draft_box=false` 时**必须**再跑一次近期草稿入口才可定性。1015 的「近期草稿」入口片段：
 ```python
 r = page.evaluate('''() => {
@@ -6164,8 +6202,19 @@ st = page.evaluate('''() => {
 # hits 含「「今日羊报 AI」」= 合集已挂；hits 只有标题/正文命中 = 未挂
 ```
 判读要点：标题与正文里本来就有「今日羊报」字样，**必须区分**——合集命中的是**独立的、短文本的**叶子节点（如 `「今日羊报 AI」`），不是标题行或 CTA 行。
-**Why:** `li.select-opt-li` 计数测量的是「下拉是否展开」，不是「值是否已写入」；拿展开状态当写入状态是典型的假阴性，且重跑不会改变结论（每次都不展开）。
-**How to apply:** Phase 12.10 合集步 + `wechat_upload.py save` 的返回判读。**禁止**用 `option not found (0 items)` 作为失败信号、禁止据此重跑或转手动；以编辑页回读为准。与坑 252 的关系：坑 252 说「偶发空态先重跑一次」仍成立（针对 placeholders 与真正的选项未加载），但**合集这一项的重跑判据已被本条取代**。
+
+**🔴 v3.66.0 重要修正（坑 310 / 2026-10-26 实测）：上面这条「叶子节点」判据仍然会假阳性，已降级为不可用。**
+本期正文开头的 `<blockquote>` 署名行 `今日羊报 AI · 2026-10-26` 就是**独立的、短文本的叶子 SPAN**（195×21），`/今日羊报/` 直接命中；`TAIL` 页脚 `🔔 关注「今日羊报 AI」，每天 9 点…` 也是叶子，含书名号原样命中 `「今日羊报 AI」`。据此判「合集已挂」→ 实际字段是「未添加」，**整条链白跑**。
+**唯一可用判据 = 读合集控件本身**（有专属 class 就不要再做文本搜索）：
+```python
+coll = page.evaluate("() => { const d = document.querySelector('.js_article_tags_content'); return d ? d.textContent.replace(/\\s+/g,' ').trim() : null; }")
+# 未挂 = '未添加'；挂上 = '「今日羊报 AI」'
+coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
+```
+**「未添加」与「已挂」的区分是一条硬规则，不是启发式**：控件文本里出现「未添加」就直接判失败，不要因为别处有同名字符串而放行。
+
+**Why:** `li.select-opt-li` 计数测量的是「下拉是否展开」，不是「值是否已写入」；拿展开状态当写入状态是典型的假阴性，且重跑不会改变结论（每次都不展开）。**而「叶子节点文本匹配」测量的是「页面上某个地方出现过这个名字」，也不是「字段是否写入」——本期证明正文署名/页脚足以让它恒真。**
+**How to apply:** Phase 12.10 合集步 + `wechat_upload.py save` 的返回判读。**禁止**用 `option not found (0 items)` 作为失败信号、禁止据此重跑或转手动；**判据只认 `.js_article_tags_content`，禁止任何形式的页面文本搜索（含叶子节点扫描）**。与坑 252 的关系：坑 252 说「偶发空态先重跑一次」仍成立（针对 placeholders 与真正的选项未加载），但**合集这一项的重跑判据已被本条取代**。
 
 ### 🔴 API 429 双形态会批量杀死请求/子 agent（v3.47.0 / 2026-10-14 记录，坑 253）
 **问题**：1013 期主循环撞过 `429 · maximum 25 requests in 5 minutes`（限频）；skill 回写时 6 宽 Workflow 子 agent 全灭于 `429 · Concurrency limit exceeded for user`（并发上限），降到 2 宽仍有阵亡——被杀的 agent 返回 null **不会自动重试**，静默丢覆盖。
@@ -6182,6 +6231,56 @@ st = page.evaluate('''() => {
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.66.0（2026-10-26 日报全程实测，验收判据自欺 + 合集静默失败 + 一条被证伪的推断，坑 310-316）
+
+基于 **2026-10-26 日报全链**（daily 295 帖；成片 **147.349s / 12,896,900B / 4419 帧 / 1920×1080 / 30fps**，锚点 **0.7377**；公众号脚本上传并最终补挂合集；B站脚本实证后用户改手动；抖音/视频号用户手动）实测。
+
+**坑 310：合集判据用正文子串 = 恒真**
+- 事故：`MP_VERIFY` 打出 `{"collection": true}`，`coll_ok = COLLECTION in all_txt`。但合集字段实际是「未添加」，从头到尾没挂上。
+- 根因：`COLLECTION = '「今日羊报 AI」'`（含书名号）命中了正文 `TAIL` 页脚 `🔔 关注「今日羊报 AI」，每天 9 点带你速览 AI 圈最热的 5 条新闻。`
+- **判据改成读控件**：`document.querySelector('.js_article_tags_content').textContent` → 未挂为 `未添加`，挂上为 `「今日羊报 AI」`
+- 沉淀规则：**有专属 class 就别做文本搜索**。坑 255 说「只认独立短文本叶子」，本期证明还不够——叶子里也可能有正文页脚。
+
+**坑 311：图片计数被 ProseMirror 分隔符污染 = 恒假**
+- `body.querySelectorAll('img')` 返回 **12** 个：6 个真图（1080×608 ×5 + 1080×810 ×1）+ **6 个 `IMG.ProseMirror-separator`**（`src` 空、`naturalWidth=0`）
+- `all(w>100)` 恒假；反过来只数 `imgCount` 又恒真（数量对不代表加载成功）
+- 修法：`filter(i => !i.className.includes('ProseMirror-separator') && (i.getAttribute('src')||'').length > 0)` 然后才断言尺寸
+- 判失败的两个不同含义别混：`src` 空 + separator class = **假问题**；`src` 非空 + `naturalWidth=0` = **真破图**
+
+**坑 312：合集弹窗的唯一真入口是一个 54×22 的小 DIV**
+- 无效且**不报错**的点法：点 `SPAN.lbl_content`（「合集」二字）／行内空白／`.frm_checkbox_label` 整行——DOM 节点数 **1377→1377**，无异常，随后「保存为草稿」照样成功并返回 `appmsgid`
+- 真入口：`.allow_click_opr.js_article_tags_label`（文本「未添加」的 DIV）
+- 弹窗结构：`.album-setting-dialog` → `input[placeholder="请选择合集"]` → `.select-opts-con li.select-opt-li`（本期 3 项 320×36）→ `button.weui-desktop-btn_primary` 文案「确认」
+- **弹窗是否打开要用容器判**：`document.querySelector('.album-setting-dialog').offsetParent` 非空。**「页面文本含『选择合集』」恒真**，不能用
+- 挂上后必须重新「保存为草稿」；实测补挂重存后 `appmsgid` 仍在、`bodyLen` 1877 不变、占位符 0——**重存不破坏已有正文与图片**
+- **旧指导「合集 try-catch 跳过不阻塞保存」是本期静默失败的成因之一**：可选项可以跳过，需求明确要的字段必须硬断言
+
+**坑 313：跨平台复制断言词表必挂**
+- 同一事实措辞不同：抖音「比上一代 K3 **便宜 15%**」／视频号「约为上一代 K3 的 **85%**」
+- 把视频号词表套到抖音 → `AssertionError: missing issue word: 85%`
+- 修法：词表按 `publish.json` 里**该平台自己的** `description` 生成，禁止跨平台抄
+
+**坑 314：抖音话题按英文句点切分**
+- `publish.json` 的 `douyin.tags` 写 `K3.1`，页面回读 `["#AI日报","#K3","#订阅计费","#额度重置","#账号安全"]`
+- 点号被吃掉 → **变成了另一个话题**，不报错、不提示
+- 修法：话题里避开带点号的版本号（改写 `K3`），或接受降级并按实际值断言；**不要断言 `#K3.1`**
+
+**坑 315：「reload 丢 token」是一个被证伪的推断（方法论坑）**
+- 经过：首页回读一度拿到 `len=83` 的「登录超时」空页 → 当时的解释是「裸 `reload()` 丢了 `token=` 参数」→ 据此写了「必须带 token 重新 `goto`」
+- 复测推翻：`RELOAD_TEST {"before_len":1685,"after_len":1685,"before_url_has_token":true,"after_url_has_token":true,"after_login_timeout":false}`——`reload()` 保留 token、首页完好；裸域 `goto('https://mp.weixin.qq.com/')` 也会 302 到带 token 的首页（同样 1685），同样不复现
+- 结论：`len=83` 是真的，但**成因未知（大概率瞬时）**。「带 token 重新 goto」作为写法仍然安全，但**不许当根因写进文档**
+- **元教训**：一次观测 + 一个顺理成章的解释 ≠ 已验证的因果。**准备写进 skill 根因章节的因果链，落笔前必须单独复测一次；复测不成就只记现象、注明「成因未明」**。错误的因果解释会以「经验」的形式沉淀，比没有解释更危险（与坑 305「证据与判据须同源」同族：那次骗人的是换行符，这次骗人的是解释力）
+
+**坑 316：B站草稿行没有可用 `href`**
+- `upload-manager/article?group=draft` 列表里，草稿行链接解析为 `null`
+- 进编辑页只能点行内「编辑」按钮：从标题叶子节点向上逐级（≤8 层）找 `textContent === '编辑'` 的元素 → 取 rect 中心 `mouse.click` → 通常新开标签落到 `upload/video/frame?type=draft&draftId=…`
+- 回读字段：分区 `.selector-container .select-item-cont`、标签 `.label-item-v2-container`（去 `×`）、简介 `.ql-editor` 的 `innerText.length`、封面取页面内 `naturalWidth>=400` 的最大 `img`
+
+**小坑备查：**
+- 抖音封面验收**禁止 grep 页面文本**（`竖封面缺失` / `双封面缺失` 在 AI 推荐封面生成期会**瞬时为真**，坑 296）；只认 `.coverControl-CjlzqC` 下标 + `img.naturalWidth/naturalHeight`
+- 公众号正文深读时，`body.innerText` 里除了页脚，**标题、作者、CTA 也都会含合集名/日期**——凡是要判「某字段是否生效」，先找该字段的专属容器
+- 本期正例固化：daily 295 帖；成片 147.349s / 12,896,900B / 4419 帧 / 1920×1080 / 30fps；锚点 0.7377（wav 实测）；字幕 64 条、7 场景块起点精确等于 wav 边界（Δ0ms）；封面横 1536×1152 / 竖 1152×1536 未触发字号收缩；公众号最终 `MP_FINAL_OK`（appmsgid / 标题 67 字 / bodyLen 1877 / 占位符 0 / 真图 6 / 封面 hasQpic / 合集「今日羊报 AI」）
 
 ### v3.65.0（2026-10-25 W42 周报全程实测，raw CDP 迁移 + 三处静默失效坑 306-309）
 
