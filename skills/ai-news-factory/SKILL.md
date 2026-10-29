@@ -1,12 +1,20 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.66.0
+version: 3.70.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.66.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.70.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.70.0 核心改进（2026-10-29 全链实测：五处「派生残留」与「判据过严/过松」，坑 326-330）**：**坑 326 —— 派生脚本的 `forbidden`/`STALE` 表会误伤本期的合法复述。**1029 把上期事件词整表复制成 `forbidden`，结果 PDF 编译前断言炸在「招股书」上——而本期报告里「用 Anthropic 招股书的 85% 毛利率反推 Opus 5.5 成本」是**必须保留的论据**；同样 `publish.json` 的 `STALE` 表把「Terra」列为禁词，而本期「Codex 稳定性」那条正点名 GPT-6.1 Terra。**铁律：派生后先 `grep 每个 forbidden 词 data/reports/<DATE>.md`，命中的逐个判断是「上期残留」还是「本期合法引用」，后者从禁词表删除并在注释里写明理由**（1029 实测因此移除 `招股书` 与 `Terra` 两个词）。**坑 327 —— 锚点占比只在「低于 0.70」时有既定对策，超过 0.80 没有。**1029 首轮 TTS 实测 `191.991 / 235.727 = 0.8145`，超上限。既有指导（坑 236）只教「把锚点前口播加长约 12 字把占比推过 70%」——那是**加法**；超上限需要**减法或给锚点增重**。本期采用后者：**扩充锚点场景自身的口播**（补一段「延迟 vs 吞吐」的展开，+13.3s），把分母做大，占比降到 `191.991 / 249.035 = 0.7709`，一次通过。**为什么不用「削减前面场景」**：前面 5 个场景各承载一条独立新闻，删任何一条都要重做选材表与审核清单；而锚点场景本身是可加深的概念讲解，扩写不损失信息量。**坑 328 —— `audit` 脚本的可信度枚举是硬编码白名单，新写法会被判 FAIL。**1029 脚本里写了「可信度：官方发布」「可信度：官方站点」，`audit` 的 `CRED` 白名单只有 `官方确认/媒体报道/社区实测/源码迹象/未确认传闻/个人经历/第三方评测/概念定义/官方披露/社区观察` → 2 项 FAIL、`RENDER NOT ALLOWED`。**这是判据过严，不是脚本错**：语义上「官方发布」= 「官方确认」。处置二选一：① 改脚本用白名单里的词（首选，保持判据稳定）；② 扩白名单。**不要**为了绕过而写「可信度：官方确认」但内容其实是站点页面——`官方站点` 那种来源应归到 `官方确认` 或 `社区观察`，按「信息是谁说的」而不是「我从哪看到的」归类。**坑 329 —— `_setup_remotion` 的 `ANCHOR` 常量与 `play_order` 是两处独立硬编码。**1029 换了锚点场景（scene5 → scene6），改了 `script` 里的 `### 场景6（专业锚点·…）`、改了 `gen_publish` 的 `ANCHOR_SCENE`，**但漏了 `_setup_remotion_1029.py` 里的 `ANCHOR = 5`**——它负责断言「占比 ∈ [0.70, 0.80]」并在 `Composition.tsx` 注释里写锚点位置。漏改的直接后果是：若新锚点算出来的占比不在区间内，报错信息会指向错误的场景号，排查时白花时间。**铁律：换锚点场景时必须同时改三处——`script-<DATE>.md` 的场景标题、`gen_publish_*.py` 的 `ANCHOR_SCENE`、`_setup_remotion_*.py` 的 `ANCHOR`（外加注释里的概念名）。****坑 330 —— raw CDP 脚本必须「失败保留标签 + 附着复用」。**视频号 24MB 视频重传一次约 60s，而 1029 的 raw CDP 脚本每跑一步都 `open_tab` 新建 + `finally` 关标签，导致「上传 → 描述 → 封面」被拆成三次运行、每次都要重传。**改成 `attach_or_create()`**：把 `targetId` 落到 `/tmp/<platform>-<date>-tab.txt`，下次运行先查 `/json` 里该 id 是否还在，在就附着、不在才新建；**失败时 `keep=True` 不关标签**，让下一次运行能从断点继续（成功才关并删掉 id 文件）。这一条把「改一版封面」的成本从「重传 24MB + 重填表单」降到「只跑封面那一步」。
+
+> **🔴 v3.69.0 核心改进（2026-10-29 视频号补传实测：两个「界面在动但状态不对」的新形态，坑 324-325）**：**坑 324 —— 后台标签页里 Vue 过渡动画不推进，下拉面板「打开即关闭」**。视频号「添加合集」点开后，`.post-album-wrap .filter-wrap` 立即带上 `zoom-in-top-leave zoom-in-top-leave-active`、`opacity:0`、`getBoundingClientRect().height === 0`，而 `getComputedStyle().height` 仍是 `160px`、`scrollHeight=160`、`.option-item` 有 4 个且 `offsetParent` 非空。**判据陷阱**：`offsetParent !== null` 在高度 0 时仍为真 → 用「可见选项」筛选得到 0 条，会误判成「没有合集」。**根因** = 该标签页 `document.visibilityState === "hidden"`（raw CDP 新开的标签在后台），浏览器把 CSS transition 的推进节流掉了，`leave-active` 永远走不完。**实测无效**：`Page.bringToFront`、HTTP `/json/activate`（返回非 JSON，失败）、hover（`mouseMoved`）、只发 `mousePressed`、JS `dispatchEvent(new MouseEvent("click"))` —— 全部无法让面板停留。**可用修法**：直接在 evaluate 里**剥掉过渡类并内联样式**——`wrap.className="filter-wrap zoom-in-top-enter-to"`、`wrap.style.opacity="1"`、`wrap.style.transform="none"`，再给每个 `.option-item` 设 `height:40px; display:block`；随后选项 `getBoundingClientRect().height > 5` 成立，正常按坐标点击即可（本期实测一次成功，`ALBUM AFTER: 今日羊报Al`）。更一般的判据：**任何「点开就消失」的下拉/浮层，先量 `getBoundingClientRect().height`，不要用 `offsetParent` 或 `getComputedStyle().height` 判可见**。**坑 325 —— 上传就绪的假绿信号**：视频号表单的 `.input-editor` 在**上传之前就已存在**，所以「`ready = !!sr.querySelector(".input-editor")`」在文件刚喂进去时就返回 true，脚本会立刻往下走，后面写描述、设封面全落在空表单上。**真判据** = `sr.querySelectorAll("video").length >= 1` **且** `video.duration` 接近成片时长（本期 249s，实测 `dur=249`）**且** `body` 不含「点击上传/拖入此区域」。本期视频号正例（raw CDP 全链）：短标题 13 字 / 描述 244 字 / 竖封面 810×1080 + 横封面 / 合集「今日羊报Al 共138个内容」/ 「保存草稿」四步自证命中 `BUTTON/保存草稿`（x=893，三按钮 x=833/969/1105 间距 16px）/ 草稿箱 7 条首条为本期（07:57）。
+
+> **🔴 v3.68.0 核心改进（2026-10-29 日报实测：抖音草稿「视频不落库」这一新形态，坑 323）**：**抖音「暂存离开」成功后，「继续编辑」横幅、标题、描述、话题、双封面、合集、自主声明全部回读正常，但 `document.querySelectorAll('video').length === 0`、右侧上传区回到「点击上传」——视频文件本身没有被草稿持久化。**这是坑 290/295「双信号」（按钮消失 + 横幅出现）之后的第三种「回读对但没落库」，而且**它骗过的正是双信号**：横幅在、字段全、只差视频。**判据修订：抖音草稿验收必须包含 `videos >= 1`，双信号不再是充分条件。****修复路径：在「继续编辑」恢复出的草稿页内重新 `set_input_files` 上传视频**（页面上有 2 个 `input[type=file]`，**索引 0 是 `image/png,image/jpeg,image/jpg`（封面），索引 1 才是 `video/mp4,...`**；按 `accept` 含 `video` 来挑，不要按索引挑）→ 等 `videos>=1` 且不再「上传中」→ 再点一次「暂存离开」→ **第三次恢复核验 `videos=1` 才算完成**。本期实测：重传后 78%→100% 约 15s，重传后恢复核验 `videos=1`、`missingV=false`、`missingDual=false`、声明在场。另：本期「暂存离开」全程走坑 317 四步自证（`elementFromPoint` 命中 `BUTTON/暂存离开` 且 `ok=true` 才点），视频号因 `finder_login_token=null` 未上传（`login_required`，未做任何点击）。1029 正例：日报 356 帖；成片 249.195s / 7474 帧 / 23,609,760B / 锚点 0.7709（音频口径）· 0.7704（成片口径）；字幕↔mp4 音频 lead 中位 +0.085s、离群 1；公众号 appmsgid + 标题 62 字 + bodyLen 1943 + 占位符 0；B站 `draftId=4046833` 全字段回读通过；抖音第 139 集（重传后）。
+
+> **🔴 v3.67.0 核心改进（2026-10-28 日报实测：一次真实误发布 + 三条「回读正确但没落库」的新形态 + 两个防护自身的坑，坑 317-322）**：**🔴 视频号「保存草稿」误点成「发表」——坐标点击必须自证落点（坑 317，本期最重要）**——1028 期视频号在 07:49 已成功存草稿并落库（`草稿箱 (7)`，首条为本期，时间戳 07:49）；随后为补设 AI 标注第二次、第三次点「保存草稿」，08:08 其中一次**实际命中相邻的「发表」**，`视频 (187)→(188)`、本期卡片出现且状态「原创审核中」、`草稿箱 (7)→(6)`，**平台无二次确认**。根因 = 写法 `el.scrollIntoView({block:'center'})` 与 `getBoundingClientRect()` 在**同一次 `Runtime.evaluate` 内**完成，再 `sleep(0.5)` 才 `mouse.click`——读到的是**滚动落定前**的旧坐标；而视频号三按钮水平相邻（实测 `保存草稿 x=833 w=120` / `手机预览 x=969` / `发表 x=1105`，**y 全为 1088，间距仅 16px**），偏一点就落到邻居。**铁律：任何坐标点击前后必须做「落点自证」——① `scrollIntoView` 单独一次 evaluate，② 等 ≥600ms 落定，③ **重新**测量 rect，④ 点击前 `document.elementFromPoint(x,y)` 断言命中目标元素（或其子节点），自证不通过就不点、直接报错停下**。危险按钮（`发表`/`发布`/`立即投稿`/`存草稿`）**没有任何例外**。**坑 321（同批发现）：`document.elementFromPoint` 不穿 shadowRoot**——wujie/micro-frontend 页面里它只返回宿主 `WUJIE-APP`，`hit === el` 恒假，**落点自证对最需要它的那些控件全部失效**（表现是「连正确按钮都自证失败」，很容易被误判成元素不可点）。修法 = **递归下钻** `sr.elementFromPoint` 取最深节点（≤12 层）。实测：视频号「保存草稿」自证 `ok=true, hit=BUTTON/保存草稿`；同页面 +272px 打到「发表」时 `ok=false, hit=BUTTON/发表`——**正反两向都验过**。这条与坑 302/303（视口外点击静默失效）是同族但更重：那两次是「点了没反应」，这次是「点错了地方还真生效了」。**视频号「视频标注」不随草稿持久化（坑 318）**——设成 `Contains AI-generated content` → `.select-display` 回读一致 → 点「保存草稿」→ toast「已保存」→ **关标签重开该草稿，标注回到「选择视频标注」**，两次复现；同一份草稿的**描述 205 字 / 短标题 / 合集「今日羊报Al」/ 竖封面 3:4 全部正确保留**，只有标注丢。**结论：视频号视频标注只在发布时随请求提交，草稿阶段不落库；「设后回读 = 已生效」在这个字段上不成立。** 对接用户的说法应是「标注已设置，但草稿不保存它，发布前需再设一次」，不能报「已保存 AI 标注」。另注意：改标注时点选项可能**点空**——第二次尝试改回 AI 标注后回读仍是 `No label needed`，**每次选完都必须回读 `.select-display`，不匹配就重来，不要连续盲点**。**`DOM.getDocument` 在本机 Chrome 155 上返回 -32601（坑 319）**——`DOM.enable` 已先行、`Runtime.evaluate` 正常，`Document.getDocument`/`DOM.getDocument` 报 `wasn't found`；**唯一可靠的文件上传路径 = `Runtime.evaluate` 求值出一个 `input[type=file]` 元素（`returnByValue:false`）拿 `objectId` → `DOM.setFileInputFiles({files:[...], objectId})`**，实测对 wujie shadowRoot 内的 input **一次成功**（本期视频 + 竖封面都走这条）。skill 旧文里教「`DOM.getDocument{depth:-1,pierce:true}` → 手工 walk `children`+`shadowRoots`」的段落降级为**备选**；`DOM.performSearch`→`backendNodeId` 那条**本期未复测**，保留但标注未复测。**抖音竖封面弹窗默认带裁切缩放，会切掉 3:4 海报上的文字（坑 320）**——直接喂 1152×1536 后平台判「封面存在文字展示不全问题 / 封面不佳」，海报两端的「别」「一」被裁掉。修法 = 把 `.semi-slider-handle`（在 `.semi-slider-rail` 内，实测 x 区间 778.5–831.5、y≈550）拖到**最小档**：`mouse.move → mouse.down → 分 10 步 move → mouse.up`；**点击与方向键都无效**（试过无反应）。拖到最小后海报完整带边距显示，「封面效果检测通过」+ 发文助手「无建议」。另：抖音「编辑封面」的叶子节点搜索**必须限定在竖槽位（`.coverControl-CjlzqC`[1]）的 rect 内**，全局搜「编辑封面」会命中横向槽位的浮层，打开错误弹窗、上传后仍判「竖封面缺失」。1028 正例：日报 358 帖；成片 152.064s / 4560 帧 / 14,836,850B / 锚点 0.7260（音频口径）· 0.7253（成片口径）；字幕↔mp4 音频 lead 中位 +0.067s、离群 0；公众号草稿 appmsgid + 标题 68 字 + bodyLen 1712 + 占位符 0 + 合集 `.js_article_tags_content` 回读通过；B站 `draftId=4042422` 全字段回读通过；抖音双信号草稿通过（第 138 集）；视频号被误发表（坑 317）。
 
 > **🔴 v3.66.0 核心改进（2026-10-26 日报全程实测：两项「验收自己骗自己」+ 合集弹窗真入口 + 一条被证伪的推断，坑 310-315）**：**公众号合集判据用 `body.innerText` 子串 = 恒真（坑 310）**——本期 `MP_VERIFY` 打出 `collection: true`，`coll_ok = COLLECTION in all_txt`，而 `COLLECTION='「今日羊报 AI」'`（带书名号）命中的是正文 `TAIL` 页脚「🔔 关注「今日羊报 AI」，每天 9 点…」。**合集实际一直是「未添加」**，是后来用 `.js_article_tags_content` 控件回读才发现的。**铁律：合集判据只认 `.js_article_tags_content` 的 textContent（挂上后为 `「今日羊报 AI」`，未挂为 `未添加`），正文/标题里的同名文本一律不算**；这与坑 255「只认独立短文本叶子」同源，但更严——**控件有专属 class 就直接用 class，别做文本搜索**。**正文图片计数被 ProseMirror 分隔符污染 = 恒假（坑 311）**——`body.querySelectorAll('img')` 返回 12 个，其中 **6 个是编辑器为每个图片块插入的 `IMG.ProseMirror-separator`**（`src` 为空、`naturalWidth=0`），于是 `all(w>100)` 恒假；真图只有 6 张（1080×608 ×5 + 1080×810 ×1）。**修法：先按 `classList.contains('ProseMirror-separator')` 与 `src` 非空双重过滤再断言尺寸**；反过来，只按 `imgCount>0` 判「图都在」同样是假阳性。**合集弹窗唯一能打开的入口是 `.allow_click_opr.js_article_tags_label`（坑 312）**——点「合集」二字（`SPAN.lbl_content`）、点行内空白、点 `.frm_checkbox_label` 整行**全部不生效且不报错**（DOM 节点数 1377→1377，无异常），随后「保存为草稿」照样成功并返回 `appmsgid`，**整条链静默失败**。真入口是「未添加」四个字所在的 DIV（约 54×22，`allow_click_opr js_article_tags_label`）；点开后弹窗容器 `.album-setting-dialog`，输入框 `input[placeholder="请选择合集"]`，选项 `.album-setting-dialog .select-opts-con` 内的 `li.select-opt-li`（本期 3 项，每项 320×36），确认是弹窗内文案精确为「确认」的 `button.weui-desktop-btn_primary`。**「同一个事实」在不同平台文案里措辞可以不同，坑 241 词表禁止跨平台复制（坑 313）**——本期抖音写「比上一代 K3 **便宜 15%**」，视频号写「约为上一代 K3 的 **85%**」，把视频号词表套到抖音直接 `AssertionError: missing issue word: 85%`。**词表必须按 `publish.json` 里该平台自己的 `description` 生成**，跨平台抄一份就必挂。**抖音话题解析器按英文句点切分，`K3.1` 会退化成 `#K3`（坑 314）**——`publish.json` 的 `douyin.tags` 写 `K3.1`，页面回读却是 `["#AI日报","#K3","#订阅计费",…]`，点号被吃掉变成**另一个话题**（不会报错、不会提示）。**要么话题里避开带点号的版本号（改写 `K3`），要么接受降级并在验收里按实际值断言**，不要断言 `#K3.1`。**「reload 丢 token」是个被证伪的推断，写进 skill 前必须复测（坑 315，元教训）**——本期首页回读一度拿到 `len=83` 的「登录超时」空页，当时的解释是「裸 `reload()` 丢了 `token=` 参数」，据此写了「必须带 token 重新 goto」。**收尾复测把这条推翻了**：`RELOAD_TEST {"before_len":1685,"after_len":1685,"after_url_has_token":true,"after_login_timeout":false}`——`reload()` 保留 token、首页完好；裸域 `goto('https://mp.weixin.qq.com/')` 也会自动 302 到带 token 的首页（1685），同样不复现。**结论：`len=83` 的真实成因未知（大概率瞬时），「reload 丢 token」不成立。** 带 token 重新 `goto()` 作为写法仍然安全可用，但**不许把它当根因写进文档**；「一次观测 + 一个顺理成章的解释」不等于已验证的因果，与坑 305（证据与判据须同源）是同族。**B站草稿箱行没有可用 `href`，要进编辑页只能点该行的「编辑」按钮（坑 316）**——`upload-manager/article?group=draft` 列表里草稿行的链接解析出来是 `null`；正确做法是从「标题叶子节点」向上逐级（≤8 层）找 `textContent === '编辑'` 的元素，取 rect 中心 `mouse.click`，通常新开标签落到 `upload/video/frame?type=draft&draftId=…`。回读分区用 `.selector-container .select-item-cont`、标签用 `.label-item-v2-container`（去掉 `×`）、封面取页面内 `naturalWidth>=400` 的最大图。
 > **🔴 v3.65.0 核心改进（2026-10-25 W42 周报全程实测，raw CDP 迁移与三处「静默失效」坑 306-309）**：**`playwright.connect_over_cdp` 会整体挂起，SSE 端点却健康（坑 306）**——`curl http://127.0.0.1:9222/json/version` 正常返回、`/json` 列得出 25 个 target，但 `connect_over_cdp` 在 `ws connected` 之后**既不返回也不报错**（timeout 从 25s 加到 90s 一样），四个平台探针全部空转。**铁律：CDP 探针先看 HTTP 端点，端点健康而 playwright 挂起 → 立刻切 raw CDP，不要加大超时、不要重启 Chrome**。raw CDP 三件套（直接复用 `templates/cdp_helper.py`）：① `websockets.connect(..., proxy=None)`——不带 `proxy=None` 会走环境 SOCKS 代理，报 `python-socks is required to use a SOCKS proxy`；② `Runtime.evaluate` 的表达式**必须包进 async IIFE**（`(async () => JSON.stringify(await (async () => { return (EXPR); })()))()`），顶层裸写 `await` 报 `ReferenceError: await is not defined`，而 `JSON.stringify(await (FUNC)())` 直接返回 `undefined`——两种写法都静默给空值；③ `eval` 结果统一 `JSON.parse`，并在 `send()` 里对断线重连一次（wujie 长页面会偶发断开，报 `ConnectionClosedError: no close frame`）。**公众号正文的 `Meta+A` 会选中刚 focus 的标题而不是正文（坑 307）**——先点标题区键入标题、再点正文执行 `Meta+A` 替换，结果正文被标题串覆盖成 3 遍（`bodyLen` 1347 → 120），而 `placeholders=0` 让验收误判通过。**修法：标题与正文是两个独立 ProseMirror，操作正文前必须重新 `window.scrollTo(0,0)` + 坐标点击正文区 + 断言 `document.activeElement` 是第 2 个 ProseMirror**；覆盖后只能「清空 → 重新 `execCommand('insertHTML')`」，不要试图增量修。**视频号「保存草稿」点击返回成功但不落库（坑 308）**——短标题/描述分离写入、AI 标注选中、合集选中、双封面全部就位，点「保存草稿」后 `draftListManager` 仍是 4 条旧稿、页面无 toast、无 fetch 记录，`save` 状态只能报 `clicked` 不能报 `true`。**铁律：任何「保存草稿」的成功判据只能是「列表计数 +1 / 目标标题出现」，点击回执不算数**；连续两次失败就停下来报告用户，不要换选择器硬试。**B站分区误点与抖音草稿的时序坑（坑 309）**——B站 `.select-controller` 点击后要等 ≥2.5s 下拉才渲染出 30 个 `.drop-list-v2-item`，**没等就按文本找选项会命中预置值**（本期分区误落「科技数码」）；抖音必须在 `uploading` 变 false **且** 出现「暂存离开」按钮后才填表，否则标题被吞。修法见下方 v3.65.0 段。
@@ -29,7 +37,7 @@ version: 3.66.0
 > **🔴 v3.51.0 核心改进（2026-10-16 日报实测，环境断供 + 渲染边界帧）**：**`~/.claude/settings.json` 的 GEN_IMG/MIMO_TTS 凭据会静默丢失（坑 256）**——1016 视频链开工时 settings.json 的 env 只剩 ANTHROPIC_* 十键，`GEN_IMG_API_URL/_KEY`（及 `_001/_002/_003` 回退）与 `MIMO_TTS_API_*` 全没了，`gen_scenes_api.py` 的 ENDPOINTS 解析为空。排查顺序：① `~/.claude/settings.json.bak-*` 备份里找（1016 从 9-22 的 `settings.json.bak-post2video-2931081` 恢复 16 键后 9/9 场景图一次走通）；② 日常跑流水线前 `python3 -c` 打印 endpoint 名 + keylen 做**存在性探针**（禁打印 key 本体）；③ 恢复后原地 `cp settings.json settings.json.bak-pre{MMDD}-HHMM` 留痕。注意 key 的分组语义别搞错：1016 实测 `main`（ai.xmiaom.com）对 gpt-image-2 直接回非 JSON（`Expecting value: line 1 column 1`），实际承接的是 `main_001`（elysiver.h-e.top，grok-imagine-image）——**首轮 5/9、scene2/7/8/9 全挂，重跑 missing-only 即全过**，说明是时段性抖动不是端点死亡，**重跑缺失文件前不要换端点顺序**（与坑 253 的「拆单+间隔重试」同对策）。**TTS 用探针先验环境再跑全量**：1016 先验 `edge-tts 7.3.1`（坑 250 门禁）+ 代理探活（非 CN 出口 IP）双绿后才跑 9 场景，一次过 113.008s / anchor_pos 0.7024。**渲染边界帧漂移约一帧（坑 257）**——1016 成片视频流 113.166667s vs 音频 113.216000s，相差 0.049s（<1 帧@30fps）：逐场景 `ceil(dur*30)` 的垫帧累计 3395 帧，画面边界比音频边界早约一帧，锚点帧 t=79.4s 抽到的是 scene7 尾帧、音频已进 scene5——**属测量容差，不重渲、不重排**（与坑 209 重排阈值 >5% 不可比）。验收时抽锚点帧允许 ±0.2s 偏差，以字幕时间轴为准。**正例固化**：场景时长/锚点用字数预估（1016 预估 0.7065 → TTS 实测 0.7024 一次过，锚点 scene5 排播放第 7 位 `[1,2,3,4,6,7,5,8,9]`）；公众号全链分步一次过（open→body 1471字→images 占位符0→cover hasQpic→title 65字→save appmsgid=100001578→verify 1283字，占位符0、合集 picked）；B站/抖音/视频号用户手动，坑 215 全不碰含核验。
 > **🔴 v3.50.0 核心改进（2026-10-15 日报实测，公众号链路两坑）**：**合集「option not found (0 items)」是假阴性，判据只认编辑页回读（坑 255）**——1015 公众号 save 步首跑报 `0 items`，按坑 252 重跑 save **仍 0 items**，但编辑页回读文本已含 `「今日羊报 AI」`，**合集实际早已挂上**。根因：`li.select-opt-li` 只在下拉**手动展开**后才渲染；脚本链路（点「合集」label → 点「未添加」→ 点 `input[placeholder="请选择合集"]` → value-setter 填「今日羊报」）在选项未渲染时**仍会命中默认/唯一合集**并写入，此时 DOM 里没有 `li.select-opt-li`，计数自然是 0——**0 是「没展开」，不是「没选中」**。唯一可靠判据 = 编辑页回读**独立的短文本叶子节点**含合集名（标题/正文里本来就有「今日羊报」字样，必须区分：合集命中的是 `「今日羊报 AI」` 这种独立叶子，不是标题行或 CTA 行）。**禁止**用 `0 items` 当失败信号、禁止据此重跑或转手动。**`type=10 list_card` 第二次假阴性，验收只认首页「近期草稿」（坑 221 补充）**——`wechat_check_draft.py 2026-10-15` 走 `list_card` 返回 `草稿箱标题候选: []` + `in_publish_record: false` → 打印 `两处均无 — 需排查`，而草稿 `appmsgid=100001568` 实际完好。正确动作 = 改走首页**「近期草稿」**入口（点文本为「近期草稿」的节点），实测首条即当期标题，与 10-14/10-13/10-12 历史草稿同列返回；**该入口不跳转 URL**（仍停在 `cgi-bin/home`），不能靠 URL 判断是否进入，只能看 DOM 文本。**正例固化**：本期只上传公众号（B站/抖音/视频号用户已手动，坑 215 全不碰含核验）；`wechat-article-2026-10-15.md` 落盘 8656B 含「无配图版全文」降级节；6 张 `wechat-images/sceneN.jpg` 全过严格解码 + 底边绿行扫描（绿行=0）后才上传；上传脚本 `wechat_upload_1015.py` 带坑 241 内容断言（sections=4 / placeholders=6 / images=6，反期·禁词·密钥全过）。
 > **🔴 v3.49.0 核心改进（2026-10-15 日报实测）**：**curl 下载图片被静默截断 → 成片纯绿条，必须严格 PIL 解码 + 尺寸门禁（坑 254）**——1015 成片第 1/3/5 场景底部各有纯绿条（实测 59/725/32 行，RGB 恒 `(0,137,0)`）。排查起初误判为 Remotion/CSS/素材拷贝问题，**根因在图片下载**：`gen_scenes_api.py` 的 `ok-url` 分支 `curl -s -o out URL` 拿到的 body **尾部被截断**（scene1/3/5 分别少 43/16/14 字节），而 `curl` 对截断 body 仍 **exit 0**；脚本只验 `getsize(out) > 5000` 即判成功。三个残缺 JPEG 一路流过 ffmpeg 转 PNG（`-v error` 只吐 `overread 8` 不报错）→ 转 public JPG → 渲染，ffmpeg 容错解码器把**取不到的尾部填成重复值**，烧进成片就是绿条。**修法**：① 下载后**严格 PIL 解码** `Image.open(p); im.load()`，**绝不设 `ImageFile.LOAD_TRUNCATED_IMAGES`**（设了照样读得出、是本坑最大的检测陷阱），截断会抛 `OSError: image file is truncated (N bytes not processed)`，捕获即判失败换端点；② 尺寸门禁 `>5000` → `>20000` 且**同时过解码**；③ 底边绿行扫描做二次断言（取底边 5 点，`|g-137|<12` 且 `|r|,|b|<12` 连续计数，>0 即失败）；④ **禁止只验产物不验源**——1015 一开始反复重转 PNG/JPG 完全无效，因为 `_api.png` 本身就是坏的；⑤ `skip (exists)` 只认「尺寸合规 **且** 严格解码通过」，否则「坏但足够大」的文件永不会被重试（1015 scene1/3/5 就是被旧逻辑跳过的）。**正例固化**：6 场景 `_api`+成图 12 文件全过三合一门禁后才进渲染；场景时长/锚点未受影响（总 98.795s、anchor_scene 5、anchor_pos 0.7376），**无需重跑 TTS/字幕，只需重渲染**。
-> **🔴 v3.48.0 核心改进（2026-10-14 日报实测）**：**edge-tts WSS 403 第二根因=客户端版本 DRM 令牌算法过期（坑 250 补充）**——1014 实测：代理出口已美国、时钟偏移 0.5s、`--proxy` 显式指定，7.2.8 仍全线 403；**升级 `pip install -U edge-tts`（7.2.8→7.3.1）后一次通过**。403 排查顺序固定为：①`--proxy` 非 CN 出口（ip-api.com 查出口，ipinfo 常 429）②系统时钟（NTP 偏移 >60s 即修）③**版本升级到 ≥7.3.1**；三步皆过仍 403 才考虑 UA/header 矩阵。**`Document.getDocument` 方法名根本不存在（坑 251 模板修正）**——1013 模板 `channels_upload_1013.py` 里写的 `Document.getDocument` 无论有无 `DOM.enable` 都报 -32601（当时 upload 步未跑通未暴露）；**CDP 正确方法名是 `DOM.getDocument`**。且 **`DOM.querySelectorAll` 不穿 wujie shadowRoot**（root 级查询返回空数组）——必须在 `DOM.getDocument{depth:-1,pierce:true}` 返回树上**手工 walk `children` + `shadowRoots` + `contentDocument`** 收集 `input[type=file]`（模板=`channels_upload_1014.py` `_file_input_ids()`）。**视频号「空壳」判定假阴性**：`window.__WUJIE` 为 false / `document.body.innerText` 近空 **不代表**子应用没渲染——innerText 不进 shadowRoot，实体判定=查 `wujie-app.shadowRoot` 内表单元素（file input/短标题/合集）；真·空壳判据仍按坑 251（shadowRoot `#app` 后代数 ≤1）。**视频号 setFileInputFiles 后 300s 无 ready=多半 node 选错**：pierce walk 收集的 file input 可能是封面/头像等非视频入口，`setFileInputFiles` 对错 node **静默失败**——正确姿势=set 后先回读 shadow 文本有无进度/`%`，20s 无进度立即换下一个 node，不傻等 300s（1014 用户手动收尾，下期按此验证）。**B站创作声明回读判据修正（坑 247 补充）**：`input[placeholder*="创作声明"]` rect 中心点开 → 选项 rect 中心点「个人观点，仅供参考」→ **回读用 `input.value`**，`body.innerText` 不含已选值（pre-draft `declOk=False` 属预期，以 input.value 为准）；分区三级「知识/人工智能」同现属正常形态。**`connect_over_cdp` 挂起第二形态（坑 251 补充）**：`ws connected` 后卡死在握手返回（180s 超时），同一 daemon 时段性出现（sync API 可用→下一次挂起）；对策不变=raw CDP websockets。**公众号草稿箱 URL 陷阱**：`cgi-bin/appmsg?t=media/appmsg_draft&action=edit` 打开的是**空白新草稿编辑器**不是列表——草稿箱验收判据=首页「近期草稿」文本含标题+更新时间（坑 221/248 组合复用）。**正例固化**：锚点字数预估法（1014 预估≈0.71 → TTS 实测 0.7141 一次过）；封面 fit_size 门（竖版 933/934px 压线通过，172px 固定字号必截断的坑 249 修复在 1014 无回归）；审核清单门禁流程（§1-5、7 绿后渲染，§6 渲染后 8/8 回填）零返工。
+> **🔴 v3.48.0 核心改进（2026-10-14 日报实测）**：**edge-tts WSS 403 第二根因=客户端版本 DRM 令牌算法过期（坑 250 补充）**——1014 实测：代理出口已美国、时钟偏移 0.5s、`--proxy` 显式指定，7.2.8 仍全线 403；**升级 `pip install -U edge-tts`（7.2.8→7.3.1）后一次通过**。403 排查顺序固定为：①`--proxy` 非 CN 出口（ip-api.com 查出口，ipinfo 常 429）②系统时钟（NTP 偏移 >60s 即修）③**版本升级到 ≥7.3.1**；三步皆过仍 403 才考虑 UA/header 矩阵。**`Document.getDocument` 方法名根本不存在（坑 251 模板修正）**——1013 模板 `channels_upload_1013.py` 里写的 `Document.getDocument` 无论有无 `DOM.enable` 都报 -32601（当时 upload 步未跑通未暴露）；**CDP 正确方法名是 `DOM.getDocument`**（**但 🔴 v3.67.0 坑 319：本机 Chrome 155 上这个也不再可用，报 -32601 `wasn't found`**；首选改为 `Runtime.evaluate` 取 `objectId` → `DOM.setFileInputFiles({files, objectId})`，见 `templates/cdp_helper.py` 的 `Tab.set_files()`）。且 **`DOM.querySelectorAll` 不穿 wujie shadowRoot**（root 级查询返回空数组）——旧方案是在 `DOM.getDocument{depth:-1,pierce:true}` 返回树上**手工 walk `children` + `shadowRoots` + `contentDocument`** 收集 `input[type=file]`（模板=`channels_upload_1014.py` `_file_input_ids()`），**该路径在本机已失效，仅作兜底**。**视频号「空壳」判定假阴性**：`window.__WUJIE` 为 false / `document.body.innerText` 近空 **不代表**子应用没渲染——innerText 不进 shadowRoot，实体判定=查 `wujie-app.shadowRoot` 内表单元素（file input/短标题/合集）；真·空壳判据仍按坑 251（shadowRoot `#app` 后代数 ≤1）。**视频号 setFileInputFiles 后 300s 无 ready=多半 node 选错**：pierce walk 收集的 file input 可能是封面/头像等非视频入口，`setFileInputFiles` 对错 node **静默失败**——正确姿势=set 后先回读 shadow 文本有无进度/`%`，20s 无进度立即换下一个 node，不傻等 300s（1014 用户手动收尾，下期按此验证）。**B站创作声明回读判据修正（坑 247 补充）**：`input[placeholder*="创作声明"]` rect 中心点开 → 选项 rect 中心点「个人观点，仅供参考」→ **回读用 `input.value`**，`body.innerText` 不含已选值（pre-draft `declOk=False` 属预期，以 input.value 为准）；分区三级「知识/人工智能」同现属正常形态。**`connect_over_cdp` 挂起第二形态（坑 251 补充）**：`ws connected` 后卡死在握手返回（180s 超时），同一 daemon 时段性出现（sync API 可用→下一次挂起）；对策不变=raw CDP websockets。**公众号草稿箱 URL 陷阱**：`cgi-bin/appmsg?t=media/appmsg_draft&action=edit` 打开的是**空白新草稿编辑器**不是列表——草稿箱验收判据=首页「近期草稿」文本含标题+更新时间（坑 221/248 组合复用）。**正例固化**：锚点字数预估法（1014 预估≈0.71 → TTS 实测 0.7141 一次过）；封面 fit_size 门（竖版 933/934px 压线通过，172px 固定字号必截断的坑 249 修复在 1014 无回归）；审核清单门禁流程（§1-5、7 绿后渲染，§6 渲染后 8/8 回填）零返工。
 > **🔴 v3.47.0 核心改进（2026-10-13 日报实测）**：**封面大字必须按可用宽度实测收缩字号（坑 249）**——竖版封面固定比例字号 `int(w*0.150)=172px` 对 8 字行实宽 1376px，超出可打印宽度（1152−2×margin≈934px）被 PIL 直接裁掉，用户报「内容被截断」；修法 = `font.getlength()` 实测行宽、从目标字号向下收缩（下限 48），生成时打印每行 px 与 limit 并断言 `px ≤ limit`（1013 修复后竖版 812/928 ≤ 934）。横版同样要过门（1013 横版 1272/1276 已贴极限，钩子再长 1 字即截）。**edge-tts WSS 403 根因=出口 IP，第一动作 `--proxy` 走非 CN 出口（坑 250）**——1013 TTS 卡死约 3.5h：时钟偏移（DRM 自校正无效）、版本升降（6.1.16/7.2.8 都 403）、UA/Chromium header 补丁（MSIE+129 探测矩阵 24 组全 403）全部无效，HTTPS `voices/list` 却正常（只有 WSS 被拒）；终局 = `edge-tts --proxy http://127.0.0.1:7897` + 用户把代理切美国出口一次通过，直连与 `api.msedgeservices.com` 仍 403。终端无 `HTTPS_PROXY` env、系统 scutil 代理对 aiohttp 不生效，**必须显式 `--proxy`**（`gen_tts.py` 已固化）；探测脚本用 `python3 -I` 会忽略 `SSL_CERT_FILE` 报证书假故障。**Playwright attach 无报错挂起 → 整平台切 raw CDP websockets（坑 251）**——1013 B站/抖音/视频号三平台 `connect_over_cdp` 全部纯挂起（并发 raw 客户端无冲突 → 是 Playwright flatten 协议自身问题）；视频号另命中 **wujie 空壳**（`#app` 后代数=1、`.app-body-full` kids=0，SPA 未挂载，`Page.reload` 多次无效）→ **`Page.navigate` 到 `/platform/post/video` 重新挂载**（返回 `net::ERR_ABORTED` 属正常），轮询 shadowRoot `#app` 后代数 >10 且 `input[type=file]` 出现才继续（实测 kids=1410）。raw-CDP 上传协议与全步骤模板 = `news-pipeline/2026-10-13/scripts/channels_upload_1013.py`（`DOM.enable` 先行否则 `Document.getDocument` 报 -32601；pierce 遍历找 file input；`Input.insertText` 填 contenteditable；Vue 受控 input 用 value-setter+input 事件）。**公众号占位符/合集偶发空态直接重跑该步（坑 252，与坑 232 同族）**——images 跑完 verify `placeholders=1` → 重跑 `wechat_upload.py images` 幂等补齐（脚本每次扫描剩余 PLACEHOLDER 替换）再 save 即 0；save 首跑合集下拉 `option not found (0 items)`（选项未加载）→ 重跑 save 即挂上「今日羊报 AI」。**坑 236 补充**：加长口播前先**按场景字数预估锚点占比**（时长∝字数，1013 预估 0.6936→补 19 字→0.7060，TTS 实测 0.7099 一次过，省 TTS 返工）；仍略低时锚点场景 atempo +0.1（1.4→1.5）作最后微调。**API 429 双形态（坑 253）**：`maximum 25 requests in 5 minutes` 限频 + `Concurrency limit exceeded` 并发上限都会批量杀死请求（1013 主循环与 skill 回写 workflow 双双命中，6 宽子 agent 全灭、2 宽也有阵亡）→ 对策 = 拆单 + 间隔重试 + workflow 并发宽度 ≤2，被杀 agent 返回 null 不会自动重试，关键提取宁可主循环自己做。**坑 215**：视频号最终由用户手动上传完成，声明后立即停手（含核验）。
 >
 > **🔴 v3.46.0 核心改进（2026-10-12 周报 W40 实测）**：**周报脚本先过字数门禁再进 TTS（坑 244）**——W40 初版 531 字 → edge-tts 云扬 atempo1.4 实测仅 82s，低于周报 100s 下限整 18s；扩写到 682 字重跑得 104.746s 合格。实测换算 ≈6.4 字/s（atempo1.4），**周报去标点字数门禁 ≥650 字、目标 680–720（105–110s 留头寸）**；脚本写完先 `len(strip_punct(full))` 断言再落 TTS，TTS 实测 <100s 时扩写正文补齐，**不降 atempo、不挪锚点凑时长**。**派生 run_all.sh 必须带 PNG→JPG + 渲染 timeout（坑 245）**——W39 派生版同步段只 `cp scene*.png`，而 Composition 引 `images/scene*.jpg`（v3.45.0 sips/ffmpeg 链是必做步骤不是备注），渲染 seek 到 frame 613 超时；且 10 场景大图默认 30s seek timeout 不够，渲染命令必须 `--timeout=180000`。派生 run_all 后 grep 断言：①同步段含 `ffmpeg ... scene$i.jpg`（或 sips），②渲染命令含 `--timeout`，③无上期日期残留（坑 241 扩展到 run_all）。**concepts.json 结构是 `{concepts:[...], updated}`，concepts 为 list 按 id 查（坑 246）**——verify 脚本 `bank.get('token')` 对 list 直接 `AttributeError: 'list' object has no attribute 'get'`，正确写法 `next(x for x in bank if x.get('id')=='token')`；verify 分两级跑：落盘脚本层即刻跑，**总时长 100–150s 实测项必须等 durations.json 生成后再跑**（无 durations 时 INFO 跳过而非 FAIL）。**B站创作声明是 bcc-select 自定义组件，text= 定位必超时（坑 247）**——`page.locator('text=请选择符合您视频内容的创作声明')` 5s 必超时；正确交互 = `getBoundingClientRect` 取选择框 rect → `page.mouse.click(rect 中心)` 开下拉 → 选项同法点 rect 中心，回读判据沿用 v3.45.0（body 含 `个人观点，仅供参考`）。同理 **form 步分区 locator 超时 ≠ 未选中**——W40 分区 locator 报 timeout 但页面回读已是 `人工智能`，以回读为准不重跑（坑 242 回读铁律正例）。**公众号 `cgi-bin/publish?action=list` 直接 goto 抛 `ERR_HTTP_RESPONSE_CODE_FAILURE`（坑 248）**——发表记录页 URL 不稳定，验收走首页「近期草稿」+ appmsgid 编辑页直达（坑 221 三件套内替代）。**字幕尾差分解补第四项**：坑 234 可加性闭合 = 静音尾 + 帧取整 + 容器 + **whisper 对齐尾隙（末行字幕停在末音节前）**，W40 实测 1.098s = 0.415+0.188+0.048+0.447 精确闭合。**坑 215 收口**：用户中途声明「已经全部手动上传」→ 四平台全部停手（含核验），当期只做 skill 回写。
@@ -66,12 +74,14 @@ version: 3.66.0
 - 避免因自动发布导致的内容错误或违规风险
 - 用户可在各平台草稿箱中检查后手动发布
 
+> **🔴 v3.67.0 硬约束（坑 317 血的教训，2026-10-28）**：**「发布/发表/立即投稿」按钮永不进入脚本逻辑，且「保存草稿」的点击必须自证落点。** 视频号三个按钮水平相邻、间距仅 16px、平台无二次确认；1028 期因「`scrollIntoView` 与测 rect 同一次 evaluate + sleep 后点击」用了滚动落定前的旧坐标，落点偏到「发表」，**内容直接公开**（`视频 187→188`、`草稿箱 7→6`）。**任何坐标点击前：① 滚动单独一次、② 等 ≥600ms、③ 重新测 rect、④ `document.elementFromPoint(x,y)` 断言命中目标元素；不通过就不点、报错停下，不重试。**
+
 **各平台存草稿方式**：
 | 平台 | 存草稿操作 | 成功判据（**点击回执不算数**） |
 |------|-----------|------------------------|
 | B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） | URL 跳到 `upload-manager/article?group=draft`，且草稿箱标题匹配 |
-| 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿） | 按钮消失 **且**「继续编辑」横幅出现；同标签回读标题 + `video` 元素数 > 0 |
-| 视频号 | 点击「保存草稿」按钮 | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4） |
+| 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿）。**若恢复后发现视频丢失（坑 323），在该草稿页内按 `accept` 含 `video` 挑 `input[type=file]`（本期实测索引 1，索引 0 是封面图的 image/*）重新 `set_input_files` 上传，再暂存** | **① 按钮消失 且「继续编辑」横幅出现；② 恢复后 `videos >= 1`（v3.68.0 坑 323：双信号不是充分条件——横幅在、字段全，视频仍可能没落库）；③ 标题回读一致** |
+| 视频号 | 点击「保存草稿」按钮——**点击前必须 `document.elementFromPoint` 自证落点是它**（v3.67.0 坑 317：它与「手机预览」「发表」水平相邻、间距仅 16px、无二次确认，1028 期因 stale 坐标误点「发表」，内容直接公开） | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4）。**另：视频标注不在草稿里保存（坑 318），验收时不要拿它当落库判据** |
 | 公众号 | 点击「保存为草稿」按钮 | URL 出现 `appmsgid=`，且 `bodyLen` / 占位符数 / 封面 `hasQpic` / **合集 `.js_article_tags_content`** 回读一致（v3.66.0 坑 310：合集**不能**用 `body.innerText` 子串判，正文页脚恒含合集名） |
 
 ### 🔴 浏览器与 Profile 全局铁律（v3.7.0 / 2026-07-18 实测）
@@ -2260,7 +2270,7 @@ for (const c of chips) {
 }
 ```
 - **验收铁律**：每次增删后回读 `.label-item-v2-container` 的文本列表断言，**不能只信脚本打印的 "added"**（0921 打印 added 但列表里没进）。最终 chips 列表必须等于 publish.json 的 tags（允许少、不允许脏）。
-- **🔴 平台可能单独拒收某个标签（v3.63.0 坑，1025 实测）**：本期 `AI大模型` 原样重输两次、点推荐行同名 chip 也未入列，终态 6/7。**断言写成「记录缺了哪个，但不阻断存草稿」**——例如打印 `missing_tags: ['AI大模型']` 并把其余标签的到位率写进 review-checklist §15；**不要** `assert len(chips) == len(tags)` 让整条链停在存草稿前。标签缺失不触发平台杠杆（简介/分区/合集才是），为一个可选项白跑一遍上传不划算。同时**禁止**为了凑数点推荐行里的同名 chip——推荐行点击会追加**别的**标签（坑 240）。
+- **🔴 平台可能单独拒收某个标签（v3.63.0 坑，1025 实测）**：本期 `AI大模型` 原样重输两次、点推荐行同名 chip 也未入列，终态 6/7。**v3.67.0 补（1028 二次确认，形成定论）**：这个串在 B站**稳定收不下**——原串、加空格变体（`AI 大模型`）、词序变体（`大模型AI`）、裸写（`大模型`）都只会落成**另一个** chip，回读必然对不上。**别再浪费一轮试变体：B站标签池里直接改用推荐行里存在的「人工智能」**，本期即以此凑满 6 个。**断言写成「记录缺了哪个，但不阻断存草稿」**——例如打印 `missing_tags: ['AI大模型']` 并把其余标签的到位率写进 review-checklist §15；**不要** `assert len(chips) == len(tags)` 让整条链停在存草稿前。标签缺失不触发平台杠杆（简介/分区/合集才是），为一个可选项白跑一遍上传不划算。同时**禁止**为了凑数点推荐行里的同名 chip——推荐行点击会追加**别的**标签（坑 240）。
 
 #### 11.8 加入合集（自定义下拉框）
 
@@ -3455,7 +3465,7 @@ browser_run_code_unsafe("""async (page) => {
 
 **🔴 v3.47.0 / 坑 251：wujie 空壳用 `Page.navigate` 重新挂载；Playwright attach 无报错挂起 → 整平台切 raw CDP websockets**（2026-10-13 实测）：
 
-- **症状A（attach 挂起）**：`connect_over_cdp` **无报错纯挂起**（1013 B站/抖音/视频号三平台均出现；并发 raw CDP 客户端无冲突 → 问题是 Playwright flatten 协议/事件洪泛自身）。对策 = 该平台脚本整平台改 **raw CDP websockets**，全步骤模板 = `news-pipeline/2026-10-13/scripts/channels_upload_1013.py`：`/json/list` 取 `webSocketDebuggerUrl` → websockets 收发 CDP JSON（cmd/ev 助手）；文件上传 = `DOM.enable` → **`DOM.getDocument{depth:-1,pierce:true}`**（v3.48.0 修正：旧模板写的 `Document.getDocument` 方法名**根本不存在**，无论有无 DOM.enable 都 -32601）→ **pierce 树手工 walk `children`+`shadowRoots`+`contentDocument` 收集 `input[type=file]`**（`DOM.querySelectorAll` 不穿 wujie shadowRoot，root 级查询返回空）→ `DOM.setFileInputFiles`；set 后 20s 回读 shadow 文本有无进度/`%`，无进度即换下一个 node（错 node 静默失败，不傻等 300s）；contenteditable 用 `Input.insertText`；Vue 受控 input 用原生 value-setter + `input` 事件；截图 `Page.captureScreenshot`。
+- **症状A（attach 挂起）**：`connect_over_cdp` **无报错纯挂起**（1013 B站/抖音/视频号三平台均出现；并发 raw CDP 客户端无冲突 → 问题是 Playwright flatten 协议/事件洪泛自身）。对策 = 该平台脚本整平台改 **raw CDP websockets**，全步骤模板 = `news-pipeline/2026-10-13/scripts/channels_upload_1013.py`：`/json/list` 取 `webSocketDebuggerUrl` → websockets 收发 CDP JSON（cmd/ev 助手）；文件上传 = **首选（v3.67.0 坑 319，1028 实测）**：`Runtime.evaluate` 求值出 `input[type=file]` 元素（`returnByValue:false`）取 `objectId` → `DOM.setFileInputFiles({files, objectId})`——对本机 Chrome 155 **一次成功**，且能直接 `shadowRoot.querySelector` 拿到元素，不需要 pierce 遍历。**备选（Chrome 155 上已失效，坑 319）**：`DOM.getDocument{depth:-1,pierce:true}` 报 -32601 `wasn't found`，故 v3.48.0 那条「pierce 树手工 walk `children`+`shadowRoots`+`contentDocument`」在本机不可用，仅在 objectId 路径失效时才尝试。set 后 20s 回读 shadow 文本有无进度/`%`，无进度即换下一个 node（错 node 静默失败，不傻等 300s）；contenteditable 用 `Input.insertText`；Vue 受控 input 用原生 value-setter + `input` 事件；截图 `Page.captureScreenshot`。
 - **症状B（wujie 空壳）**：登录墙清掉后 `#app` 仍是空壳（`.app-body-full` kids=0、`querySelectorAll('*').length==1`、`appText` 空），`Page.reload` 多次无效 → **`Page.navigate` 到 `https://channels.weixin.qq.com/platform/post/video` 让 wujie 微应用重新挂载**；nav 返回 `net::ERR_ABORTED` **属正常**，不作失败判据。
 - **挂载判据（轮询 ≤60s）**：shadowRoot 内 `#app` 后代数 >10 且 `input[type=file]` 出现（1013 实测 kids=1410、2 个 file input：video + image cover、按钮含「保存草稿」），未达标**禁止**开始表单操作。
 
@@ -3564,6 +3574,14 @@ page.mouse.click(target['x'], target['y'])
 
 **验收**：回读 `.select-display` 文本必须等于 `Contains AI-generated content`；`absent` / `No label needed` 均判失败。
 
+**🔴 但这个字段不随草稿持久化（坑 318 / 1028 两次复现，1029 据此调整策略）**：设成 `Contains AI-generated content` → 回读一致 → 点「保存草稿」→ 出现 toast「已保存」→ **关标签重开该草稿，`.select-display` 回到「选择视频标注」**。同一份草稿的描述、短标题、合集、双封面全部保留，**只有标注丢**。
+
+**因此分两种场景**：
+- **只存草稿**（本流水线日常）：**不要设**——设了也会丢，白白多一次对相邻按钮（「保存草稿」/「手机预览」/「发表」间距 16px）的点击，1028 期第二次、第三次补设标注正是误发布事故的直接诱因（坑 317）。
+- **发布时**：**必须设**，这是 AI 生成内容的合规披露义务。这一条不能因「草稿里不保存」而被放弃。
+
+**对接用户的话术**：不能说「已保存 AI 标注」，要说「草稿阶段平台不保存该字段，发布前需再设一次」。
+
 #### 13.6 上传封面（shadow 协议优先）
 
 **🔴 `hasWujie=true`（当前默认）**：按 13.1 字段表操作——`.single-cover-uploader-wrap input[type=file]` `setInputFiles` → 弹窗 `button.weui-desktop-btn_primary`「确认」。短标题走 13.4 Vue input，**不是** `.edit-shorttitle-content`。
@@ -3571,7 +3589,7 @@ page.mouse.click(target['x'], target['y'])
 **🔴 封面对话框（`.vertical-img-wrap .edit-btn` → 标题「编辑个人主页卡片」→ 取消/确认）的上传必须用 Playwright locator，不能取 ElementHandle（v3.61.0 坑 294）**：`page.evaluate_handle(...).as_element().set_input_files(path)` 必抛 `Cannot set input files to detached element`（shadow 内节点在取句柄到设文件之间被重渲染）；改用 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(path)`（locator 每次动作前重新解析）。确认按钮 JS 常从错误 wrapper 查 `.weui-desktop-btn_primary` 得空 → 取可见 `.weui-desktop-dialog__wrp` 内「确认」的 rect 做坐标点击。弹窗有开关状态机（坑 280）：每次操作前先 Esc 清残留再重开。
 
 **🔴 两条验收补充（v3.63.0 / 1025 实测）**：
-1. **「弹窗是否关闭」不能用「容器还在不在」判**。`edit-cover-dialog-container` 关闭后**仍留在 DOM 里**，只是 `rect` 变成 0×0——`container exists` / `offsetParent !== null` 都会给出「还开着」的**假阳性**（1025 一度以为封面没生效，截图一看早已换成本期海报）。判据改为 `rect.width > 0 && rect.height > 0`，或干脆**回读槽位实图**：`img.naturalWidth/naturalHeight === 1152/1536`。
+1. **「弹窗是否关闭」不能用「容器还在不在」判**。`edit-cover-dialog-container` 关闭后**仍留在 DOM 里**，只是 `rect` 变成 0×0——`container exists` / `offsetParent !== null` 都会给出「还开着」的**假阳性**（1025 一度以为封面没生效，截图一看早已换成本期海报）。判据改为 `rect.width > 0 && rect.height > 0`，或干脆**回读槽位实图**。**⚠️ 但尺寸断言必须按比例判，不能写死 1152×1536（v3.70.0 / 1029 实测）**：页面会把上传图**等比缩放**后回填槽位，1029 上传 1152×1536 后 `img.naturalWidth/naturalHeight` 实测为 **810×1080**（同为 3:4，缩放系数 0.703）。写死 `=== 1152/1536` 会判成「封面没生效」并触发重复上传。正确写法：`Math.abs(w/h - 0.75) < 0.01`（3:4）或 `Math.abs(w/h - 4/3) < 0.01`（4:3），再配合页面自身的 `封面已更新` 文案确认。
 2. **喂图后必须等预览图长到目标尺寸比例再点「确认」**。`set_input_files` 是异步上传，立刻点确认可能确认的是**旧图**。轮询槽位 `img.naturalWidth/naturalHeight` 达到 `1152×1536`（±2px）后再点。
 
 **封面尺寸**：
@@ -3584,7 +3602,7 @@ page.mouse.click(target['x'], target['y'])
 
 #### 13.7 保存草稿（不发布）
 
-**🔴 保存成功无跳转、无可见 toast（textContent 长度也不变）——不能以 URL 变化判成败，必须去草稿箱列表页数条目验证（v3.24.0 实测）。**
+**🔴 保存成功无跳转，不能以 URL 变化判成败——必须去草稿箱列表页数条目验证（v3.24.0 实测）。****⚠️ 「无可见 toast」这条已被 1029 实测修正**：点「保存草稿」后 `shadowRoot.body.innerText` 末尾**出现「已保存」**（`...© 1998-2026 Tencent Inc. All Rights Reserved. 已保存`），URL 仍停在 `/platform/post/create`。所以无论 toast 出不出现（不同版本行为不一致），**落库判据都只能是草稿箱计数与标题**；`已保存` 文案可以当辅助信号，**不能单独当成功依据**。
 
 **保存前两道拦截检查**：
 1. **🔴 表单错误检查**（短标题超限/非法字符时按钮 silent disabled）：按 13.1 回读 `.error-title` 可见项 + 保存按钮 `disabled` 状态，有错误先修复再保存。
@@ -3687,6 +3705,302 @@ news-pipeline/
 **月报输入**：`data/monthly/{YYYY-MM}.md`（项目根 data 目录，由 linuxdo-daily v13 生成，**不在 news-pipeline 下**）。
 
 ## 已知坑与经验教训
+
+### 🔴 误发布事故：坐标点击必须自证落点 + 三条「回读对但没落库」+ 两个防护自身的坑（v3.67.0 / 2026-10-28 日报实测，坑 317-322）
+
+**问题**：本期视频号的视频**被自动发布**了，违反常设约束「各平台一律存草稿，绝不点发布」。同一期还撞上三个「回读看起来对、实际没落库」的字段。四个坑的共性是：**判据（点击回执、设置后回读、容器存在）都在描述「我做了什么」，而没有描述「平台真的接受了吗」。**
+
+**坑 317（最重要）：用滚动落定前的坐标点「保存草稿」，命中了 16px 外的「发表」**
+- 事故序列：07:49 首次存草稿**成功落库**（`草稿箱 (7)`，首条为本期，时间戳 07:49）→ 08:02 重开草稿补设 AI 标注后又点一次「保存草稿」（toast「已保存」但**列表时间戳没变**）→ 08:08 第三次点 → `视频 (187)→(188)`，本期卡片出现、状态「原创审核中」，`草稿箱 (7)→(6)`
+- 错误写法：
+  ```js
+  // ❌ scrollIntoView 与测 rect 在同一次 evaluate 内
+  (() => { el.scrollIntoView({block:'center'});
+           const r = el.getBoundingClientRect();
+           return JSON.stringify({x:r.x+r.width/2, y:r.y+r.height/2}); })()
+  // Python: sleep(0.5) → mouse.click(x, y)   ← 坐标是滚动落定前的旧值
+  ```
+- 为什么落点会偏：视频号三个按钮**水平相邻、间距 16px**（实测 rect，y 同为 1088）：
+  | 按钮 | x | w | 中心 |
+  |---|---|---|---|
+  | 保存草稿 | 833 | 120 | **893** |
+  | 手机预览 | 969 | 120 | 1029 |
+  | 发表 | 1105 | 120 | 1165 |
+- 平台**没有二次确认**，「发表」点下去即发布
+- **修法（三步都要）**：
+  ```js
+  // ① 滚动单独一次 evaluate，等落定
+  await ev("(() => { el.scrollIntoView({block:'center'}); return 1; })()")
+  await sleep(0.8)
+  // ② 重新测量
+  ({x, y} = JSON.parse(await ev("(() => { const r=el.getBoundingClientRect(); ... })()")))
+  // ③ 点击前自证落点
+  const ok = await ev(`(() => {
+    const hit = document.elementFromPoint(${x}, ${y});
+    const want = /* 目标按钮元素 */;
+    return !!(hit && (hit === want || want.contains(hit)));
+  })()`)
+  if (!ok) throw new Error('落点自证失败，不点')
+  ```
+- **危险按钮**（`发表` / `发布` / `立即投稿` / `存草稿`）**没有例外**；自证不过就报错停下，不要「再试一次」
+- **代码级闸门**（已进 `templates/cdp_helper.py` 的 `Tab.click_safe()`）：
+  - ⓪ **文案闸门**：目标 `innerText/value` 含 `发表视频/立即投稿/提交审核/发表/发布` → **滚动之前就抛异常**，连测量都不做
+  - ①②③④ 滚动 / 等落定 / 重测 / **穿透 shadowRoot 自证**（见坑 321）
+  - 实测：`click_safe(发表按钮)` → `🔴 拒绝点击危险按钮 '发表'`；`click_safe(保存草稿)` 自证通过
+- **🔴 坑 322（元教训，同批踩到）**：为验证这套闸门而用 `allow_danger=True` 实点了一次「保存草稿」——**防护机制的测试本身也会产生真实动作**。此后所有闸门验证一律用「只测量不点击」的探针（把 `click_safe` 的 ④ 步单独抽出来跑），**绝不用 `allow_danger=True` 绕过闸门做实点**。本期实点因页面是空表单（`hasVideo=false`）未产生草稿（草稿箱仍 6）也未被发布，属侥幸。
+- 与坑 302/303 的关系：那两条是「视口外点击**静默无效**」，这条是「点错了地方**还真生效了**」——后者严重得多
+
+**坑 318：视频号「视频标注」不随草稿持久化**
+- 设成 `Contains AI-generated content` → `.select-display` 回读一致 → 点「保存草稿」→ toast「已保存」→ **关标签重开该草稿 → 标注回到「选择视频标注」**，两次复现
+- 同一份草稿的**描述 205 字 / 短标题 / 合集「今日羊报Al」/ 竖封面 3:4 全部正确保留**，只有标注丢
+- 结论：**视频号视频标注只在发布时随请求提交，草稿阶段不落库**
+- 对外措辞要准确：「标注已设置，但草稿不保存它，发布前需再设一次」——不能报「已保存 AI 标注」
+- 附带：改标注时点选项可能**点空**（第二次改回 AI 标注后回读仍是 `No label needed`）。**每次选完必须回读 `.select-display`，不匹配就重来，不要连续盲点**
+
+**坑 319：`DOM.getDocument` 在本机 Chrome 155 上 -32601**
+- `DOM.enable` 已先行、`Runtime.evaluate` 正常，`DOM.getDocument` / `Document.getDocument` 均报 `wasn't found`
+- **唯一可靠的上传路径**：
+  ```python
+  oid = (await cmd('Runtime.evaluate', {'expression': js, 'returnByValue': False})
+         )['result']['result']['objectId']
+  await cmd('DOM.setFileInputFiles', {'files': [...], 'objectId': oid})
+  ```
+  其中 `js` 求值为一个 `input[type=file]` 元素（**可以直接 `document.querySelector('wujie-app').shadowRoot.querySelector('input[type=file]')`**，不需要 pierce 遍历）
+- 实测：wujie shadowRoot 内的视频 input 与封面 input 都**一次成功**
+- 旧文「`DOM.getDocument{depth:-1,pierce:true}` → 手工 walk `children`+`shadowRoots`」降级为**备选**；`DOM.performSearch`→`backendNodeId` 那条**本期未复测**，保留但标注未复测
+
+**坑 320：抖音竖封面弹窗默认带裁切缩放，切掉海报文字**
+- 直接喂 1152×1536 后平台判「封面存在文字展示不全问题 / 封面不佳」——海报两端的「别」「一」被裁掉
+- 修法：把 `.semi-slider-handle`（在 `.semi-slider-rail` 内，实测 x 区间 778.5–831.5、y≈550）拖到**最小档**
+  ```python
+  mouse.move(handle_x, handle_y); mouse.down()
+  for i in range(1, 11):
+      mouse.move(handle_x + (min_x - handle_x) * i / 10, handle_y, steps=1)
+  mouse.up()
+  ```
+- **点击与方向键都无效**（本期试过，无任何反应）
+- 拖到最小后海报完整带边距显示 →「封面效果检测通过」+ 发文助手「无建议」
+- 另：抖音「编辑封面」的叶子节点搜索**必须限定在竖槽位 `.coverControl-CjlzqC`[1] 的 rect 内**——全局搜「编辑封面」会命中横向槽位的浮层，打开错误弹窗，上传后仍判「竖封面缺失」
+
+
+**坑 321：`document.elementFromPoint` 不穿 shadowRoot，落点自证对 wujie 控件全部失效**
+- 首次实现 `click_safe` 时用 `document.elementFromPoint(x,y)` 做自证，探针返回
+  `{'ok': False, 'hit': 'WUJIE-APP.wujie_iframe / '}` ——**连正确的「保存草稿」都自证失败**
+- 根因：wujie 子应用渲染在自己的 shadowRoot 里，`document.elementFromPoint` 只到宿主层
+- 修法：**递归下钻**
+  ```js
+  const deepHit = (x, y) => {
+    let el = document.elementFromPoint(x, y), guard = 0;
+    while (el && el.shadowRoot && guard++ < 12) {
+      const inner = el.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === el) break;
+      el = inner;
+    }
+    return el;
+  };
+  ```
+- 实测双向验证：`保存草稿` → `{ok:true, hit:"BUTTON / 保存草稿"}`；同页 `+272px` 打到 `发表` → `{ok:false, hit:"BUTTON / 发表"}`
+- **这个坑的危险性**：如果当时把「自证总失败」理解成「自证逻辑不适用」，就会把闸门整个拆掉——**闸门失效往往伪装成闸门不好用**
+
+**坑 322：验证防护机制本身也会产生真实动作（元教训）**
+- 为确认 `click_safe` 的 danger 闸门「通过自证后才拦」，我用了 `allow_danger=True` 绕过——**它真的点下去了**
+- 本期侥幸：那个 `create` 页是空表单（`hasVideo=false`），点击后无 toast、无弹窗、草稿箱仍 6 条、未被发布
+- **铁律：闸门验证一律用「只测量不点击」的探针**——把自证那一步单独抽出来跑，看完 `{x,y,ok,hit,want}` 就够；**任何 `allow_danger=True` / 关掉保护再试 的写法都不要写进验证流程**
+- 与坑 317 同源但更进一步：317 是「坐标漂移」，322 是「**为了防事而做的事**本身成了新的事故面」
+
+**Why:** 坑 317 是本期唯一造成**不可逆后果**的坑——其他坑最多让草稿不完整，这个让内容直接公开了。而它之所以发生，恰恰因为前两次「保存草稿」都成功了，第三次就顺手复用了同样的写法，**没有意识到「同一个坐标在页面滚动状态不同时指向不同按钮」**。坑 318 则说明「设后回读」也是一种点击回执式的自欺：它证明的是 UI 变了，不是平台存了。
+
+**How to apply:** ① **任何坐标点击前用 `document.elementFromPoint` 自证落点**，危险按钮无例外；② 滚动后必须重新测量，绝不跨 `scrollIntoView` 复用坐标；③ 「保存/提交」类操作的最终判据只能是**去另一个入口回读落库结果**（草稿箱计数、列表时间戳、`appmsgid`），设置态回读不算；④ 交付给用户的措辞要按「平台实际存了什么」写，不按「我点了什么」写。
+
+### 🔴 派生禁词表误伤 + 锚点超上限 + 枚举过严 + 三处锚点常量（v3.70.0 / 2026-10-29 全链实测，坑 326-329）
+
+**坑 326：`forbidden` / `STALE` 表照抄上期会误伤本期合法引用**
+
+派生脚本时把上期事件词整表复制是标准做法，但**这些词表本质是「上期专属」的快照，不是「永久禁词」**。1029 命中两次：
+
+| 词 | 出现在哪 | 为什么必须保留 |
+|---|---|---|
+| `招股书` | `_md2typ` 的 `forbidden` | 本期用「Anthropic 招股书的 85% 毛利率」反推 Opus 5.5 成本，是核心论据 |
+| `Terra` | `gen_publish` 的 `STALE` | 本期「Codex 稳定性」那条正点名 GPT-6.1 Terra 只有 20–30 t/s |
+
+两次都是**断言在最后一步才炸**（PDF 编译前、publish 写入前），前面的抓取、报告、press、概念、TTS、渲染全部白跑一遍。
+
+**做法**：派生完成后立刻做一次「禁词表 vs 当日报告」的交叉检查——
+
+```python
+md = open(f'data/reports/{DATE}.md', encoding='utf-8').read()
+for w in forbidden:
+    if w in md:
+        i = md.find(w)
+        print(f'{w} <- ...{md[max(0,i-60):i+60]}...')
+```
+逐条看上下文：是「上期事件被复述」→ 留着；是「本期合法引用」→ 从表里删除并加一行注释说明（`# 注意：Terra 本期合法出现（…），不作禁词`）。
+
+**坑 327：锚点占比超过 0.80 时该动哪里**
+
+坑 236 只覆盖了「低于 0.70」（加长锚点前口播）。上界同样会破：1029 首轮 `0.8145`。
+
+三种修法的取舍：
+
+| 修法 | 代价 | 适用 |
+|---|---|---|
+| 削减前面场景 | 要重做选材表、审核清单、可能丢一条新闻 | 最后手段 |
+| 削短前面场景 | 信息密度下降，且要重跑 TTS | 局部可用 |
+| **扩充锚点场景** | 只重跑 1 个场景的 TTS（约 40s） | **首选** |
+
+1029 的做法：在锚点场景补一段「延迟 vs 吞吐不是一回事 / 两者会分头崩 / 同一张卡上互相拉扯」，句式与既有的概念讲解连贯，+13.3s（39.53 → 52.84s），占比 0.8145 → 0.7709。
+
+**注意**：扩充锚点场景时 `script_15s` 原文必须逐字保留在口播里（audit §6 会断言），新增内容只能加在原文**之后**，不能插入中间把原文切断。
+
+**坑 328：可信度枚举是硬编码白名单**
+
+`audit_*.py` 里的 `CRED` 是常量列表。写「官方发布」「官方站点」都会 FAIL。
+
+归类原则：**按「信息是谁说的」而不是「我从哪里看到的」**——
+- 官方博客 / 官网页面 → `官方确认`
+- 官方文档截图转述 → `官方披露`
+- 第三方媒体 → `媒体报道`
+- 社区单用户实测 → `社区实测`
+- 单用户个人经历 → `个人经历`
+- 概念库定义 → `概念定义`
+
+**坑 329：换锚点要改三处常量，漏一处会让报错指向错误场景**
+
+```python
+# 1) news-pipeline/<DATE>/scripts/script-<DATE>.md
+### 场景6（专业锚点·延迟 Latency）
+
+# 2) gen_publish_<DATE>.py
+ANCHOR_SCENE = 6
+
+# 3) _setup_remotion_<DATE>.py
+ANCHOR = 6          # ← 最容易漏
+```
+
+漏改第 3 处的表现：`_setup_remotion` 仍按旧场景号算 `pre`，若新锚点的真实占比不在 `[0.70,0.80]`，报错会说「锚点占比 X 不合格」并指向旧场景，而真实原因是常量错了。
+
+**How to apply:** ① 派生脚本后第一件事就是「禁词表 × 当日报告」交叉检查，别等最后的断言；② 占比超上限优先扩写锚点场景本身，且 `script_15s` 原文必须完整保留；③ 可信度按「谁说的」归类到白名单；④ 换锚点记牢三处常量。
+
+### 🔴 raw CDP 脚本的「失败保留 + 附着复用」骨架（v3.70.0 / 2026-10-29 视频号实测，坑 330）
+
+Playwright 的 `connect_over_cdp` 能用时，一个 `with sync_playwright()` 块里可以连续跑完 upload → meta → cover → album → save，表单状态天然保留。**切到 raw CDP 之后，每次 `open_tab` 都是新标签、新页面、空表单**——1029 因此把视频号上传拆成 6 次运行，每次都重传 24MB 视频（每次约 60s），光重传就花了 6 分钟。
+
+**骨架**：
+
+```python
+TAB_FILE = '/tmp/channels-<date>-tab.txt'
+
+def http_targets():
+    req = urllib.request.Request('http://127.0.0.1:9222/json', method='GET')
+    return json.loads(urllib.request.urlopen(req, timeout=10).read())
+
+def _find_target(tid):
+    return next((t for t in http_targets() if t.get('id') == tid), None)
+
+async def attach_or_create():
+    if os.path.exists(TAB_FILE):
+        tid = open(TAB_FILE).read().strip()
+        t = _find_target(tid) if tid else None
+        if t:
+            tab = Tab(t['webSocketDebuggerUrl'])
+            await tab.__aenter__()
+            return tab, tid
+    tab, tid = await open_tab('about:blank')
+    open(TAB_FILE, 'w').write(tid)
+    return tab, tid
+
+async def main():
+    tab, tid = await attach_or_create()
+    keep = False
+    try:
+        ...
+    except Exception:
+        keep = True          # ← 失败不关标签，留给下一次续跑
+        raise
+    finally:
+        await tab.__aexit__()
+        if not keep:
+            urllib.request.urlopen(f'http://127.0.0.1:9222/json/close/{tid}', timeout=10).read()
+            os.remove(TAB_FILE)
+```
+
+**要点**：
+1. `keep=True` 只在异常路径置位——成功才关标签并删 id 文件；
+2. 附着前必须查 `/json` 确认 id 还在（用户可能手动关了标签）；
+3. 想强制重来就删掉 `/tmp/<platform>-<date>-tab.txt`；
+4. 附着后**不要**再 `goto` 同一页面——会重新加载，表单还是丢。需要导航时先判断 `location.href` 是否已在目标页。
+
+**本期收益**：封面确认按钮一开始点错位置（弹窗其实没开），修好后只重跑封面那一步，没有重传视频。
+
+### 🔴 后台标签页过渡动画不推进 + 「就绪」信号假绿（v3.69.0 / 2026-10-29 视频号实测，坑 324-325）
+
+**坑 324：下拉面板「打开即关闭」，其实是标签页在后台**
+
+现象：点 `.post-album-display` 后，`.filter-wrap` 的 class 立刻变成 `zoom-in-top-leave zoom-in-top-leave-active`，`opacity` 为 `0`，`getBoundingClientRect().height` 为 `0`。反复点、hover、`bringToFront`、`/json/activate` 都没用。
+
+诊断三步：
+1. 量 `getBoundingClientRect().height` → `0`
+2. 量 `getComputedStyle().height` → 仍是 `160px`；`scrollHeight` = `160`；`.option-item` 有 4 个且 `offsetParent` 非空
+3. 查 `document.visibilityState` → **`hidden`**
+
+结论：**`offsetParent` 和 `getComputedStyle().height` 都不能判「元素是否真的可见」**。前者在高度 0 时仍为真，后者反映的是声明值而非布局结果。唯一可信的是 `getBoundingClientRect()` 的实测宽高。
+
+根因：raw CDP 新开的标签默认在后台，`visibilityState=hidden`，浏览器对后台页的 CSS transition 做节流，`leave-active` 阶段永远推进不完 → 面板一出现就带着「正在离开」的类卡死。
+
+修法（实测有效）：
+```js
+const wrap = sr.querySelector('.post-album-wrap .filter-wrap');
+wrap.className = 'filter-wrap zoom-in-top-enter-to';   // 剥掉 leave 类
+wrap.style.opacity = '1';
+wrap.style.transform = 'none';
+wrap.querySelectorAll('.option-item').forEach(it => {
+  it.style.height = '40px';
+  it.style.display = 'block';
+});
+```
+之后按 `getBoundingClientRect().height > 5` 筛选项、走四步自证点击即可。
+
+**坑 325：「表单就绪」的假绿信号**
+
+视频号的 `.input-editor`（描述编辑器）**在上传视频之前就已经存在**。所以：
+
+```js
+ready = !!sr.querySelector('.input-editor')   // ❌ 上传前一秒就是 true
+```
+
+会让脚本在文件刚喂进去时立刻进入下一步，描述、短标题、封面全部写到一个还没绑定视频的空表单上——**而且每一步的「回读」都会成功**（描述确实写进去了），只有最后草稿里没有视频。
+
+真判据（三者同时满足）：
+```js
+sr.querySelectorAll('video').length >= 1
+&& Math.round(video.duration) >= 成片时长 - 容差
+&& !/点击上传|拖入此区域/.test(bodyText)
+```
+本期实测：`videos=4, dur=249`（成片 249.195s）、`uploadArea=false`。
+
+**How to apply:** ① 后台标签页里操作 Vue 浮层前，先量 `getBoundingClientRect().height`，为 0 就剥过渡类强制显示；② 任何「表单就绪」判据都要指向**上传产物本身**（video 元素 + 时长），不要指向「容器元素存在」；③ 判据失败时不要靠反复点击重试——先查 `visibilityState`。
+
+### 🔴 抖音草稿不保存视频文件：「双信号」之后的第三种「回读对但没落库」（v3.68.0 / 2026-10-29 日报实测，坑 323）
+
+**问题**：1029 期抖音端到端跑完，`暂存离开` 点击成功、按钮消失、「继续编辑」横幅出现——**双信号全绿**（坑 290/295 的判据）。恢复草稿回读：标题「今日羊报AI 10月29日」、`descLen=351`、5 个话题、双封面 `missingV=false missingDual=false`、合集「今日羊报Al 第139集」、自主声明「内容为个人观点或见解」——**全部正确**。唯独 `document.querySelectorAll('video').length === 0`，右侧上传区回到「点击上传 / 或直接将视频文件拖入此区域」。截图确认：表单壳在了，**视频没了**。
+
+**根因**：抖音的草稿暂存持久化的是**表单字段**（标题、描述、话题、封面引用、合集、声明），**不持久化视频文件本体**——或者至少在本期这条路径上没有。所以「双信号 + 字段回读」这套判据整体上是**必要但不充分**的：它验证了平台记住了你填了什么，没验证平台记住了你要发什么。
+
+**判据修订（写进上方存草稿表）**：抖音草稿验收 = 按钮消失 + 横幅出现 + **`videos >= 1`** + 标题回读一致。第三个条件不能省。
+
+**修复路径（实测可用）**：
+1. 点「继续编辑」恢复出草稿页（`URL` 会带 `enter_from=draft`）；
+2. 页面上有 **2 个 `input[type=file]`**：
+   - 索引 0：`accept="image/png,image/jpeg,image/jpg"` → **封面图**，喂视频进去会被拒
+   - 索引 1：`accept="video/mp4,video/x-m4v,video/x-flv,.flv,.avi,.wmv,.ts,.mp4,.m..."` → **视频**，要的就是它
+   - **按 `accept` 含 `video` 来挑，不要按索引挑**（顺序不保证）
+3. `set_input_files()` 后轮询：`上传中` 消失且 `videos >= 1`（本期 78%→100% 约 15s，全程约 60s）；
+4. **再点一次「暂存离开」**（恢复会消费掉横幅，不重新暂存草稿就没了）；
+5. **第三次恢复核验 `videos=1`** 才算完成——第一次恢复可能只是页面内存态。
+
+**为什么这条比坑 317 更容易重犯**：坑 317 会产生不可逆后果（内容公开），所以一旦踩过就记住了；坑 323 只会让草稿残缺，**而残缺的草稿在列表里看起来完全正常**——只有去恢复它、并且真的检查 `videos`，才会发现。任何只跑到「横幅出现」就收工的验收，都会静默地交付一份空草稿。
+
+**How to apply:** ① 抖音验收判据加上 `videos >= 1`，写进 checklist；② 恢复草稿后第一件事就是数 `video` 元素，不要先看字段；③ 发现视频丢失就在同一草稿页重传，不要删草稿重来（坑 295：横幅消费掉就没了）；④ 重传后必须再暂存一次，否则草稿仍是空的。
 
 ### 🔴 验收判据自欺 + 合集静默失败 + 一条被证伪的推断（v3.66.0 / 2026-10-26 日报实测，坑 310-316）
 
@@ -4617,7 +4931,28 @@ browser_run_code_unsafe("""async (page) => {
   try {
     await cover.waitFor({ state: 'attached', timeout: 8000 });
     await cover.setInputFiles(path);
-    return 'v setInput via selectArea';
+    // 🔴 v3.67.0 坑 320：喂图后弹窗默认带裁切缩放，会切掉 3:4 海报两端的字，
+    //    平台随后判「封面存在文字展示不全问题 / 封面不佳」。
+    //    必须把缩放滑块拖到最小档（点击与方向键都无效）：
+    //      mouse.move → down → 分 10 步 move → up
+    //    实测 rail x 区间 778.5–831.5、y≈550（视口 1440×769）
+    const sl = page.locator('.semi-slider-rail').first();
+    const hb = page.locator('.semi-slider-handle').first();
+    if (await hb.count()) {
+      const h = await hb.boundingBox();
+      const r = await sl.boundingBox();
+      if (h && r) {
+        const y = h.y + h.height / 2;
+        await page.mouse.move(h.x + h.width / 2, y);
+        await page.mouse.down();
+        for (let i = 1; i <= 10; i++) {
+          await page.mouse.move(h.x + h.width / 2 + (r.x - h.x) * i / 10, y);
+        }
+        await page.mouse.up();
+        await page.waitForTimeout(800);
+      }
+    }
+    return 'v setInput via selectArea (+zoom min)';
   } catch (e) {
     // 兜底：按 accept 过滤（禁止索引）
     const inputs = await page.$$('input[type="file"]');
@@ -6171,7 +6506,7 @@ r = page.evaluate('''() => {
 
 ### 🔴 Playwright attach 无报错挂起 → 整平台切 raw CDP；wujie 空壳用 Page.navigate 重挂（v3.47.0 / 2026-10-13 实测，坑 251）
 **问题**：1013 上传阶段 B站/抖音/视频号三平台的 Playwright `connect_over_cdp` 全部**无报错纯挂起**（并发 raw CDP 客户端对同一 daemon 无冲突 → 问题是 Playwright flatten 协议/事件洪泛自身）。视频号叠加第二个故障：登录墙清掉后 `#app` 仍是空壳（`.app-body-full` kids=0、后代总数=1、`appText` 空，SPA 未挂载），`Page.reload` 多次无效。
-**解决**：① attach 挂起 >30s 即弃 Playwright，该平台脚本整平台改 **raw CDP websockets**（模板 `news-pipeline/2026-10-13/scripts/channels_upload_1013.py`：`/json/list` → `webSocketDebuggerUrl` → cmd/ev 助手；`DOM.enable` **先行**否则 `Document.getDocument` 报 -32601；`Document.getDocument{depth:-1,pierce:true}` + `DOM.querySelectorAll('input[type=file]')` 定位 shadow 内 input → `DOM.setFileInputFiles`；contenteditable 用 `Input.insertText`；Vue 受控 input 用原生 value-setter + `input` 事件；截图 `Page.captureScreenshot`）。② wujie 空壳 = **`Page.navigate` 到 `/platform/post/video` 重新挂载**；nav 返回 `net::ERR_ABORTED` 属正常。③ 挂载判据（轮询 ≤60s）：`#app` 后代数 >10 且 `input[type=file]` 出现（1013 实测 kids=1410、2 个 file input、按钮含「保存草稿」），未达标禁止碰表单。
+**解决**：① attach 挂起 >30s 即弃 Playwright，该平台脚本整平台改 **raw CDP websockets**（模板 `news-pipeline/2026-10-13/scripts/channels_upload_1013.py`：`/json/list` → `webSocketDebuggerUrl` → cmd/ev 助手；**首选 `Runtime.evaluate` 取 `objectId` → `DOM.setFileInputFiles({files, objectId})`（v3.67.0 坑 319，1028 实测一次成功）**；旧的 `DOM.getDocument{depth:-1,pierce:true}` + `DOM.querySelectorAll` 路径在本机 Chrome 155 上 -32601，已降级为备选；contenteditable 用 `Input.insertText`；Vue 受控 input 用原生 value-setter + `input` 事件；截图 `Page.captureScreenshot`）。② wujie 空壳 = **`Page.navigate` 到 `/platform/post/video` 重新挂载**；nav 返回 `net::ERR_ABORTED` 属正常。③ 挂载判据（轮询 ≤60s）：`#app` 后代数 >10 且 `input[type=file]` 出现（1013 实测 kids=1410、2 个 file input、按钮含「保存草稿」），未达标禁止碰表单。
 **Why:** Playwright 挂起不抛异常，最容易被误判成「浏览器死了」去重启 daemon——实际 daemon 活着，换客户端即可；wujie 空壳同理，reload 只重拉外壳，navigate 才会重跑微应用挂载。
 **How to apply:** Phase 11/13/14 上传开工前 `curl -s -m 5 http://localhost:9222/json/version` 探活（坑 198 协议）；attach 挂起即切 raw CDP，不再回头试 Playwright。
 
@@ -6426,6 +6761,7 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 - 弹窗内 6 个 file input，只有 `.selectArea-BCIYQD input[type=file]` 是封面，其余为模板/贴纸选择器，喂错**静默无报错**
 - 封面槽位按下标断言：`.coverControl-CjlzqC[0]`=横 4:3、`[1]`=竖 3:4，用 `img.naturalWidth/naturalHeight` 判 1536×1151 / 1150×1535
 - 「竖封面缺失」在 AI 推荐封面生成期会瞬时为真，**禁只 grep 文本判封面**
+- **坑 320 补（v3.67.0 / 1028 实测）**：弹窗**默认带裁切缩放**，直接喂 1152×1536 会切掉海报两端的字，平台判「封面存在文字展示不全问题 / 封面不佳」（本期实测「别」「一」被裁）。修法 = 把 `.semi-slider-handle` 拖到**最小档**（`mouse.move → down → 分 10 步 move → up`；**点击与方向键都无效**，实测无反应），实测 rail x 区间 778.5–831.5、y≈550。拖到最小后海报完整带边距显示 →「封面效果检测通过」+ 发文助手「无建议」。另：「编辑封面」叶子搜索**必须限定在 `.coverControl-CjlzqC[1]` 的 rect 内**——全局搜会命中横槽位浮层，打开错误弹窗，上传后仍判「竖封面缺失」
 
 **坑 297：抖音合集选项匹配必须最小面积法**
 - `/^「?今日羊报/` + `/共\s*\d+\s*个作品/` 同时命中整个下拉容器（`请选择合集不选择合集「虢礫緙嘞」共4个作品「羊报AI月报」…`），点它等于没选
@@ -6573,7 +6909,8 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 - edge-tts 403 第二根因=7.2.8 DRM 令牌算法过期：出口 US + 时钟正常 + 显式 --proxy 仍 403，升级 7.3.1 即恢复；排查顺序=出口→时钟→版本
 
 **视频号 raw CDP（坑 251 模板修正）**
-- `Document.getDocument` 方法名不存在（-32601），正确名=`DOM.getDocument`；`DOM.querySelectorAll` 不穿 shadowRoot → pierce 树手工 walk children/shadowRoots/contentDocument（模板=channels_upload_1014.py）
+- ~~`Document.getDocument` 方法名不存在（-32601），正确名=`DOM.getDocument`；`DOM.querySelectorAll` 不穿 shadowRoot → pierce 树手工 walk children/shadowRoots/contentDocument（模板=channels_upload_1014.py）~~
+  **🔴 v3.67.0 更新（坑 319 / 1028 实测）：本机 Chrome 155 上 `DOM.getDocument` 同样报 -32601 `wasn't found`**（`DOM.enable` 已先行、`Runtime.evaluate` 正常）。**首选路径改为 `Runtime.evaluate` 求值出 `input[type=file]` 元素（`returnByValue:false`）→ 取 `objectId` → `DOM.setFileInputFiles({files, objectId})`**，对 wujie shadowRoot 内的 input 一次成功（1028 期视频与竖封面都走这条）。见 `templates/cdp_helper.py` 的 `Tab.set_files()`。pierce walk 代码仅在 objectId 路径失效时兜底。
 - `__WUJIE` false / body.innerText 近空是渲染判定假阴性；实体判据=shadowRoot 内表单元素
 - setFileInputFiles 后 20s 无进度即换 node，不傻等 300s（错 node 静默失败）
 

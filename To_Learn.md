@@ -583,7 +583,7 @@ vertical-3-4.png
 
 定时任务
 今天10:35pm执行
-  执行 linuxdo 全量日报流水线（日期按明天：2026-10-26）。
+  执行 linuxdo 全量日报流水线（日期按明天：2026-10-30）。
   要求与「过滤后全部抓取完」一致：
   1) 用 linuxdo-daily：双源列表 → 合并去重/公益站过滤 → 32h 窗口 → 全量逐帖抓取正文（每批立即保存 batch_browser_N.json）→ 二次过滤 → 写 data/daily/YYYY-MM-DD.json、data/reports/YYYY-MM-DD.md、press、PDF。
   2) 然后用 ai-news-factory 生成当日日报视频：事件按推荐自动选定，不用再向我确认；权限给足直接跑；上传各平台一律存草稿。
