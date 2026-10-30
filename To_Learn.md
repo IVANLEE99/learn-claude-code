@@ -583,7 +583,7 @@ vertical-3-4.png
 
 定时任务
 今天10:35pm执行
-  执行 linuxdo 全量日报流水线（日期按明天：2026-10-30）。
+  执行 linuxdo 全量日报流水线（日期按明天：2026-10-31）。
   要求与「过滤后全部抓取完」一致：
   1) 用 linuxdo-daily：双源列表 → 合并去重/公益站过滤 → 32h 窗口 → 全量逐帖抓取正文（每批立即保存 batch_browser_N.json）→ 二次过滤 → 写 data/daily/YYYY-MM-DD.json、data/reports/YYYY-MM-DD.md、press、PDF。
   2) 然后用 ai-news-factory 生成当日日报视频：事件按推荐自动选定，不用再向我确认；权限给足直接跑；上传各平台一律存草稿。
@@ -652,10 +652,11 @@ Astra全量开放
 只需要上传公众号~其他我已经手动上传了
 
 
-https://linux.do/raw/2995229
+https://bbs.hupu.com/643293715.html到底要接受平庸还是打破命运？
 帖子做成视频 不要出现帖子来源
 称呼全部用道友+名字
 竖屏幕视频
+参考/Users/youngsdream/.claude/skills/ai-news-factory/SKILL.md上传经验 上传b站 抖音 视频号
 
 
 根据生成的content.json 生成tts 字幕 生成视频
@@ -707,3 +708,43 @@ https://linux.do/t/topic/2935850
 Q版国风IP角色插画，半身特写，可爱拟人小羊，大头小身。白色蓬松羊毛，浅粉色圆脸，脸颊两团腮红，黑色小鼻子，开心张嘴，一只眼眨眼、另一只睁大。头顶两侧棕色螺旋羊角。穿红色连帽卫衣，白色抽绳。右手ok，左手竖起大拇指。粗黑色干净描边，赛璐璐平涂，圆润可爱，潮玩感。暖米色做旧宣纸背景，隐约浅色山水纹理，红色细边框，左上短红线与黄色强调线，右下红色回纹角花。高饱和暖色，柔和块面阴影，无强光，矢量插画质感，高清，居中构图。
 
 打开top 10的视频 分析视频的优缺点
+
+新增知乎平台
+模块化,这部分写到单独的md文件 skill 引用
+1、参考微信公众号文章生成知乎文章,需要审核 
+符合/Users/youngsdream/Documents/learn-claude-code/skills/ai-news-factory/知乎关于 AI 辅助创作内容的治理细则.md
+/Users/youngsdream/Documents/learn-claude-code/skills/ai-news-factory/知乎社区规范.md
+
+2、上传知乎https://www.zhihu.com/creator/manage/creation/article
+
+点击 立即创作
+
+标题
+正文
+添加封面
+创作声明 包含AI辅助创作作作者对内容负责
+专栏收录 发布到专栏「今日羊报Al」
+保存草稿
+
+
+
+/Users/youngsdream/Documents/learn-claude-code/skills/ai-news-factory/SKILL.md
+
+更新优化skill,
+新增知乎平台
+模块化,这部分写到单独的md文件 skill 引用
+1、参考微信公众号文章生成知乎文章,需要审核 
+符合/Users/youngsdream/Documents/learn-claude-code/skills/ai-news-factory/知乎关于 AI 辅助创作内容的治理细则.md
+/Users/youngsdream/Documents/learn-claude-code/skills/ai-news-factory/知乎社区规范.md
+
+2、上传知乎https://www.zhihu.com/creator/manage/creation/article
+
+点击 立即创作
+
+标题
+正文
+添加封面
+创作声明 包含AI辅助创作作作者对内容负责
+专栏收录 发布到专栏「今日羊报Al」
+保存草稿
+最后在正文前插入生成的视频

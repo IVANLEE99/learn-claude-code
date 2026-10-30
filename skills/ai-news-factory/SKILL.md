@@ -1,14 +1,22 @@
 ---
 name: ai-news-factory
-description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video"
-version: 3.70.0
+description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
+version: 3.73.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.70.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.73.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.73.0 核心改进（2026-10-30 知乎首次端到端实跑：视频内嵌落位 + Draft.js 三处选区陷阱 + 两处判据假绿，坑 338-343）**：1030 期知乎草稿全链跑通（视频 1 / 图 6 / 封面 1 / 创作声明 / 专栏，`ZHIHU_DRAFT_OK`），过程中踩到六个新坑。**坑 338 —— 视频卡片是原子块**：Draft.js 里 `.Editable-video` 是一个不可分割的块，光标在其后按一次 `Backspace` 删的是**整个视频**；任何含退格的操作后都要重数 `.Editable-video`。**坑 339 —— `Shift+Home` 在 Draft.js 里会反向选到整篇开头**：本想只选占位行，结果 `Backspace` 把占位之前的正文全删了（1030 首轮正文 2025 字 → 441 字、34 块 → 7 块、6 图 → 1 图），**且自动保存已把破坏写进草稿**；正解是 `Range.selectNodeContents(占位文本节点)` 精确选中再退格。**坑 340 —— Vue tab/radio 的 `element.click()` 静默无效**，须取 `getBoundingClientRect()` 中心走 `page.mouse.click(x,y)`。**坑 341 —— 整行加粗的判断漏掉「行首加粗 + 行内正文」**：`startswith('**') and endswith('**')` 放过 `**AI 辅助创作说明**：本文由作者…` 这类行，页面上留下字面 `**`；须逐行 `re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)`，并把「全文块文本无 `**`」加进验收。**坑 342 —— `Backspace` 走的是 Draft.js 的**内部选区**，不是刚设的 DOM 选区**：`paste` 认 DOM Selection 所以落点正确，但退格删掉了文件开头的视频卡片；结论是**任何带退格的步骤之后都必须回读全部结构性计数**（视频数/图片数/块数），缺了立刻补插。**坑 343 —— 专栏选中态 grep 页面文本恒真**：`发布到专栏 / 不发布到专栏` 本来就常驻 DOM；真判据是 `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 `checked`。**另修正一处长期错误文案**：知乎专栏真名是 `今日羊报 AI`（**含半角空格 U+20、末位大写 I U+49**，按页面码点实测），旧文档写的「末位是小写 l、无空格」是错的——那是**抖音/视频号的合集名** `今日羊报Al`（无空格、小写 l U+6C）。两个平台的名称不同，改成了各自的正确值并加了交叉警示。**视频落位已验证**：光标置文档开头 → 点 `button[aria-label="视频"]` → 直接对 `input.VideoUploadButton-fileInput`（弹窗前已在 DOM）`set_input_files` → 约 10–15 s 出卡片 → `data-video-playable === 'true'`；落位为 block 0 自动空文本 + block 1 VIDEO，**即在正文之前**，刷新后卡片与前后文本均完好。模块文档 §3.5–3.7、§4（坑 338–343）、§7（探测项 12–20）已同步。
+
+> **🔴 v3.72.0 核心改进（2026-10-30 新增知乎平台，模块化到 `templates/platform-zhihu.md`）**：**知乎是第五个发布平台，图文 + 内嵌成片视频**。链路 = 公众号图文（Phase 10.3）→ 派生知乎稿 → **合规审核门** → 八步上传（立即创作 / 标题 / 正文+配图 / **正文前插视频** / 封面 / 创作声明 / 专栏收录 / 保存草稿）→ 落库验收。三条与既有平台**不同**的硬约束：① **审核是前置门，不是事后补**——知乎《AI 辅助创作治理细则》要求「作者完成主要智力劳动、审查编辑并对最终内容负责」，所以派生稿必须有「编辑判断」段，且须逐项过 `review-checklist.md` 的 §知乎 十一条才允许上传；② **公众号 CTA 与导流句必须删**——知乎《社区规范》§四禁止在标题/封面加营销推广信息、禁止诱导至第三方平台关注，公众号结尾的「点个赞/转发/关注/评论区聊聊」整段删除，标题也去掉 `| 今日羊报AI` 品牌后缀（改为 ≤40 字信息型标题）；③ **机器人只到「存草稿」为止**——规范§五把「使用自动化/插件批量发布」与「发布机器生成的内容」列为违规，AI 声明**不能豁免**，因此发布动作一律留给用户本人。**✅ 页面选择器已于 2026-10-30 全部实测回填**：编辑器在 `zhuanlan.zhihu.com/write`（点「立即创作」新开标签）、标题 `textarea[placeholder*="请输入标题"]`、正文 `div.public-DraftEditor-content`（Draft.js）、图片 `input[accept*="image/webp"]`、视频 `input.VideoUploadButton-fileInput`、封面 `input[accept=".jpeg, .jpg, .png"]`、创作声明 `div.css-be2u3` 内 combobox → `.Select-option`「包含 AI 辅助创作 作者对内容负责」、专栏 radio `checked`、**无保存按钮＝自动保存**。完整记录见模块文档 §7。仍未实测：封面裁剪弹窗、`zhihu-images/` 生成脚本、正式发布流程（本站点不执行）。
+
+> **🔴 v3.71.0 核心改进（2026-10-30 公众号实测收尾：一处「派生没生成的上传源目录」+ 一处「页面锁定选错标签」+ 一处渲染前须同步的静默隐患，坑 331-333）**：**坑 331 —— 公众号上传配图目录 `wechat-images/` 不是派生产物，漏生成会让 `images` 步 `set_input_files` 直接 `FileNotFoundError`。**1030 期 `news-pipeline/2026-10-30/wechat-images/` 全程缺失，运行 `wechat_upload_1030.py images` 在第 1 张 `scene1.jpg` 就炸 `os.stat FileNotFoundError`——它不是 skill 脚本生成的，是**派生脚本之外**、需要**本地从 `images/scene*.png` 现场转 JPEG** 才能补齐的上传源；同理 `cover.png` 也取自 `images/horizontal-4-3.png`。**铁律：派生完成后先核对上传源目录**——`wechat-images/`（`wx_scene_map` 逐个 `scene<i>.jpg` + `cover.png`）与 `video/`、`captions/`、`images/` 一样都在「生图 + 渲染」之后立即落盘，漏了就先 `PIL` 现场转（`convert('RGB').save(dst,'JPEG',quality=88)`），不要等到 `images` 上传步才撞 `FileNotFoundError`（那一步已先进了编辑器、还得回来补）。**坑 332 —— 公众号 `open` 步的「首选 mp 标签页」可能是「合集管理」（`appmsgalbummgr`），它没有「新的创作」入口，断言与点击都会落空。**1030 期 `ctx.pages` 里既有 `cgi-bin/home`（首页）也有 `appmsgalbummgr`（合集管理），旧写法取**第一个** mp 页，恰好是合集管理页 → `.new-creation__menu-item` 为 null、"新的创作"不在 → `open` 断言失败。**修法：`open` 必须锁定 `cgi-bin/home?token=` 首页**——先扫 `cgi-bin/home&token=`，无则扫任一带 `token=` 的 mp 页并把 token 借到首页 `goto`，再无才 `new_page` 走裸域自动 302；不要直接取 `ctx.pages` 第一个 mp 标签。**坑 333 —— 渲染前若忘了把本期 `captions.json` 同步到 `video-project/public/`，成片字幕会静默沿用上期。**1030 期 `_setup_remotion_1030.py` 只同步了 voiceover 与封面，没同步字幕；第一次渲染出的 mp4 字幕时间轴对得上、画面正常，**只有内容全是 10-29 的**（`public/captions.json` 还是上期时间戳）。这是最危险的一类——成片能出、不报错、ffprobe 也过，只有抽音频逐词核对才发现。**铁律：`_setup_remotion` 里必须有「copy caps + 断言」——复制 `captions/captions.json → public/captions.json`，断言首行含本期关键词、尾帧时长 ≈ 音频总长（±2s），缺一步就在装配阶段 fail-fast，绝不让它进渲染。** 1030 正例：日报 377 帖；成片 226.496s / 1920×1080 / 23,352,377B / 锚点 0.7763（音频口径）；字幕↔mp4 音频 lead 中位 +0.080s、离群 0、7 场景块 Δ≤1ms；公众号 `MP_VERIFY_OK`（appmsgid true / bodyLen 1763 / placeholders 0 / cover block+qpic / titleLen 74 / 合集「今日羊报 AI」）；B站标题超 80 字被平台截断到 70 字已改短、`Claude` 标签大写平台不收改小写 `claude`；视频号 / 抖音由用户手动完成（坑 215 不碰）。
+
 > **🔴 v3.70.0 核心改进（2026-10-29 全链实测：五处「派生残留」与「判据过严/过松」，坑 326-330）**：**坑 326 —— 派生脚本的 `forbidden`/`STALE` 表会误伤本期的合法复述。**1029 把上期事件词整表复制成 `forbidden`，结果 PDF 编译前断言炸在「招股书」上——而本期报告里「用 Anthropic 招股书的 85% 毛利率反推 Opus 5.5 成本」是**必须保留的论据**；同样 `publish.json` 的 `STALE` 表把「Terra」列为禁词，而本期「Codex 稳定性」那条正点名 GPT-6.1 Terra。**铁律：派生后先 `grep 每个 forbidden 词 data/reports/<DATE>.md`，命中的逐个判断是「上期残留」还是「本期合法引用」，后者从禁词表删除并在注释里写明理由**（1029 实测因此移除 `招股书` 与 `Terra` 两个词）。**坑 327 —— 锚点占比只在「低于 0.70」时有既定对策，超过 0.80 没有。**1029 首轮 TTS 实测 `191.991 / 235.727 = 0.8145`，超上限。既有指导（坑 236）只教「把锚点前口播加长约 12 字把占比推过 70%」——那是**加法**；超上限需要**减法或给锚点增重**。本期采用后者：**扩充锚点场景自身的口播**（补一段「延迟 vs 吞吐」的展开，+13.3s），把分母做大，占比降到 `191.991 / 249.035 = 0.7709`，一次通过。**为什么不用「削减前面场景」**：前面 5 个场景各承载一条独立新闻，删任何一条都要重做选材表与审核清单；而锚点场景本身是可加深的概念讲解，扩写不损失信息量。**坑 328 —— `audit` 脚本的可信度枚举是硬编码白名单，新写法会被判 FAIL。**1029 脚本里写了「可信度：官方发布」「可信度：官方站点」，`audit` 的 `CRED` 白名单只有 `官方确认/媒体报道/社区实测/源码迹象/未确认传闻/个人经历/第三方评测/概念定义/官方披露/社区观察` → 2 项 FAIL、`RENDER NOT ALLOWED`。**这是判据过严，不是脚本错**：语义上「官方发布」= 「官方确认」。处置二选一：① 改脚本用白名单里的词（首选，保持判据稳定）；② 扩白名单。**不要**为了绕过而写「可信度：官方确认」但内容其实是站点页面——`官方站点` 那种来源应归到 `官方确认` 或 `社区观察`，按「信息是谁说的」而不是「我从哪看到的」归类。**坑 329 —— `_setup_remotion` 的 `ANCHOR` 常量与 `play_order` 是两处独立硬编码。**1029 换了锚点场景（scene5 → scene6），改了 `script` 里的 `### 场景6（专业锚点·…）`、改了 `gen_publish` 的 `ANCHOR_SCENE`，**但漏了 `_setup_remotion_1029.py` 里的 `ANCHOR = 5`**——它负责断言「占比 ∈ [0.70, 0.80]」并在 `Composition.tsx` 注释里写锚点位置。漏改的直接后果是：若新锚点算出来的占比不在区间内，报错信息会指向错误的场景号，排查时白花时间。**铁律：换锚点场景时必须同时改三处——`script-<DATE>.md` 的场景标题、`gen_publish_*.py` 的 `ANCHOR_SCENE`、`_setup_remotion_*.py` 的 `ANCHOR`（外加注释里的概念名）。****坑 330 —— raw CDP 脚本必须「失败保留标签 + 附着复用」。**视频号 24MB 视频重传一次约 60s，而 1029 的 raw CDP 脚本每跑一步都 `open_tab` 新建 + `finally` 关标签，导致「上传 → 描述 → 封面」被拆成三次运行、每次都要重传。**改成 `attach_or_create()`**：把 `targetId` 落到 `/tmp/<platform>-<date>-tab.txt`，下次运行先查 `/json` 里该 id 是否还在，在就附着、不在才新建；**失败时 `keep=True` 不关标签**，让下一次运行能从断点继续（成功才关并删掉 id 文件）。这一条把「改一版封面」的成本从「重传 24MB + 重填表单」降到「只跑封面那一步」。
+
+
 
 > **🔴 v3.69.0 核心改进（2026-10-29 视频号补传实测：两个「界面在动但状态不对」的新形态，坑 324-325）**：**坑 324 —— 后台标签页里 Vue 过渡动画不推进，下拉面板「打开即关闭」**。视频号「添加合集」点开后，`.post-album-wrap .filter-wrap` 立即带上 `zoom-in-top-leave zoom-in-top-leave-active`、`opacity:0`、`getBoundingClientRect().height === 0`，而 `getComputedStyle().height` 仍是 `160px`、`scrollHeight=160`、`.option-item` 有 4 个且 `offsetParent` 非空。**判据陷阱**：`offsetParent !== null` 在高度 0 时仍为真 → 用「可见选项」筛选得到 0 条，会误判成「没有合集」。**根因** = 该标签页 `document.visibilityState === "hidden"`（raw CDP 新开的标签在后台），浏览器把 CSS transition 的推进节流掉了，`leave-active` 永远走不完。**实测无效**：`Page.bringToFront`、HTTP `/json/activate`（返回非 JSON，失败）、hover（`mouseMoved`）、只发 `mousePressed`、JS `dispatchEvent(new MouseEvent("click"))` —— 全部无法让面板停留。**可用修法**：直接在 evaluate 里**剥掉过渡类并内联样式**——`wrap.className="filter-wrap zoom-in-top-enter-to"`、`wrap.style.opacity="1"`、`wrap.style.transform="none"`，再给每个 `.option-item` 设 `height:40px; display:block`；随后选项 `getBoundingClientRect().height > 5` 成立，正常按坐标点击即可（本期实测一次成功，`ALBUM AFTER: 今日羊报Al`）。更一般的判据：**任何「点开就消失」的下拉/浮层，先量 `getBoundingClientRect().height`，不要用 `offsetParent` 或 `getComputedStyle().height` 判可见**。**坑 325 —— 上传就绪的假绿信号**：视频号表单的 `.input-editor` 在**上传之前就已存在**，所以「`ready = !!sr.querySelector(".input-editor")`」在文件刚喂进去时就返回 true，脚本会立刻往下走，后面写描述、设封面全落在空表单上。**真判据** = `sr.querySelectorAll("video").length >= 1` **且** `video.duration` 接近成片时长（本期 249s，实测 `dur=249`）**且** `body` 不含「点击上传/拖入此区域」。本期视频号正例（raw CDP 全链）：短标题 13 字 / 描述 244 字 / 竖封面 810×1080 + 横封面 / 合集「今日羊报Al 共138个内容」/ 「保存草稿」四步自证命中 `BUTTON/保存草稿`（x=893，三按钮 x=833/969/1105 间距 16px）/ 草稿箱 7 条首条为本期（07:57）。
 
@@ -67,7 +75,7 @@ version: 3.70.0
 
 ### 🔴 全局规则：所有平台上传一律存草稿
 
-**v2.8.0 新增**：无论日报还是周报，所有平台（B站/抖音/视频号/公众号）上传后一律**保存草稿**，不直接发布/投稿。
+**v2.8.0 新增**：无论日报还是周报，所有平台（B站/抖音/视频号/公众号/知乎）上传后一律**保存草稿**，不直接发布/投稿。
 
 **原因**：
 - 标题、封面、合集等可能需要用户二次确认
@@ -83,6 +91,7 @@ version: 3.70.0
 | 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿）。**若恢复后发现视频丢失（坑 323），在该草稿页内按 `accept` 含 `video` 挑 `input[type=file]`（本期实测索引 1，索引 0 是封面图的 image/*）重新 `set_input_files` 上传，再暂存** | **① 按钮消失 且「继续编辑」横幅出现；② 恢复后 `videos >= 1`（v3.68.0 坑 323：双信号不是充分条件——横幅在、字段全，视频仍可能没落库）；③ 标题回读一致** |
 | 视频号 | 点击「保存草稿」按钮——**点击前必须 `document.elementFromPoint` 自证落点是它**（v3.67.0 坑 317：它与「手机预览」「发表」水平相邻、间距仅 16px、无二次确认，1028 期因 stale 坐标误点「发表」，内容直接公开） | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4）。**另：视频标注不在草稿里保存（坑 318），验收时不要拿它当落库判据** |
 | 公众号 | 点击「保存为草稿」按钮 | URL 出现 `appmsgid=`，且 `bodyLen` / 占位符数 / 封面 `hasQpic` / **合集 `.js_article_tags_content`** 回读一致（v3.66.0 坑 310：合集**不能**用 `body.innerText` 子串判，正文页脚恒含合集名） |
+| 知乎 | **无「保存草稿」按钮——知乎文章是自动保存**（v3.71.0 坑 335 实测）。填完标题/正文等 ≥3s 出现底部「刚刚 · 草稿」即可；**「发布」永不进脚本**（规范禁止自动化发布，AI 声明不能豁免） | 编辑页 URL 变为 `zhuanlan.zhihu.com/p/<id>/edit`；创作者中心「草稿箱(N)」列表出现本期标题；编辑器内 标题 value / 正文 innerText 长度 / 封面 / **创作声明（含 AI 辅助创作 作者对内容负责）** / 专栏「今日羊报 AI」五项同时回读（详见 `templates/platform-zhihu.md` §3.10） |
 
 ### 🔴 浏览器与 Profile 全局铁律（v3.7.0 / 2026-07-18 实测）
 
@@ -187,6 +196,7 @@ ws = await websockets.connect(target['webSocketDebuggerUrl'],
   ☐ 抖音：自动上传视频、封面、填写描述、选择合集、存草稿
   ☐ 视频号：自动上传视频、封面、填写描述/短标题、选择合集、存草稿
   ☐ 公众号：自动创建文章、填写标题/正文、上传封面、声明原创、选择合集、存草稿
+  ☐ 知乎：派生知乎稿、过合规审核清单、创建文章、填写标题/正文+配图+**正文前插入成片视频**、添加封面、设置「包含 AI 辅助创作」声明、收录专栏「今日羊报 AI」、存草稿（**不发布**）
 
 请回复「确认」或「全部授权」开始执行。
 ```
@@ -200,7 +210,8 @@ ws = await websockets.connect(target['webSocketDebuggerUrl'],
 1. 📄 日报文件路径（默认: data/reports/YYYY-MM-DD.md）
 2. 🖼️ 图片生成 API URL
 3. 🔑 图片生成 API Key
-4. 📤 上传平台（默认: 全部；可指定如「B站+公众号」）
+4. 📤 上传平台（默认: 全部 = B站/抖音/视频号/公众号/知乎；可指定如「B站+公众号+知乎」）
+5. 🧭 知乎专栏名（默认: 今日羊报 AI；中间半角空格，末位是**大写字母 I**，2026-10-30 按页面码点实测）
 ```
 
 ## 触发条件
@@ -212,6 +223,7 @@ ws = await websockets.connect(target['webSocketDebuggerUrl'],
 - "AI月报", "羊报AI月报", "monthly report", "月报视频", "把月报做成视频", "月报转视频"
 - "破格模式", "破格元素", "破格风格", "元素破格"
 - "精简模式", "精简", "排序", "精华版", "3W", "压新闻"
+- "知乎", "知乎文章", "知乎发文", "发知乎"（→ 进入 Phase 10.3b 派生 + Phase 15 上传，只存草稿）
 
 ## 模式参数映射表（v3.1.0 新增，单一事实源）
 
@@ -248,6 +260,10 @@ ws = await websockets.connect(target['webSocketDebuggerUrl'],
 | **锚点库路径** | `ai-concept-bank/concepts.json` | 同左 | 同左 |
 | **脚本默认结构** | **3W + 可信度** | **3W + 可信度** | 趋势内嵌 3W + 可信度 |
 | **灰色渠道上限** | **每期 ≤1 条** | **每期 ≤1 条** | **每期 ≤1 条** |
+| **知乎标题** | `【M月D日】{信息型判断句}`（≤40 字，禁品牌后缀） | `【M月D日~D日】{信息型判断句}`（≤40 字） | `【YYYY年M月】{信息型判断句}`（≤40 字） |
+| **知乎专栏** | `今日羊报 AI`（中间半角空格 U+20，末位**大写 I** U+49；2026-10-30 页面码点实测，旧文案「小写 l」是错的） | 同左（实跑确认是否有独立周刊专栏） | 同左（实跑确认） |
+| **知乎文章文件** | `zhihu-article-YYYY-MM-DD.md` | `zhihu-article-<range>.md` | `zhihu-article-YYYY-MM.md` |
+| **知乎封面** | `horizontal-4-3.png` → `zhihu-images/cover.jpg` | 同左 | 同左 |
 
 **模式判定规则**（Phase 0 自动）：
 - `REPORT_PATH` 含 `data/monthly/`，或触发词含"月报/monthly" → `REPORT_MODE=monthly`，`MONTH_LABEL=YYYY-MM`
@@ -817,6 +833,10 @@ Hook：[破格类型] {开场，用破格制造意外感}
 | `微信视频号运营规范.md` | 视频号 |
 | **`微信视频号常见的不合规频道内容概述.md`** | **视频号限流/违规类型细目** |
 | **`微信公众号互联网用户公众账号信息服务管理规定.md`** | **公众号删文常见法规依据** |
+| **`知乎社区规范.md`** | **知乎（见 `templates/platform-zhihu.md`）** |
+| **`知乎关于 AI 辅助创作内容的治理细则.md`** | **知乎 AI 声明与低质内容治理（强制对照）** |
+
+**🔴 知乎平台专项** → **`templates/platform-zhihu.md`**（文章派生 + 合规清单 + 草稿上传 + 坑 334-343）。**Phase 10.3b** 生成文章、**Phase 15** 上传，两处均以该文件为准。
 
 #### 禁止内容（所有平台通用）
 
@@ -870,6 +890,15 @@ Hook：[破格类型] {开场，用破格制造意外感}
 - ✅ 提供具有价值的、持续性的并与该账号高度相关的内容
 - **2026-07-26 实测**：可「接投诉 + 违反《互联网用户公众账号信息服务管理规定》+ 已删除」且**不写条款号** → 优先按第五条/第十八条（三）（六）整改选题与包装
 
+**知乎特别规则**（v3.72.0 新增，对照 `知乎关于 AI 辅助创作内容的治理细则.md` + `知乎社区规范.md`；完整审核见 `templates/platform-zhihu.md` §2）：
+- 🔴 **必须加「包含 AI 辅助创作」创作声明**，并在文中披露 AI 使用目的（资料检索/初稿整理/排版）
+- 🔴 **作者须完成主要智力劳动**：稿中必须有「编辑判断」段（作者视角的判断，非复述）——这是「辅助创作」与「机器生成内容」的分界
+- 🔴 **图文必须相关**：配图只放与该小节事件对应者，宁缺勿错配（治理细则点名治理「图文不相关」）
+- 🚫 无资质不得转载时政类新闻；不得以「揭秘/重磅/独家爆料/知情人士称」渲染
+- 🚫 标题/封面不得加导流或营销推广信息；不得诱导至第三方平台关注（公众号 CTA 整段删）
+- 🚫 不得发布机器生成内容、不得用自动化程序批量发布、不得重复发布相似内容、不得代写代发
+- 🚫 不得拉踩引战、辱骂、阴阳怪气；AI 新闻里的「XX 完了/慌了」式表达须收敛
+
 #### AI News Video 合规检查清单
 
 在生成脚本时，必须逐项检查（**完整勾选表见 `templates/platform-compliance.md` §5，须写入 review-checklist.md**）：
@@ -909,6 +938,7 @@ Hook：[破格类型] {开场，用破格制造意外感}
 | 视频号 | 减少推荐、限制传播、删除内容、暂停/终止服务、封禁账号 |
 | 抖音 | 删除/屏蔽内容、暂停/终止账号功能、封禁账号 |
 | 公众号 | 删除内容、限制功能、封禁账号 |
+| 知乎 | 提示与处罚（按违规程度）、标识/减少分发/折叠/建议修改/删除；批量违规时展示干预 |
 
 **Why:** 四个平台都有严格公约/法规；2026-07-26 视频号限流 + 公众号删文；**同日周报**抖音「不适宜公开/仅自己可见（画面）」证明：内部审核清单通过 ≠ 平台过审，且 **画面与标题攻击词** 是独立维度  
 **How to apply:** Phase 1 划分 A/B 档 → Phase 2–5 按 `platform-compliance.md`（含 §8 禁词 + 画面铁律）写脚本/标题/分镜/场景图 → 审核清单落盘 → 再进入渲染/上传
@@ -1841,7 +1871,7 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 
 #### 10.2 生成多平台发布信息
 
-生成 `{输出目录}/publish.json`，包含 B站、抖音、视频号、公众号四个平台（下方为 daily 模板，weekly/monthly 按模式参数映射表替换标题前缀/tags/日期字段）：
+生成 `{输出目录}/publish.json`，包含 B站、抖音、视频号、公众号、知乎五个平台（下方为 daily 模板，weekly/monthly 按模式参数映射表替换标题前缀/tags/日期字段）：
 
 ```json
 {
@@ -1869,6 +1899,14 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
       "title": "【YYYY-MM-DD】{核心标题}… | 今日羊报AI",
       "article": "wechat-article-YYYY-MM-DD.md",
       "images": "wechat-images/"
+    },
+    "zhihu": {
+      "title": "【M月D日】{信息型判断句}",
+      "column": "今日羊报 AI",
+      "note": "知乎专栏名与抖音/视频号**合集名不同**：知乎是「今日羊报 AI」（含半角空格、末位大写 I），抖音/视频号是「今日羊报Al」（无空格、末位小写 l）。2026-10-30 分别按页面码点实测，别互相套用",
+      "tags": ["AI", "人工智能", "..."],
+      "article": "zhihu-article-YYYY-MM-DD.md",
+      "images": "zhihu-images/"
     }
   }
 }
@@ -1883,6 +1921,7 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 - `wechat.title`：`【YYYY-MM】{核心标题}… | 羊报AI月报`
 - `bilibili.description`：**强制全数字中文化**（见 B站简介数字中文化章节）
 - `wechat.article`：`wechat-article-YYYY-MM.md`
+- `zhihu.title`：`【YYYY年M月】{信息型判断句}`（≤40 字）；`zhihu.article`：`zhihu-article-YYYY-MM.md`
 
 **标题规则（v3.17：日期在前、报刊名在后）**:
 - 日报 B站：`【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI`（🔴 v3.29.0：publish.json bilibili 段固定 `"partition": "人工智能"`，Phase 11.4 按此字段选择分区）
@@ -1999,6 +2038,19 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 输出到：
 - 文章：`news-pipeline/YYYY-MM-DD/wechat-article-YYYY-MM-DD.md`
 - 配图：`news-pipeline/YYYY-MM-DD/wechat-images/sceneN.png`
+
+#### 10.3b 生成知乎文章（🔴 v3.72.0 新增，模块化）
+
+**完整规范见 `templates/platform-zhihu.md` §1**（本处只列与公众号的差异，避免两处漂移）：
+
+- 素材 = 上一步的 `wechat-article-<DATE>.md`，**不重新组织事实**；
+- 标题改成 ≤40 字信息型判断句，**去掉 `| 今日羊报AI` 品牌后缀**，命中禁词表（重磅/独家爆料/揭秘/炸裂/彻底/封神/翻车/末日/慌了/完蛋）即改；
+- 公众号结尾 CTA（点个赞/转发/关注/评论区聊聊）**整段删除**，改为稿末 AI 使用说明段；
+- 必须有「编辑判断」段（≥120 字，作者视角的判断而非复述）——这是通过知乎 AI 治理细则的前提，不是可选装饰；
+- 配图只放与所在小节对应者，`images/sceneN.png` → `zhihu-images/sceneN.jpg`；
+- 产物：`zhihu-article-<DATE>.md` + `zhihu-images/`。
+
+**生成后必须过审核门**（`templates/platform-zhihu.md` §2 十一条清单，落盘 `review-checklist.md` §知乎），未过不得进 Phase 15。
 
 #### 10.4 归档资源
 
@@ -3669,7 +3721,10 @@ news-pipeline/
 │   │                    # cp images/horizontal-4-3.png images/vertical-3-4.png 到此
 │   ├── publish.json            # 多平台发布信息
 │   ├── wechat-article-*.md     # 公众号图文
-│   └── wechat-images/          # 公众号配图
+│   ├── wechat-images/          # 公众号配图
+│   ├── zhihu-article-*.md      # 知乎文章（v3.72.0，从公众号稿派生 + 合规改写）
+│   ├── zhihu-images/           # 知乎配图（sceneN.jpg + cover.jpg，同源转 JPG）
+│   └── scripts/zhihu_upload_*.py  # 分步上传：clear/title/body/images/video/cover/footer/decl/column/verify（v3.73.0）
 ├── weekly/                     # 周报产出目录（weekly，按日期范围隔离）
 │   └── YYYY-MM-DD~YYYY-MM-DD/
 │       └── （同 daily 子结构，视频 【羊报AI周刊】*.mp4，封面 horizontal-4-3.png）
@@ -3931,6 +3986,38 @@ async def main():
 4. 附着后**不要**再 `goto` 同一页面——会重新加载，表单还是丢。需要导航时先判断 `location.href` 是否已在目标页。
 
 **本期收益**：封面确认按钮一开始点错位置（弹窗其实没开），修好后只重跑封面那一步，没有重传视频。
+
+### 🔴 公众号上传源 `wechat-images/` 不是派生产物，漏生成会让 images 步撞 `FileNotFoundError`（v3.71.0 / 2026-10-30 公众号实测，坑 331）
+
+派生脚本只机械替换文本，**不负责把公众号的上传配图目录生成出来**。1030 期 `news-pipeline/2026-10-30/wechat-images/` 全程缺失——它不是脚本「从某处拷贝」出来的，是要**本地把 `images/scene*.png` 现场转成 JPEG** 才有的上传源。跑到 `wechat_upload_1030.py images` 才在 `set_input_files(scene1.jpg)` 处炸 `os.stat FileNotFoundError`——**此时编辑器已打开、正要一题一图**，只能回来自补。
+
+**为什么不是更早被拦住**：`images/`、`captions/`、`video/` 都有脚本在「生图 / 渲染」后各自落盘，唯独 `wechat-images/` 依赖的生成步骤在「公众号图文」阶段，而它不在 `run_tail.sh` 的一键链路里，派生脚本也不产出它。**铁律：进入公众号上传前先核对 `wechat-images/`** —— 它应有 `wx_scene_map` 里每个 `scene<i>.jpg`（从 `images/scene<i>.png` 转），加一个 `cover.png`（取 `images/horizontal-4-3.png`）。漏了就当场生成：
+
+```python
+from PIL import Image
+import os, shutil
+outdir = 'news-pipeline/2026-10-30/wechat-images'; os.makedirs(outdir, exist_ok=True)
+for n in range(1, 7):   # wx_scene_map
+    Image.open(f'news-pipeline/2026-10-30/images/scene{n}.png').convert('RGB')\
+        .save(f'{outdir}/scene{n}.jpg', 'JPEG', quality=88)
+shutil.copy2('news-pipeline/2026-10-30/images/horizontal-4-3.png', f'{outdir}/cover.png')
+```
+
+### 🔴 公众号 `open` 步的首选 mp 标签页可能是「合集管理」，没有「新的创作」入口（v3.71.0 / 2026-10-30 公众号实测，坑 332）
+
+`wechat_upload_1030.py open` 旧写法是「取 `ctx.pages` 里第一个 `mp.weixin.qq.com` 页」。1030 期登录后的标签集合里既有 `cgi-bin/home`（首页）也有 `appmsgalbummgr`（合集管理），**第一个恰好是合集管理页** → 它没有 `.new-creation__menu-item`、"新的创作"断言也过不了 → `open` 挂。
+
+**修法：`open` 必须锁定 `cgi-bin/home?token=` 首页**，选取优先级：
+1. 扫 `cgi-bin/home` 且带 `token=` 的页；
+2. 无则扫任一带 `token=` 的 mp 页，把它 URL 里的 `token` 借出来 `goto` 到首页；
+3. 再无才 `new_page` + 裸域 `goto('https://mp.weixin.qq.com/')`（会自动 302 到带 token 的首页）。
+**不要直接取 `ctx.pages` 第一个 mp 标签**——标签顺序不保证，页面类型（home / appmsg / appmsgalbummgr / appmsgalbum）都可能，只有 `cgi-bin/home` 有「新的创作」。
+
+### 🔴 渲染前必须把本期 `captions.json` 同步进 `video-project/public/`，否则成片字幕静默沿用上期（v3.71.0 / 2026-10-30 实测，坑 333）
+
+`Subtitles.tsx` 是 `fetch(staticFile('captions.json'))` 在渲染期读 `public/captions.json`。1030 的 `_setup_remotion_1030.py` 只同步了 `voiceover/` 与封面，**漏了字幕**——结果第一次渲染出的 mp4 **时间轴对得上、画面正常、ffprobe 也过，只有字幕内容全是 10-29 的**。这类「成片能出」的静默沿用最危险：不逐词核对就发现不了。
+
+**铁律：`_setup_remotion` 在装配阶段必须「copy caps + 断言」**——复制 `captions/captions.json → public/captions.json`，然后断言 `caps[0]['text']` 含本期关键词（防串期到上期）、`max(endMs)/1000 ≈ 音频总长 ±2s`（防字幕与音频错位）。任一失败就在装配阶段 fail-fast，绝不放它进渲染。1030 首渲后补上这一步并重渲，最终字幕↔成片音频 `verify_captions_mp4.py` lead 中位 +0.080s、离群 0、7 场景块 Δ≤1ms。
 
 ### 🔴 后台标签页过渡动画不推进 + 「就绪」信号假绿（v3.69.0 / 2026-10-29 视频号实测，坑 324-325）
 
@@ -5334,6 +5421,46 @@ browser_handle_dialog(accept=true)
 5. **作品描述用 `fill()`**（React 受控，`value=` 不生效）
 6. **草稿页只补竖封面**时从 `enter_from=draft` 继续即可
 
+### Phase 15: 知乎文章自动上传（v3.72.0 新增）
+
+**权限已在预授权阶段获得，直接执行。完整实现见 `templates/platform-zhihu.md`。**
+
+**入口**：`https://www.zhihu.com/creator/manage/creation/article` → 点击「立即创作」。
+
+**八步（顺序不可跳）**：① 立即创作 → ② 标题 → ③ 正文（先文本后插图，图必须传到平台） → ④ **正文前插成片视频** → ⑤ 添加封面 → ⑥ 创作声明「包含 AI 辅助创作，作者对内容负责」 → ⑦ 专栏收录「今日羊报 AI」 → ⑧ 保存草稿（等自动保存）。
+
+**五条只属于本平台的铁律**：
+
+1. **审核门在前**：`templates/platform-zhihu.md` §2 十一条清单全 PASS 才准上传。知乎《AI 辅助创作治理细则》要求「作者完成主要智力劳动、审查编辑并对最终内容负责」；规范§五把「发布机器生成的内容」列为违规——**加 AI 声明不能豁免**，所以「编辑判断」段与事实核验是硬性内容要求。
+2. **删导流再上传**：公众号 CTA（点个赞/转发/关注「今日羊报 AI」/评论区聊聊）整段删除；标题去品牌后缀。规范§四禁止在标题/封面加营销推广信息、禁止诱导至第三方平台关注。
+3. **只到存草稿**：「发布」按钮不进脚本候选集（坑 317 四步自证仍适用于「保存草稿」，它与相邻按钮可能只差十几像素）；发布由用户手动完成。
+4. **视频要内嵌且排正文之前**：知乎支持内嵌视频。光标置文档开头 → `button[aria-label="视频"]` → `input.VideoUploadButton-fileInput` 传文件 → 等 `data-video-playable === 'true'`（约 10–15 s）。落位是 block 0 自动空文本 + block 1 VIDEO，即在正文之前。
+5. **知乎专栏名与抖音/视频号合集名不同**：知乎是 `今日羊报 AI`（**含半角空格 U+20，末位大写 I U+49**），抖音/视频号是 `今日羊报Al`（无空格，末位**小写 l** U+6C）。两者肉眼几乎无法分辨，2026-10-30 已分别按页面码点实测确认。比较一律先两边去空白，**禁硬编码精确串**；回读不到就停，不静默跳过（坑 312）。判别以 `.ColumnSetting-ColumnSelector` 里 radio 的 `checked` 为准，不许 grep 页面文本（坑 343）。
+
+**⚠️ 2026-10-30 实测已回填（v3.71.0）**：下列选择器与行为均已在本机登录态下实测确认，模块文档 §3 即为实跑结果，**不再是 TODO-PROBE**：
+
+| 项 | 实测结果 |
+|---|---|
+| 立即创作 | 点击后**新开标签页** `https://zhuanlan.zhihu.com/write`（当前页 URL 不变） |
+| 标题 | `textarea[placeholder="请输入标题（最多 100 个字）"]` |
+| 正文 | `div.public-DraftEditor-content`（Draft.js，`innerHTML` 直赋无效）；**合成 `ClipboardEvent` + `DataTransfer` 比真剪贴板更稳**（无需 `grant_permissions`） |
+| 正文块 | `div.public-DraftEditor-content [data-block="true"]`；`VIDEO` / `IMG` / `TXT` 三类靠 `.Editable-video` / `img` 判别 |
+| 图片 | `input[type=file][accept*="image/webp"]`（常驻 DOM），上传落在**光标所在块**；先贴 `<p>__IMG__</p>` 占位再逐张替换 |
+| 视频 | `button[aria-label="视频"]` 开弹窗；真 input 是 `input.VideoUploadButton-fileInput`（**弹窗前已在 DOM**），可直接传；约 10–15 s 出卡片，判 `.Editable-video` 的 `data-video-playable === 'true'` |
+| 视频落位 | 插在光标块；光标置文档开头 → block 0 自动空文本 + block 1 VIDEO，即**在正文之前**（需求硬要求） |
+| 封面 | `input[type=file][accept=".jpeg, .jpg, .png"]`（class `UploadPicture-input`） |
+| 创作声明 | 在「发布设置」面板：`div.css-be2u3` → `label` 文本==`创作声明` → `button[role=combobox]` → `.Select-option` 文本 `包含 AI 辅助创作 作者对内容负责`；回读须归一化零宽字符，实测得到 `包含AI辅助创作作者对内容负责` |
+| 专栏 | 判据是 `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 **`checked`**，不是页面文本（坑 343）；真值 `「今日羊报 AI」`（半角空格 + 大写 I） |
+| 保存草稿 | **没有保存按钮——知乎文章自动保存**；底部出现 `刚刚 · 草稿`，URL 变 `/p/<id>/edit` 即已落库 |
+| 内容来源 | 面板底部提示「发布新闻类的内容需要明确标注信息来源」，建议「添加来源」 |
+| 危险按钮 | `发布`（`Button--pri`）——永不点击 |
+
+**坑 334-343**（详见 `templates/platform-zhihu.md` §4）：创作声明控件是 combobox 且 `css-be2u3` 被多字段复用（须按 label 文本定位）；无保存按钮只能靠自动保存验收；「立即创作」开新标签；新闻类有「内容来源」要求；**视频卡片是原子块，退格整块删（338）**；**`Shift+Home` 在 Draft.js 里会选到整篇开头，一次退格毁掉全文（339）**；**Vue tab/radio 的 `.click()` 静默无效，须 `page.mouse.click` 坐标（340）**；**整行加粗判断漏掉「行首加粗+行内正文」，页面留字面 `**`（341）**；**`Backspace` 走 Draft.js 内部选区而非 DOM 选区，可删错块（342）**；**专栏选中态 grep 文本恒真（343）**。
+
+**验收必带的结构性计数**：`videos == 1 && videoPlayable == 'true'` + `IMG` 块数 == 源文图数 + `__IMG__` 残留 == 0 + 全文无字面 `**` + 声明回读 + 专栏 radio checked。任何一步含 `Backspace` 之后都要重数一遍视频/图片，别假设它们还在。
+
+**失败处理**：登录页 → 记 `login_required` 留页给用户；「立即创作」找不到 / 声明选项找不到 / 专栏匹配不到 → **停在该步报告**，不换选择器盲试（连续两次落空即定性）。
+
 ### 🟡 B站封面上传不可靠（v1.9.1 新增）
 **问题**：B站隐藏 file input 的 accept 属性不包含图片类型（只有视频格式），且通过封面编辑弹窗上传的图片不一定被应用。
 
@@ -6566,6 +6693,51 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.73.0（2026-10-30 知乎首次端到端实跑，Draft.js 选区陷阱 + 判据假绿，坑 338-343）
+
+基于 **2026-10-30 期知乎草稿全链实跑**（`news-pipeline/2026-10-30/scripts/zhihu_upload_1030.py`，最终 `ZHIHU_DRAFT_OK`：视频 1 playable / 图 6 / 封面 1 / 创作声明 / 专栏 radio checked / 正文 2110 字）。
+
+**新增能力：正文前内嵌成片视频**
+- 工具栏 `button[aria-label="视频"]` 打开「导入视频」弹窗，但真 input `input.VideoUploadButton-fileInput` **在弹窗打开前就已在 DOM**，可直接 `set_input_files`
+- 视频卡片插在**光标所在块**：光标置文档开头 → block 0 自动空文本 + block 1 VIDEO，即在正文之前（需求「最后在正文前插入生成的视频」已满足）
+- 约 10–15 s 出卡片，判据 `.Editable-video` 的 `dataset.videoPlayable === 'true'`；刷新后卡片与前后文本完好
+
+**坑 338：视频卡片是原子块，退格整块删** — Draft.js 里 `.Editable-video` 不可分割，光标在其后按一次 `Backspace` 删的是**整个视频**。任何含退格的操作后必须重数 `.Editable-video`。
+
+**坑 339：`Shift+Home` 在 Draft.js 会反向选到整篇开头** — 1030 首轮想只选占位行，实际把占位之前的正文全删了：正文 2025 字 → 441 字、34 块 → 7 块、6 图 → 1 图，**且自动保存已把破坏写进草稿**。正解是 `Range.selectNodeContents(占位文本节点)` 精确选中再退格。教训：破坏发生后必须 reload 回读才算知道真实状态。
+
+**坑 340：Vue tab/radio 的 `element.click()` 静默无效** — 无报错但选中态不变；须取 `getBoundingClientRect()` 中心走 `page.mouse.click(x,y)`。
+
+**坑 341：整行加粗判断漏掉「行首加粗 + 行内正文」** — `startswith('**') and endswith('**')` 放过 `**AI 辅助创作说明**：本文由作者…`，页面上留下字面 `**`。须逐行 `re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)`，并把「全文块文本无 `**`」加进验收。
+
+**坑 342：`Backspace` 走 Draft.js 内部选区，不是刚设的 DOM 选区** — `paste` 认 DOM Selection 所以落点正确，但退格删掉了文件开头的视频卡片。**任何带退格的步骤之后都必须回读全部结构性计数**（视频数/图片数/块数）。
+
+**坑 343：专栏选中态 grep 页面文本恒真** — `发布到专栏 / 不发布到专栏` 本来就常驻 DOM；真判据是 `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 `checked`。
+
+**修正一处长期错误文案**：知乎专栏真名是 `今日羊报 AI`（**半角空格 U+20 + 末位大写 I U+49**，按页面码点实测）；旧文档写的「末位小写 l、无空格」其实是**抖音/视频号的合集名** `今日羊报Al`（小写 l U+6C、无空格）。两个平台名称不同，已分别改正并加交叉警示。
+
+### v3.72.0（2026-10-30 新增知乎平台，模块化）
+
+**定位**：第五个发布平台，图文 + 内嵌成片视频。
+
+**模块化**：全部实现细节搬到 `templates/platform-zhihu.md`（派生规则 / 合规审核门 / 上传流程 / 脚本骨架 / 失败回退 / 探测记录表），SKILL.md 只留入口、五条平台铁律与产物命名，避免主文档继续膨胀。
+
+**新增内容**
+- 派生：公众号图文 → 知乎稿，标题改信息型（≤40 字、无品牌后缀）、删 CTA、加「编辑判断」段、配图对齐小节
+- 审核门：`templates/platform-zhihu.md` §2 十一条清单（标题禁词 / 无导流 / 判断段 / 来源标注 / 图文相关 / 事实核验…），依据随附的《知乎关于 AI 辅助创作内容的治理细则》《知乎社区规范》
+- 上传：立即创作 → 标题 → 正文+配图 → 正文前插视频 → 封面 → 创作声明（含 AI 辅助创作）→ 专栏「今日羊报 AI」→ 保存草稿
+- 验收：草稿列表出现本期标题 + 列表无本期发布记录 + 编辑器结构性计数回读（含视频 playable、图片数、无 `**` 残留、专栏 radio checked）
+- 配置：`publish.json.platform.zhihu{title,column,tags,article,images}`；模式参数映射表加 4 行
+
+**合规依据（写进 skill 的两条平台红线，不是我们的偏好）**
+- 《治理细则》：需主动添加「包含 AI 辅助创作」声明、披露使用目的、由作者完成主要智力劳动并对最终内容负责；重点治理「滥用 AI 大量发布拼凑内容」与「AI 生成低质内容（文不对题/图文不相关/事实错误/虚假谣言）」
+- 《社区规范》§四：禁止标题/封面加导流营销信息、禁止诱导至第三方平台关注；§五：禁止自动化外挂批量发布、**禁止发布机器生成的内容**、禁止重复发布相似内容、禁止代写代发
+- 因此：只存草稿、一期一篇、发布由用户手动、AI 声明不能替代作者判断
+
+**实测回填（2026-10-30，已消除未测项）**
+- 20 项页面选择器与控件文案**已全部实测确认**，结果见 `templates/platform-zhihu.md` §7 探测记录表与 §3 上传流程：编辑器 = `zhuanlan.zhihu.com/write`（新开标签）、标题 `textarea`、正文 `div.public-DraftEditor-content`（Draft.js）、图片 `input[accept*="image/webp"]`、视频 `input.VideoUploadButton-fileInput`、封面 `input[accept=".jpeg, .jpg, .png"]`、创作声明 = `div.css-be2u3` 内 combobox → `.Select-option`「包含 AI 辅助创作 作者对内容负责」（已实设并回读通过）、专栏 = radio `checked` 判据、**无保存按钮＝自动保存**（URL 变 `/p/<id>/edit` 即落库）
+- **仍未实测**：封面裁剪弹窗行为、`zhihu-images/` 生成脚本、文章的最终发布流程（本站点不执行发布）
 
 ### v3.66.0（2026-10-26 日报全程实测，验收判据自欺 + 合集静默失败 + 一条被证伪的推断，坑 310-316）
 
