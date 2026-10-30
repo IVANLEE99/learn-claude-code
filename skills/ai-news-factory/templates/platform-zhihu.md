@@ -1,7 +1,8 @@
 # 知乎平台模块（文章派生 + 合规审核 + 草稿上传）
 
 > 本文件是 `SKILL.md` 的**平台子模块**，由 SKILL.md 的 Phase 10.6 / Phase 14 引用。
-> 版本：v3.72.0（2026-10-30 首次端到端实跑：视频内嵌 + 6 图占位替换 + 封面 + 创作声明 + 专栏，全部回读通过；补坑 338–343）
+> 版本：v3.74.0（2026-10-30 二次实跑：post-to-video 帖文成片，raw CDP + 新增坑 344–347）
+> 上一版：v3.72.0（2026-10-30 首次端到端实跑：视频内嵌 + 6 图占位替换 + 封面 + 创作声明 + 专栏，全部回读通过；补坑 338–343）
 > 合规依据（同目录）：
 > - `知乎关于 AI 辅助创作内容的治理细则.md`
 > - `知乎社区规范.md`
@@ -378,7 +379,7 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 
 ---
 
-## 4. 坑（坑 334–343）
+## 4. 坑（坑 334–347）
 
 ### 坑 334：创作声明藏在「发布设置」面板里，且控件是 combobox 不是 select
 - 页面首次加载时发布设置只露出 `添加封面 / 专栏收录 / 定时发布`；**创作声明要等面板完整展开后才在 DOM 里可见**（点过「发布到专栏」后可见）
@@ -432,6 +433,40 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 - 下拉框里的专栏名也可能是上次残留值
 - 真判据：`.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 **`checked` 属性**，配合该 radio 所属 `label[for]` 的文本
 - 另外：真实专栏名 `「今日羊报 AI」`（含半角空格 U+20、末位大写 I U+49），需求文案写法一致；但比较时仍两边去空白，别靠肉眼分辨
+
+### 坑 344：`cdp_helper.eval()` **不做参数注入**，带参 JS 必须内联
+- `Tab.eval(expr)` 只接受**一个字符串表达式**：普通 IIFE，或顶层写 `async () => {...}` 的箭头函数本体（`_is_arrow_at_top` 自动调用）
+- 写 `tab.eval("(title) => {...}", title)` 这种 Playwright 风格调用，第二个参数会被**静默丢弃**，JS 侧 `title` 为 `undefined`
+- 症状要么是 `Cannot read properties of undefined`，要么更糟——`setter.call(t, undefined)` 把标题写成字面 `"undefined"` 还回读成功
+- 正解：`tab.eval(f"(() => {{ const want = {json.dumps(x)}; ... }})()")`，用 `json.dumps` 生成合法 JS 字面量（能正确转义引号/换行/中文）
+- 生成的选择器里含 `%` 时不要用 `%` 格式化（`%r` 之外会被当格式符吞掉），统一 `f-string + json.dumps`
+
+### 坑 345：`click_safe` 的危险词闸门会误伤「发布设置」
+- 闸门按**子串**匹配 `发表 / 发布 / 立即投稿 / 提交审核 / 发表视频`，而展开设置面板的入口文案正是 `发布设置`
+- 一旦被拦就抛异常，整条上传流程卡在设置步骤
+- **不要**为此把闸门改宽或传 `allow_danger=True`
+- 正解：给「展开型」控件写**局部安全点击**——文案必须**严格等于**目标词、元素不在任何提交按钮的祖先链里、命中 `SUBMIT` 白名单即拒：
+  ```js
+  const SUBMIT = ['发布','发表','立即投稿','提交审核'];
+  const el = [...document.querySelectorAll('*')].find(e =>
+    (e.innerText||'').trim() === '发布设置' && e.offsetParent && e.children.length === 0);
+  if (SUBMIT.includes((el.innerText||'').trim())) return {err:'danger'};
+  for (let n = el, i = 0; i < 5 && n; i++, n = n.parentElement)
+    if (n.tagName === 'BUTTON' && SUBMIT.includes((n.innerText||'').trim())) return {err:'danger-ancestor'};
+  ```
+  再取 `getBoundingClientRect()` 中心走 `Input.dispatchMouseEvent`（坑 340：坐标点击才生效）
+
+### 坑 346：知乎专栏默认值是「上次用过的专栏」，不是目标专栏
+- 点「发布到专栏」后回读 `radio.checked` 只能证明**开关**打开了，不能证明**选对了专栏**
+- 1030 实测：开关已勾选，专栏名却是随机默认的 `「虢礫緙嘞」`
+- 因此判据必须**两级**：`radio.checked === true` **且** `.ColumnSetting-ColumnSelector button` 的文本归一化后 == 目标专栏名
+- 改名路径：点该 button 开下拉（选项形如 `「今日羊报AI」`，带书名号，比较时两边都剥 `「」` 与空白）→ 坐标点击目标项 → 回读 button 文本
+
+### 坑 347：视频卡片自己的封面 input 只在弹窗打开时存在
+- `.Editable-video` 卡片上叠着「上传视频封面」按钮，但专用 input `input.VideoCoverFileInput-input` **只有点了按钮、弹窗打开后才挂进 DOM**
+- 没打开弹窗直接 `set_files('input.VideoCoverFileInput-input')` → `set_files: expression returned no object`
+- 且页面上同时存在 4 个 `input[type=file]`（附件 / 正文图片 / 文章封面 `UploadPicture-input` / 视频封面），**按「取最后一个」选 input 会选错**
+- 优先级：文章封面已设好时，视频卡片用首帧即可，**不要为了视频封面去点按钮**——点了再选错 input 有污染正文图片的风险
 
 ---
 

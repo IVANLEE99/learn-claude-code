@@ -1,14 +1,16 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.73.0
+version: 3.74.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.73.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.74.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
-> **🔴 v3.73.0 核心改进（2026-10-30 知乎首次端到端实跑：视频内嵌落位 + Draft.js 三处选区陷阱 + 两处判据假绿，坑 338-343）**：1030 期知乎草稿全链跑通（视频 1 / 图 6 / 封面 1 / 创作声明 / 专栏，`ZHIHU_DRAFT_OK`），过程中踩到六个新坑。**坑 338 —— 视频卡片是原子块**：Draft.js 里 `.Editable-video` 是一个不可分割的块，光标在其后按一次 `Backspace` 删的是**整个视频**；任何含退格的操作后都要重数 `.Editable-video`。**坑 339 —— `Shift+Home` 在 Draft.js 里会反向选到整篇开头**：本想只选占位行，结果 `Backspace` 把占位之前的正文全删了（1030 首轮正文 2025 字 → 441 字、34 块 → 7 块、6 图 → 1 图），**且自动保存已把破坏写进草稿**；正解是 `Range.selectNodeContents(占位文本节点)` 精确选中再退格。**坑 340 —— Vue tab/radio 的 `element.click()` 静默无效**，须取 `getBoundingClientRect()` 中心走 `page.mouse.click(x,y)`。**坑 341 —— 整行加粗的判断漏掉「行首加粗 + 行内正文」**：`startswith('**') and endswith('**')` 放过 `**AI 辅助创作说明**：本文由作者…` 这类行，页面上留下字面 `**`；须逐行 `re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)`，并把「全文块文本无 `**`」加进验收。**坑 342 —— `Backspace` 走的是 Draft.js 的**内部选区**，不是刚设的 DOM 选区**：`paste` 认 DOM Selection 所以落点正确，但退格删掉了文件开头的视频卡片；结论是**任何带退格的步骤之后都必须回读全部结构性计数**（视频数/图片数/块数），缺了立刻补插。**坑 343 —— 专栏选中态 grep 页面文本恒真**：`发布到专栏 / 不发布到专栏` 本来就常驻 DOM；真判据是 `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 `checked`。**另修正一处长期错误文案**：知乎专栏真名是 `今日羊报 AI`（**含半角空格 U+20、末位大写 I U+49**，按页面码点实测），旧文档写的「末位是小写 l、无空格」是错的——那是**抖音/视频号的合集名** `今日羊报Al`（无空格、小写 l U+6C）。两个平台的名称不同，改成了各自的正确值并加了交叉警示。**视频落位已验证**：光标置文档开头 → 点 `button[aria-label="视频"]` → 直接对 `input.VideoUploadButton-fileInput`（弹窗前已在 DOM）`set_input_files` → 约 10–15 s 出卡片 → `data-video-playable === 'true'`；落位为 block 0 自动空文本 + block 1 VIDEO，**即在正文之前**，刷新后卡片与前后文本均完好。模块文档 §3.5–3.7、§4（坑 338–343）、§7（探测项 12–20）已同步。
+> **🔴 v3.74.0 核心改进（2026-10-30 知乎二次实跑：raw CDP 全链 + 专栏默认值陷阱，坑 344-347）**：① **`cdp_helper.eval()` 不做参数注入**——Playwright 风格的 `eval("(title) => {...}", title)` 第二个参数被**静默丢弃**，JS 侧变量为 `undefined`；最坏情况是 `setter.call(t, undefined)` 把标题写成字面 `"undefined"` 却回读成功。正解 `f"(() => {{ const x = {json.dumps(v)}; ... }})()"`。② **`click_safe` 危险词闸门会误伤「发布设置」**——闸门按子串匹配 `发布`，而展开发布设置面板的入口文案正是 `发布设置`，一拦就卡死设置步骤；**不许改宽闸门、不许传 `allow_danger=True`**，正解是给「展开型」控件写局部安全点击（文案严格等值 + 祖先链无提交按钮 + `SUBMIT` 白名单即拒）。③ **知乎专栏默认值是「上次用过的专栏」**——回读 `radio.checked` 只证明开关打开，不证明选对；1030 实测开关已勾选、专栏名却是随机的 `「虢礫緙嘞」`，判据必须两级（`checked` **且** combobox 文本 == 目标名）。④ **视频卡片封面 input 只在弹窗打开后才在 DOM**，且页面同时有 4 个 file input，按「取最后一个」会选错。**另固化两条视频号判据**：`draftListManager` 必须**新标签**打开（同页 SPA 路由会弹回），封面弹窗关闭后容器不卸载只压成 `0×0`（`offsetParent` 仍为 true）→ 判据改为 `getBoundingClientRect().width > 0` + 封面槽比例回读。
+
+> **v3.73.0（2026-10-30 知乎首次端到端实跑：视频内嵌落位 + Draft.js 三处选区陷阱 + 两处判据假绿，坑 338-343）**：1030 期知乎草稿全链跑通（视频 1 / 图 6 / 封面 1 / 创作声明 / 专栏，`ZHIHU_DRAFT_OK`），过程中踩到六个新坑。**坑 338 —— 视频卡片是原子块**：Draft.js 里 `.Editable-video` 是一个不可分割的块，光标在其后按一次 `Backspace` 删的是**整个视频**；任何含退格的操作后都要重数 `.Editable-video`。**坑 339 —— `Shift+Home` 在 Draft.js 里会反向选到整篇开头**：本想只选占位行，结果 `Backspace` 把占位之前的正文全删了（1030 首轮正文 2025 字 → 441 字、34 块 → 7 块、6 图 → 1 图），**且自动保存已把破坏写进草稿**；正解是 `Range.selectNodeContents(占位文本节点)` 精确选中再退格。**坑 340 —— Vue tab/radio 的 `element.click()` 静默无效**，须取 `getBoundingClientRect()` 中心走 `page.mouse.click(x,y)`。**坑 341 —— 整行加粗的判断漏掉「行首加粗 + 行内正文」**：`startswith('**') and endswith('**')` 放过 `**AI 辅助创作说明**：本文由作者…` 这类行，页面上留下字面 `**`；须逐行 `re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)`，并把「全文块文本无 `**`」加进验收。**坑 342 —— `Backspace` 走的是 Draft.js 的**内部选区**，不是刚设的 DOM 选区**：`paste` 认 DOM Selection 所以落点正确，但退格删掉了文件开头的视频卡片；结论是**任何带退格的步骤之后都必须回读全部结构性计数**（视频数/图片数/块数），缺了立刻补插。**坑 343 —— 专栏选中态 grep 页面文本恒真**：`发布到专栏 / 不发布到专栏` 本来就常驻 DOM；真判据是 `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 `checked`。**另修正一处长期错误文案**：知乎专栏真名是 `今日羊报 AI`（**含半角空格 U+20、末位大写 I U+49**，按页面码点实测），旧文档写的「末位是小写 l、无空格」是错的——那是**抖音/视频号的合集名** `今日羊报Al`（无空格、小写 l U+6C）。两个平台的名称不同，改成了各自的正确值并加了交叉警示。**视频落位已验证**：光标置文档开头 → 点 `button[aria-label="视频"]` → 直接对 `input.VideoUploadButton-fileInput`（弹窗前已在 DOM）`set_input_files` → 约 10–15 s 出卡片 → `data-video-playable === 'true'`；落位为 block 0 自动空文本 + block 1 VIDEO，**即在正文之前**，刷新后卡片与前后文本均完好。模块文档 §3.5–3.7、§4（坑 338–343）、§7（探测项 12–20）已同步。
 
 > **🔴 v3.72.0 核心改进（2026-10-30 新增知乎平台，模块化到 `templates/platform-zhihu.md`）**：**知乎是第五个发布平台，图文 + 内嵌成片视频**。链路 = 公众号图文（Phase 10.3）→ 派生知乎稿 → **合规审核门** → 八步上传（立即创作 / 标题 / 正文+配图 / **正文前插视频** / 封面 / 创作声明 / 专栏收录 / 保存草稿）→ 落库验收。三条与既有平台**不同**的硬约束：① **审核是前置门，不是事后补**——知乎《AI 辅助创作治理细则》要求「作者完成主要智力劳动、审查编辑并对最终内容负责」，所以派生稿必须有「编辑判断」段，且须逐项过 `review-checklist.md` 的 §知乎 十一条才允许上传；② **公众号 CTA 与导流句必须删**——知乎《社区规范》§四禁止在标题/封面加营销推广信息、禁止诱导至第三方平台关注，公众号结尾的「点个赞/转发/关注/评论区聊聊」整段删除，标题也去掉 `| 今日羊报AI` 品牌后缀（改为 ≤40 字信息型标题）；③ **机器人只到「存草稿」为止**——规范§五把「使用自动化/插件批量发布」与「发布机器生成的内容」列为违规，AI 声明**不能豁免**，因此发布动作一律留给用户本人。**✅ 页面选择器已于 2026-10-30 全部实测回填**：编辑器在 `zhuanlan.zhihu.com/write`（点「立即创作」新开标签）、标题 `textarea[placeholder*="请输入标题"]`、正文 `div.public-DraftEditor-content`（Draft.js）、图片 `input[accept*="image/webp"]`、视频 `input.VideoUploadButton-fileInput`、封面 `input[accept=".jpeg, .jpg, .png"]`、创作声明 `div.css-be2u3` 内 combobox → `.Select-option`「包含 AI 辅助创作 作者对内容负责」、专栏 radio `checked`、**无保存按钮＝自动保存**。完整记录见模块文档 §7。仍未实测：封面裁剪弹窗、`zhihu-images/` 生成脚本、正式发布流程（本站点不执行）。
 
@@ -6693,6 +6695,20 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.74.0（2026-10-30 知乎二次实跑：raw CDP 全链 + 专栏默认值陷阱，坑 344-347）
+
+基于 **post-to-video 帖文成片**（`generated-videos/post-to-video/20261029_643293715/scripts/upload_zhihu_rawcdp.py`，最终 `ZH_OK`：标题 44 字 / 正文 2035 字 / 块 37 / 视频 1 playable 且在正文前 / 封面 1440×1080 / 创作声明 / 专栏「今日羊报 AI」）。四个新坑：
+
+**坑 344：`cdp_helper.eval()` 不做参数注入** — `Tab.eval(expr)` 只接受一个字符串表达式；Playwright 风格的 `eval("(title) => {...}", title)` 里第二个参数**被静默丢弃**，JS 侧变量为 `undefined`。正解是 `f"(() => {{ const want = {json.dumps(x)}; ... }})()"`。生成的选择器含 `%` 时不要用 `%` 格式化。**这条最危险**——`setter.call(t, undefined)` 会把标题写成字面 `"undefined"` 却回读成功。
+
+**坑 345：`click_safe` 危险词闸门误伤「发布设置」** — 闸门按子串匹配 `发布`，而展开发布设置面板的入口文案就是 `发布设置`，一拦就卡死设置步骤。**不许改宽闸门或传 `allow_danger=True`**；正解是给「展开型」控件写局部安全点击：文案**严格等于**目标词 + 祖先链里无提交按钮 + 命中 `SUBMIT` 白名单即拒，再走 `Input.dispatchMouseEvent` 坐标点击。
+
+**坑 346：知乎专栏默认值是「上次用过的专栏」** — 回读 `radio.checked` 只能证明开关打开，不能证明选对；1030 实测开关已勾选、专栏名却是随机的 `「虢礫緙嘞」`。判据必须两级：`radio.checked === true` **且** `.ColumnSetting-ColumnSelector button` 文本归一化后 == 目标专栏名（选项带书名号，比较时两边剥 `「」` 与空白）。
+
+**坑 347：视频卡片封面 input 只在弹窗打开后存在** — `input.VideoCoverFileInput-input` 不在初始 DOM；且页面同时有 4 个 file input（附件/正文图片/文章封面/视频封面），按「取最后一个」会选错。文章封面已设时视频卡片用首帧即可，不要为了视频封面去点按钮。
+
+**另固化两条 raw CDP 实操**：① 视频号「保存草稿」后 `Page.navigate` 到 `draftListManager` 会因 SPA 路由弹回而被误判丢失，判据改为**新标签**打开草稿箱读 `草稿箱 (N)` + 首条标题；② 视频号封面弹窗关闭后 `.edit-cover-dialog-container` 不卸载、只被压成 `0×0`，`offsetParent`/`textContent` 仍命中 → 判据改为 `getBoundingClientRect().width > 0`，并回读封面槽 `naturalWidth/naturalHeight` 比例做正证。
 
 ### v3.73.0（2026-10-30 知乎首次端到端实跑，Draft.js 选区陷阱 + 判据假绿，坑 338-343）
 

@@ -656,7 +656,7 @@ https://bbs.hupu.com/643293715.html到底要接受平庸还是打破命运？
 帖子做成视频 不要出现帖子来源
 称呼全部用道友+名字
 竖屏幕视频
-参考/Users/youngsdream/.claude/skills/ai-news-factory/SKILL.md上传经验 上传b站 抖音 视频号
+参考/Users/youngsdream/.claude/skills/ai-news-factory/SKILL.md上传经验 上传b站 抖音 视频号 知乎 公众号 分组选「虢礫緙嘞」 保存草稿
 
 
 根据生成的content.json 生成tts 字幕 生成视频
@@ -748,3 +748,6 @@ Q版国风IP角色插画，半身特写，可爱拟人小羊，大头小身。�
 专栏收录 发布到专栏「今日羊报Al」
 保存草稿
 最后在正文前插入生成的视频
+
+
+小红书?
