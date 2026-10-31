@@ -1,8 +1,8 @@
 # 知乎平台模块（文章派生 + 合规审核 + 草稿上传）
 
 > 本文件是 `SKILL.md` 的**平台子模块**，由 SKILL.md 的 Phase 10.6 / Phase 14 引用。
-> 版本：v3.74.0（2026-10-30 二次实跑：post-to-video 帖文成片，raw CDP + 新增坑 344–347）
-> 上一版：v3.72.0（2026-10-30 首次端到端实跑：视频内嵌 + 6 图占位替换 + 封面 + 创作声明 + 专栏，全部回读通过；补坑 338–343）
+> 版本：v3.75.0（2026-10-31 日报三期实跑：专栏「第 0 级」失败 + 草稿箱 `?type=article` + 登录判据假阴性 + `ZHIHU_DRAFT_OK` 覆盖不全，坑 352–355、362–364）
+> 上一版：v3.74.0（2026-10-30 二次实跑：post-to-video 帖文成片，raw CDP + 坑 344–347）
 > 合规依据（同目录）：
 > - `知乎关于 AI 辅助创作内容的治理细则.md`
 > - `知乎社区规范.md`
@@ -155,13 +155,23 @@
 ### 3.1 入口与登录态
 
 - 入口：`https://www.zhihu.com/creator/manage/creation/article`
-- 登录判据：页面出现 **「立即创作」** 按钮 且 侧栏有 **「草稿箱(N)」**；出现扫码/密码登录即未登录 → 停下报错，不重试
+- 登录判据（**v3.75.0 修正**）：侧栏有 **「草稿箱(N)」/「创作主页」** 且 **无扫码/密码登录** → 已登录。**不要**把「页面出现『立即创作』按钮」当判据——1031 实测该按钮可以整个不存在（`hasCreate: False`）而同页侧栏「草稿箱」正常，账号也确实登录着；按旧判据会在第一步就把自己拦下（坑 353 同族的假阴性）。出现扫码/密码登录即未登录 → 停下报错，不重试
 - 登录后该页可见：内容管理 / 数据中心 / 创作成长 / 个人中心 等侧栏
 
 ### 3.2 打开编辑器
 
 点「立即创作」→ **会新开一个标签页** `https://zhuanlan.zhihu.com/write`。
 **注意**：点击后当前页不变，必须从 `ctx.pages` 里重新找 `zhuanlan.zhihu.com` 的页；不要以为点击失败。
+
+**🔴 按钮不存在时的等价回退（v3.75.0 坑，1031 实测）**：
+
+```python
+page = ctx.new_page()
+page.goto('https://zhuanlan.zhihu.com/write', wait_until='domcontentloaded')
+# 实测：标题 textarea 与正文 Draft.js 都在，可直接开工；wantsLogin=False
+```
+
+按钮缺席只是 UI 变体，**不是未登录、不是功能不可用**。旧脚本 `get_editor_page(ctx)` 只从 `ctx.pages` 里找现成标签页、自己不点也不 goto，按钮一缺席就 `AssertionError: 找不到知乎编辑器标签页`——这个回退必须写进脚本，不能只在探针里用（坑 355：未回写 = 未修复）。
 
 ### 3.3 编辑器结构（2026-10-30 实测）
 
@@ -321,22 +331,41 @@ assert cur == '包含AI辅助创作作者对内容负责', f'创作声明未生�
 
 ### 3.10 专栏收录
 
-点「发布到专栏」后，发布设置面板才完整展开（会多出「投稿至问题 / 创作声明 / 文章话题 / 定时发布 / 送礼物设置 / 内容来源」）。
-默认专栏常常已选中，但**必须回读 radio 的 `checked`，不能只 grep 页面文本**（坑 343）：
+**🔴 v3.75.0 坑 352：专栏有两个失败层级，判据必须覆盖「开关压根没开」。** 1031 实测默认状态是 **`不发布到专栏` checked=true**，此时 combobox **不存在**（`combo: null`），旧断言直接抛 `未选中「发布到专栏」: '不发布到专栏'`。坑 346 讲的「开关已勾、专栏选错」是**第 2 级**；今天的形态是**第 0 级**。
+
+正确的三步 + 三分支判据：
 
 ```python
+# 第 0 级：先确认开关是开的（坑 340：Vue radio 的 .click() 静默无效，必须坐标点）
+box = page.evaluate("""() => {
+  const lab = document.querySelector('label[for="PublishPanel-columnLabel-1"]');
+  if (!lab) return null;
+  const r = lab.getBoundingClientRect();
+  return {x: r.x + r.width/2, y: r.y + r.height/2, checked:
+          !!document.querySelector('#PublishPanel-columnLabel-1')?.checked};
+}""")
+if box and not box['checked']:
+    page.mouse.click(box['x'], box['y'])      # 1031 实测 label rect {'x':393,'y':444.07,'w':94,'h':38}
+    page.wait_for_timeout(1200)
+
+# 第 1/2 级：radio + combo 双证（combo 在关态为 None，必须先拦）
 sel = page.evaluate("""() => {
   const box = document.querySelector('.ColumnSetting-ColumnSelector');
   if (!box) return {found: false};
   const on = Array.from(box.querySelectorAll('input[type=radio]')).find(r => r.checked);
-  const lab = on && on.closest('label[for]') ? on.closest('label[for]').innerText.replace(/\s+/g, '') : '';
+  const lab = on && on.closest('label[for]') ? on.closest('label[for]').innerText.replace(/\s+/g,'') : '';
   const combo = box.querySelector('button[role=combobox]');
-  return {found: true, checkedLabel: lab, combo: combo ? combo.innerText.replace(/[\s​]/g, '') : ''};
+  return {found: true, checkedLabel: lab, combo: combo ? combo.innerText.replace(/[\s​]/g,'') : null};
 }""")
-assert sel['checkedLabel'] == '发布到专栏'
-# 页面真值按码点实测：今日羊报 + U+20 半角空格 + 'AI'（U+41 U+49 大写 I）
-assert '今日羊报AI' in sel['combo']
+if not sel['found']:              raise AssertionError('找不到专栏设置区，发布设置可能未展开')
+if sel['checkedLabel'] != '发布到专栏': raise AssertionError(f'第0级失败：开关未开（{sel["checkedLabel"]!r}）')
+if not sel.get('combo'):          raise AssertionError('第1级失败：开关已开但 combo 不存在')
+if want not in sel['combo']:      raise AssertionError(f'第2级失败：专栏选错（{sel["combo"]!r}）')
 ```
+
+**选专栏的真路径（1031 唯一成功路径）**：点开 combobox → 在 `.Select-option` 里按 `innerText.replace(/\s/g,'')` **命中带书名号的目标名** → 取 rect 中心 `page.mouse.click`。该账号专栏总数只有 **2 个**（`「虢礫緙嘞」` 与 `「今日羊报AI」`），「默认就是目标专栏」不是可依赖假设。
+
+**⚠️ 旧写法的两个错**：① 上面 `assert '今日羊报AI' in sel['combo']` 在 combo 为 `None` 时会抛 `TypeError: argument of type 'NoneType' is not iterable`，必须先 `if not sel.get('combo')` 拦；② 坑 334 说「创作声明要先展开发布设置才可见」——**1031 实测不成立**：在已落库的 `/p/<id>/edit` 页上，`[decl]` 在 `[column]` 之前成功执行、全程没点过「发布设置」。所以步骤顺序 decl 可以在 column 之前；`step_decl` 找不到控件时应「尝试展开面板」兜底，而不是静默走过去让后面的断言报「未生效: None」（那会把「没找到」误报成「没生效」）。
 
 **专栏名要按码点核，别靠肉眼**：`今日羊报 AI` 中间有**半角空格 U+20**，末位是**大写 I（U+49）**。这两个字符极容易被写错成「无空格」或小写 `l`（U+6C），肉眼几乎分辨不出。实测码点：
 
@@ -360,7 +389,7 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 
 1. 填完标题/正文后等 ≥3s，页面底部应出现 `刚刚 · 草稿`
 2. **不要点「发布」**（`Button--pri`，危险按钮，scripts 里禁止出现对其的点击）
-3. 到草稿箱核验：`https://www.zhihu.com/creator/manage/creation/article` → 侧栏「草稿箱(N)」→ 标题出现在列表中
+3. 到草稿箱核验：**必须硬 goto `https://www.zhihu.com/creator/manage/creation/draft?type=article`**（v3.75.0 坑 353）。**不要**「点侧栏『草稿箱』再 grep」——点 tab 后 URL 会变成 `?type=answer`，只列**回答草稿**，文章标题必然查不到，看起来像草稿丢了（1031 实测：点 tab 得 `正文含本期标题: False`；硬 goto 后首条正是本期标题）。记忆钩子：`?type=answer|article|zvideo` 对应 回答/文章/视频 三类草稿，默认 `answer`
 
 ### 3.12 上传验收判据
 
@@ -369,23 +398,26 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 | appmsg 级 ID | 编辑页 URL 变为 `zhuanlan.zhihu.com/p/<id>/edit`（说明已落库为草稿） |
 | 标题 | `textarea` value 与 TITLE 完全一致 |
 | 正文 | `div.public-DraftEditor-content` innerText 长度 > 800 |
-| 视频 | `.Editable-video` 数 == 1 且 `data-video-playable == 'true'`；块序在第一个正文块之前 |
+| 视频 | `.Editable-video` 数 == 1 且 `data-video-playable == 'true'`；块序在第一个正文块之前。**判块序要看前 3 块的 kind 序列**（如 `0:TXT(空) 1:VIDEO 2:正文`），**不要**看日志里的 `first block: TXT|`——那行用 `startswith(('VIDEO','TXT'))` 取第一个匹配块，正文场景下永远是 TXT，与视频是否插入无关（v3.75.0 坑，1031 实测）|
 | 图片 | `IMG` 块数 == 源文图片数，且无 `__IMG__` 残留 |
-| 封面 | 封面槽位有图（`img` naturalWidth > 200 或槽位显示已上传态） |
+| 封面 | 封面槽位有图（`img` naturalWidth > 200 或槽位显示已上传态）。**必须并入 `ZHIHU_DRAFT_OK` 的 `ok` 表达式**——旧版漏了它，封面缺失也照印 OK（v3.75.0 坑 354）|
 | 创作声明 | combobox 回读归一化后 == `包含AI辅助创作作者对内容负责` |
-| 专栏 | `.ColumnSetting-ColumnSelector` 里「发布到专栏」radio 的 `checked` 为真 |
-| 字面星号 | 全文块文本不含 `**`（坑 341） |
+| 专栏 | **三级判据**（v3.75.0 坑 352 修正）：① 开关是否打开（radio `PublishPanel-columnLabel-1` 的 `checked`）② 打开后 `combo` 是否存在（关态下为 `null`）③ combo 文本归一化后是否 == 目标专栏。**只判第 2 级会漏掉「开关压根没开」这一上游形态**（1031 实测默认就是「不发布到专栏」checked=true）|
+| 字面星号 | 全文块文本不含 `**`（坑 341）。**必须并入 `ok`**——`all` 捆绑包不含 footer，旧版永远不会自动跑（v3.75.0 坑 354）|
+| 块数守恒 | `len(blocks) == 正文块数 + 2`（+视频卡片 +自动空块）；1031 实测 32 → 34。数量不守恒 = 有块被 `Backspace` 吃掉（坑 342 的指纹）|
 | 危险动作 | 全程未点击「发布」 |
+
+**🔴 `ZHIHU_DRAFT_OK` 的真实语义（v3.75.0 坑 354）**：当前脚本的 `ok` 只含 `videos==1 / playable / decl / bodyLen>800 / IMG 数` 五项，**它只证明视频、声明、正文、图数四件事**，不证明封面、专栏、无字面星号。看到 OK 不等于全绿——要么把三项并进 `ok`，要么在 checklist 里另行逐项回读。
 
 ---
 
-## 4. 坑（坑 334–347）
+## 4. 坑（坑 334–355、362–365）
 
-### 坑 334：创作声明藏在「发布设置」面板里，且控件是 combobox 不是 select
-- 页面首次加载时发布设置只露出 `添加封面 / 专栏收录 / 定时发布`；**创作声明要等面板完整展开后才在 DOM 里可见**（点过「发布到专栏」后可见）
+### 坑 334：创作声明是 combobox 不是 select；「必须先展开面板」被 1031 推翻
 - 控件结构：`div.css-be2u3` → `label`（文本 `创作声明`）→ `button[role=combobox]`
 - **该 class `css-be2u3` 被多个字段复用**（投稿至问题 / 创作声明 / 文章话题 / 专栏收录），必须**按 label 文本定位**，不能取第一个
 - 选项文本含空格：`包含 AI 辅助创作 作者对内容负责`；回读时元素文本含**零宽空格 `​`**，比较前必须归一化
+- **🔴 v3.75.0 修正**：旧文说「页面首次加载时发布设置只露出 添加封面/专栏收录/定时发布；创作声明要等面板完整展开后才在 DOM 里可见（点过『发布到专栏』后可见）」——**1031 实测不成立**。在已落库的 `/p/<id>/edit` 页上，`[decl]` 步在 `[column]` 步**之前**成功执行，全程没有点过「发布设置」。所以：① 步骤顺序上 decl 可以排在 column 之前；② `step_decl` 找不到控件时应「尝试展开面板」兜底，**不要**静默走过去让 `assert cur == ...` 报「未生效: None」——那会把「没找到」误报成「没生效」，误导排查方向。
 
 ### 坑 335：知乎文章没有「保存草稿」按钮
 - 自动保存，底部显示 `刚刚 · 草稿`
@@ -468,6 +500,45 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 - 且页面上同时存在 4 个 `input[type=file]`（附件 / 正文图片 / 文章封面 `UploadPicture-input` / 视频封面），**按「取最后一个」选 input 会选错**
 - 优先级：文章封面已设好时，视频卡片用首帧即可，**不要为了视频封面去点按钮**——点了再选错 input 有污染正文图片的风险
 
+### 坑 352：专栏默认是「不发布到专栏」，开关本身就是关的（v3.75.0 / 2026-10-31 实测）
+- 1031 实测 DOM：`[{"id":"PublishPanel-columnLabel-1","checked":false,"label":"发布到专栏"},{"id":"PublishPanel-columnLabel-0","checked":true,"label":"不发布到专栏"}]`，此时 **`combo: null`**
+- 这是坑 346 的**上游形态**：346 是「开关已勾、专栏选错」，这里是「开关压根没开」
+- 关闭态下 `assert re.sub(r'\s','',WANT) in sel['combo']` 会抛 `TypeError: argument of type 'NoneType' is not iterable` —— 必须先 `if not sel.get('combo')` 拦
+- 正确路径见 §3.10 的三步 + 三分支
+
+### 坑 353：草稿箱点 tab 落 `?type=answer`，标题必然查不到（v3.75.0 / 2026-10-31 实测）
+- 点「草稿箱」后 URL = `.../draft?type=answer`，只列回答草稿 → `正文含本期标题: False`
+- 硬 goto `?type=article` → `草稿箱(24) 回答草稿20 文章草稿3 想法草稿1`，首条即本期标题
+- 记忆钩子：`?type=answer|article|zvideo` 对应 回答/文章/视频 三类草稿，默认 `answer`
+
+### 坑 354：`ZHIHU_DRAFT_OK` 只证明四件事，不能当全量验收（v3.75.0 / 2026-10-31 实测）
+- `ok` 只含 `videos==1 / playable / decl / bodyLen>800 / IMG 数`；**封面数、专栏两级、字面 `**` 三项全不在内**
+- 1031 专栏断言先崩、手工修好才跑 verify —— 若没修，这一行照样印 OK
+- 另：`all` 捆绑包**不含 footer**（`if step == 'footer':` 对比相邻的 `if step in ('all','column'):`）→ 坑 341 的 `**` 验收永远不会自动跑
+
+### 坑 355：「未回写 = 未修复」——临时探针里的修复不算修复（v3.75.0 / 2026-10-31 实测）
+- 1031 专栏的坐标点击修复**只活在 heredoc 的临时 playwright 代码里**，`zhihu_upload_1031.py` 的 mtime 仍是 `Oct 30 22:08`，脚本内 `grep mouse.click` 只命中旧的三行
+- 规则：任何浏览器里手工验证通过的修复，必须当场回写对应 `step_*` 函数，并立刻单跑该 step 自证。没跑过就只能写「人工探针验证过」，不能写「策略已实测」
+- 派生器把脚本从上一期复制过去，缺陷会跟着走
+
+### 坑 362：登录判据「页面出现『立即创作』」会假阴性（v3.75.0 / 2026-10-31 实测，知乎专属）
+- 1031 实测 `creator page: {'url':'.../creation/article','hasCreate':False,'hasDraft':True,'needsLogin':False,'len':952}` —— 侧栏有草稿箱、无扫码登录，唯独没有「立即创作」
+- 按旧判据会在第一步就把自己拦下。真判据 = 侧栏有「草稿箱(N)」/「创作主页」且无扫码/密码登录
+
+### 坑 363：「立即创作」缺席时可直接 goto `/write`（v3.75.0 / 2026-10-31 实测，知乎专属）
+- `ctx.new_page()` + `goto('https://zhuanlan.zhihu.com/write')` → `{'title': True, 'editor': True, 'bodyLen': 1, 'wantsLogin': False}`，编辑器直出可用
+- 旧脚本 `get_editor_page(ctx)` 只从 `ctx.pages` 里找现成标签页、不点也不 goto → 按钮缺席即 `AssertionError: 找不到知乎编辑器标签页`
+
+### 坑 364：`first block: TXT|` 是构造性无信息行，不能当块序证据（v3.75.0 / 2026-10-31 实测，知乎专属）
+- `first = next((b for b in st['blocks'] if b.startswith(('VIDEO','TXT'))), '')` → 正文场景下永远返回第一个 TXT 块，与视频是否插入无关
+- 真块序靠打印 `st['blocks'][:3]`：1031 实测 `0:TXT(空) 1:VIDEO 2:正文`
+
+### 坑 365：文章一旦被发布，草稿就从草稿箱消失——验收必须当场做（v3.75.0 / 2026-10-31 实测）
+- 1031 上传当场：`文章草稿 2→3`，首条即本期标题，`ZHIHU_DRAFT_OK`
+- 同日下午回查：`草稿箱(23) 回答草稿20 文章草稿2`，**本期标题不在草稿箱**；而文章页显示 `发布于 2026-10-31 09:53・广东`、正文 2679 字、视频 1、图 7
+- **判定**：用户手动发布，草稿被「提升」成正式文章后从草稿箱移除。**这不是草稿丢失，也不是自动化点的发布**（脚本内 `grep 发布` 只命中「发布设置」「发布到专栏」）
+- **规则**：① 草稿验收必须在**上传当场**完成并留存读数，事后回查的「查不到」不能反推「当时没存上」；② 回查发现标题不在草稿箱时，**先去文章页看有没有 `发布于 <时间>`**，再看正文长度/图片数/视频数是否与上传时一致，才能判断是「已发布」还是「真丢失」；③ 汇报时如实写「上传当时为草稿，之后用户手动发布」，不要含糊成「草稿状态正常」
+
 ---
 
 ## 5. 与其他平台的差异速查
@@ -499,13 +570,13 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 
 | # | 探测项 | 实测结果 | 状态 |
 |---|---|---|---|
-| 1 | 登录判据 | 创作者中心出现「立即创作」+ 侧栏「草稿箱(N)」 | ✅ 已测 |
-| 2 | 「立即创作」行为 | **新开标签页** → `https://zhuanlan.zhihu.com/write` | ✅ 已测 |
+| 1 | 登录判据 | **侧栏有「草稿箱(N)」/「创作主页」且无扫码登录**（~~出现「立即创作」~~ —— 1031 实测该按钮可整个缺席而账号已登录，坑 362） | ✅ 已测（v3.75.0 修正） |
+| 2 | 「立即创作」行为 | **新开标签页** → `https://zhuanlan.zhihu.com/write`；**按钮缺席时直接 `ctx.new_page()` + goto `/write` 等价可用** | ✅ 已测（v3.75.0 补回退） |
 | 3 | 标题容器 | `textarea[placeholder="请输入标题（最多 100 个字）"]` | ✅ 已测 |
 | 4 | 正文容器 | `div.public-DraftEditor-content`（Draft.js；`innerHTML` 直赋无效，须剪贴板 paste） | ✅ 已测 |
 | 5 | 创作声明控件 | `div.css-be2u3` → `label`=创作声明 → `button[role=combobox]` → `.Select-option` | ✅ 已测 |
 | 6 | 创作声明选项文案 | `包含 AI 辅助创作 作者对内容负责`（回读归一化零宽字符后 = `包含AI辅助创作作者对内容负责`） | ✅ 已测（已实设并回读成功） |
-| 7 | 专栏默认值 | 点「发布到专栏」后面板展开，默认已选中 `「今日羊报 AI」` | ✅ 已测 |
+| 7 | 专栏默认值 | **默认是「不发布到专栏」（`PublishPanel-columnLabel-0` checked=true），此时 combo 为 `null`；手动开启后 combo 默认值是上次用过的专栏（1031 实测「虢礫緙嘞」）**（v3.75.0 推翻旧记录，坑 352） | ✅ 已测（v3.75.0 修正） |
 | 8 | 封面 input | `input[type=file][accept=".jpeg, .jpg, .png"]`（class `UploadPicture-input`） | ✅ 已测 |
 | 9 | 保存机制 | **无保存按钮，自动保存**；底部 `刚刚 · 草稿`；URL 变 `/p/<id>/edit` | ✅ 已测 |
 | 10 | 草稿列表入口 | 创作者中心侧栏「草稿箱(N)」 | ✅ 已测 |
@@ -516,8 +587,8 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 | 15 | 视频可播放判据 | `.Editable-video` 的 `dataset.videoPlayable === 'true'`，上传约 10–15 s | ✅ 已测 |
 | 16 | 视频持久化 | 刷新页面后视频卡片与前后文本均完好 | ✅ 已测 |
 | 17 | 图片上传 input | `input[type=file][accept*="image/webp"]`，上传落在光标块 | ✅ 已测 |
-| 18 | 专栏真实选中判据 | `.ColumnSetting-ColumnSelector` 内 `input[type=radio][checked]` | ✅ 已测 |
-| 19 | 草稿箱 URL | `zhihu.com/creator/manage/creation/draft?type=article\|answer\|zvideo`，子标签「文章草稿」 | ✅ 已测 |
-| 20 | 端到端 | 视频 1（playable）+ 图 6 + 封面 1 + 创作声明 + 专栏，`ZHIHU_DRAFT_OK` | ✅ 已测（1030 期实跑） |
+| 18 | 专栏真实选中判据 | **两级**：`.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 `checked` **且** combobox 文本归一化 == 目标专栏名（只判 `checked` 会漏掉「开关开了但选错」，v3.75.0 最终版） | ✅ 已测 |
+| 19 | 草稿箱 URL | `zhihu.com/creator/manage/creation/draft?type=article\|answer\|zvideo`，子标签「文章草稿」。**必须硬 goto `?type=article`**；点侧栏 tab 会落 `?type=answer` 只列回答草稿（v3.75.0 坑 353） | ✅ 已测（v3.75.0 修正） |
+| 20 | 端到端 | 视频 1（playable）+ 图 6 + 封面 1 + 创作声明 + 专栏，`ZHIHU_DRAFT_OK`。**注意该标志只覆盖视频/声明/正文/图数四项**，封面、专栏、字面星号须另行回读（v3.75.0 坑 354） | ✅ 已测（1030 / 1031 两期实跑） |
 
 **尚未实测**：封面裁剪弹窗行为、`zhihu-images/` 目录生成脚本、文章的最终发布流程（本站点不执行发布）。

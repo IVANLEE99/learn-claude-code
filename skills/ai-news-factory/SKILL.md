@@ -1,12 +1,25 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.74.0
+version: 3.75.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.74.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.75.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.75.0 核心改进（2026-10-31 五平台全量实跑：**验收判据自己骗自己**的四个新形态 + 两条被推翻的旧解释，坑 348-361、365）**
+>
+> 本期最贵的一条教训不是某个选择器失效，而是**我们有五处判据把「成功」读成「失败」、把「失败」读成「成功」**。按危害排序：
+>
+> ① **视频号「草稿 vs 已发表」有硬判据，而我们一直在用软判据**（坑 348）。两个列表的卡片 **class 与操作按钮集完全互斥**：草稿卡 `post-draft-item` 只有 `编辑 / 删除`；已发表卡 `post-feed-item` 才有 `复制视频ID / 视频ID / 可见权限 / 评论管理 / 分享`。**时间戳、页签计数、页面文本全都不可靠**（实测两侧时间戳零重叠，但那是因为草稿卡的时间选择器是 `.post-time` 而发表卡是 `.center-info .time-label`——选错选择器就得到空集，看起来像「没有草稿」）。1031 实测：草稿箱 `(7)` 首条 11:16 为本期草稿、`post/list` 另有一条 10:02 已发表（用户手动发布，非流水线产出）——**若只看时间戳，会得出「本期视频号变成已发表事故」的错误结论**。
+> ② **抖音 e2e 的终态复查在已经跳走的页面上取值**（坑 349）。第二次「暂存离开」后页面跳回发布页，`cover slots []`、`vids=0`、`uploadArea=true` → `rb_covers_ok=False` → 脚本印 `DY_E2E_FAILED`，而**草稿实际完好**（`readback` 阶段已记录 `vids=1 / decl / 双封面 1536×1151 + 1006×1343`，事后只读复核 `hasResume=true`）。**铁律：最终判定只能引用「在本步页面上已经取到的快照」，禁止在任何跳转之后复判前一步的产物**。
+> ③ **知乎 `ZHIHU_DRAFT_OK` 门禁只覆盖 4 项，专栏坏了也照印 OK**（坑 354）。`ok = videos==1 and playable and decl and bodyLen>800 and IMG 数` —— 封面数、专栏两级、字面 `**` 三项全不在内；本期专栏断言先崩、手工修好后才跑 verify，若没修这一行照样印 OK。
+> ④ **B站标签的「大小写规则每期翻转」是错误模型**（坑 350）。真相是**每个 tag 有各自的固定规范形态**：`claude` 必须小写（1030/1023 两期一致）、`DeepSeek` 必须大写（1023 首轮即落、1031 小写三次被吞）、`OpenAI` 大写。1031 把 1030 的「`Claude` 要小写」外推成「`deepseek` 要小写」，才制造出「规则翻转」的假象。**探测阶段抓「推荐标签」整行当规范表**——那一行同屏就并列着 `OpenAI` 与 `claude` 两种形态，是最便宜的真源。
+>
+> 另固化三条操作纪律：**⑤ 标签断言不许阻断存草稿**（坑 351，SKILL 早就写了、派生模板没同步，本期为此白扔一次 29MB 上传后的全部后续步骤）；**⑥「未回写 = 未修复」**（坑 355，今天所有平台修复都只活在临时探针里，派生器下期原样复发）；**⑦ 轮询命令的退出码不是脚本的退出码**（坑 356，`ps -p` 在进程已退出时返回 1，把 exit 0 的成功读成失败）。
+>
+> ⑧ **草稿一旦被发布就从草稿箱消失**（坑 365）：知乎 09:53 文章页出现 `发布于 2026-10-31 09:53`、草稿箱 `文章草稿 3→2`；视频号另有用户手动发表的 10:02 条目。**两者都已向用户确认为本人手动发布并保留**，非流水线产出。**验收必须在上传当场做并留存读数**——事后回查的「查不到」既可能是「被发布了」，也可能是「本来就没存上」，两者要先去文章页/发表列表比对才能分清。
 
 > **🔴 v3.74.0 核心改进（2026-10-30 知乎二次实跑：raw CDP 全链 + 专栏默认值陷阱，坑 344-347）**：① **`cdp_helper.eval()` 不做参数注入**——Playwright 风格的 `eval("(title) => {...}", title)` 第二个参数被**静默丢弃**，JS 侧变量为 `undefined`；最坏情况是 `setter.call(t, undefined)` 把标题写成字面 `"undefined"` 却回读成功。正解 `f"(() => {{ const x = {json.dumps(v)}; ... }})()"`。② **`click_safe` 危险词闸门会误伤「发布设置」**——闸门按子串匹配 `发布`，而展开发布设置面板的入口文案正是 `发布设置`，一拦就卡死设置步骤；**不许改宽闸门、不许传 `allow_danger=True`**，正解是给「展开型」控件写局部安全点击（文案严格等值 + 祖先链无提交按钮 + `SUBMIT` 白名单即拒）。③ **知乎专栏默认值是「上次用过的专栏」**——回读 `radio.checked` 只证明开关打开，不证明选对；1030 实测开关已勾选、专栏名却是随机的 `「虢礫緙嘞」`，判据必须两级（`checked` **且** combobox 文本 == 目标名）。④ **视频卡片封面 input 只在弹窗打开后才在 DOM**，且页面同时有 4 个 file input，按「取最后一个」会选错。**另固化两条视频号判据**：`draftListManager` 必须**新标签**打开（同页 SPA 路由会弹回），封面弹窗关闭后容器不卸载只压成 `0×0`（`offsetParent` 仍为 true）→ 判据改为 `getBoundingClientRect().width > 0` + 封面槽比例回读。
 
@@ -89,9 +102,9 @@ version: 3.74.0
 **各平台存草稿方式**：
 | 平台 | 存草稿操作 | 成功判据（**点击回执不算数**） |
 |------|-----------|------------------------|
-| B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） | URL 跳到 `upload-manager/article?group=draft`，且草稿箱标题匹配 |
-| 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿）。**若恢复后发现视频丢失（坑 323），在该草稿页内按 `accept` 含 `video` 挑 `input[type=file]`（本期实测索引 1，索引 0 是封面图的 image/*）重新 `set_input_files` 上传，再暂存** | **① 按钮消失 且「继续编辑」横幅出现；② 恢复后 `videos >= 1`（v3.68.0 坑 323：双信号不是充分条件——横幅在、字段全，视频仍可能没落库）；③ 标题回读一致** |
-| 视频号 | 点击「保存草稿」按钮——**点击前必须 `document.elementFromPoint` 自证落点是它**（v3.67.0 坑 317：它与「手机预览」「发表」水平相邻、间距仅 16px、无二次确认，1028 期因 stale 坐标误点「发表」，内容直接公开） | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4）。**另：视频标注不在草稿里保存（坑 318），验收时不要拿它当落库判据** |
+| B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） | URL 跳到 `upload-manager/article?group=draft`，且草稿箱标题匹配。**🔴 v3.75.0 补（坑 351）：标签缺失只记录、不阻断——把 `assert not missing` 改成 log + 写进 checklist；分区/标题/封面/简介/合集/声明才允许 assert 停链。SKILL 早就这么写，但派生模板没同步，1031 因此白扔一次 29MB 上传后的全部后续步骤** |
+| 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿）。**若恢复后发现视频丢失（坑 323），在该草稿页内按 `accept` 含 `video` 挑 `input[type=file]`（本期实测索引 1，索引 0 是封面图的 image/*）重新 `set_input_files` 上传，再暂存** | **① 按钮消失 且「继续编辑」横幅出现；② 恢复后 `videos >= 1`（v3.68.0 坑 323：双信号不是充分条件——横幅在、字段全，视频仍可能没落库）；③ 标题回读一致**。**🔴 v3.75.0 补（坑 349）：判定必须在「恢复后的回读页」完成并当场留存，禁止在任何跳转之后复判——第二次「暂存离开」后页面会跳回发布页，此时 `cover slots []`/`vids=0` 会把已建成的草稿读成失败（1031 实测 `DY_E2E_FAILED` 为假阴性）** |
+| 视频号 | 点击「保存草稿」按钮——**点击前必须 `document.elementFromPoint` 自证落点是它**（v3.67.0 坑 317：它与「手机预览」「发表」水平相邻、间距仅 16px、无二次确认，1028 期因 stale 坐标误点「发表」，内容直接公开） | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4）。**另：视频标注不在草稿里保存（坑 318），验收时不要拿它当落库判据**。**🔴 v3.75.0 补硬判据（坑 348）：只看「条目出现在哪个列表」不够——必须查卡片的操作按钮集。草稿卡 `post-draft-item` 只有 `编辑/删除`；已发表卡 `post-feed-item` 才有 `复制视频ID/视频ID/可见权限/评论管理/分享`。两侧时间戳选择器不同（草稿 `.post-time .time-label` vs 发表 `.center-info .time-label`），选错就得到空集，会被误读成「没有草稿」** |
 | 公众号 | 点击「保存为草稿」按钮 | URL 出现 `appmsgid=`，且 `bodyLen` / 占位符数 / 封面 `hasQpic` / **合集 `.js_article_tags_content`** 回读一致（v3.66.0 坑 310：合集**不能**用 `body.innerText` 子串判，正文页脚恒含合集名） |
 | 知乎 | **无「保存草稿」按钮——知乎文章是自动保存**（v3.71.0 坑 335 实测）。填完标题/正文等 ≥3s 出现底部「刚刚 · 草稿」即可；**「发布」永不进脚本**（规范禁止自动化发布，AI 声明不能豁免） | 编辑页 URL 变为 `zhuanlan.zhihu.com/p/<id>/edit`；创作者中心「草稿箱(N)」列表出现本期标题；编辑器内 标题 value / 正文 innerText 长度 / 封面 / **创作声明（含 AI 辅助创作 作者对内容负责）** / 专栏「今日羊报 AI」五项同时回读（详见 `templates/platform-zhihu.md` §3.10） |
 
@@ -2279,6 +2292,29 @@ page.mouse.click(*opt)                      # 选中
 # 回读判据（沿用 v3.45.0）：body.innerText 含「个人观点，仅供参考」
 ```
 
+**🔴 v3.75.0 补：创作声明回读有两个假信号，真判据只有两条（1031 实测）**
+
+同一个控件，三种读法给出相反结论：
+
+```
+容器 innerText : {"declBlock": "创作声明 |  | * |  | 分区 | ...", "declSel": "* |  | 创作声明"}   ← 看起来「声明是空的」
+真值           : {"val": "个人观点，仅供参考", "selected": ["个人观点，仅供参考"], "boxText": "*||创作声明"}
+```
+
+**唯一可信的两条判据**（必须同时成立）：
+
+```python
+ok = (
+    sel.querySelector('input').value == '个人观点，仅供参考'
+    and '个人观点，仅供参考' in [
+        o.innerText.strip() for o in page.query_selector_all('.bcc-option')
+        if 'selected' in (o.get_attribute('class') or '')
+    ]
+)
+```
+
+**不要用**：`creation-statement-container` 的 `innerText`（只有个 `*`）、`dropdownOpen`（点空白关不掉，恒 true）、`display`。这是坑 305「证据与判据同源」的新变体——**读的容器和渲染的值不是同一个节点**。
+
 同理，form 步任何 locator 超时都**先回读再决定重跑**——W40 分区 locator timeout 但回读已是「人工智能」，不重跑（坑 242/205 回读铁律）。
 
 #### 11.6 填写简介（Quill 编辑器）
@@ -2325,6 +2361,13 @@ for (const c of chips) {
 ```
 - **验收铁律**：每次增删后回读 `.label-item-v2-container` 的文本列表断言，**不能只信脚本打印的 "added"**（0921 打印 added 但列表里没进）。最终 chips 列表必须等于 publish.json 的 tags（允许少、不允许脏）。
 - **🔴 平台可能单独拒收某个标签（v3.63.0 坑，1025 实测）**：本期 `AI大模型` 原样重输两次、点推荐行同名 chip 也未入列，终态 6/7。**v3.67.0 补（1028 二次确认，形成定论）**：这个串在 B站**稳定收不下**——原串、加空格变体（`AI 大模型`）、词序变体（`大模型AI`）、裸写（`大模型`）都只会落成**另一个** chip，回读必然对不上。**别再浪费一轮试变体：B站标签池里直接改用推荐行里存在的「人工智能」**，本期即以此凑满 6 个。**断言写成「记录缺了哪个，但不阻断存草稿」**——例如打印 `missing_tags: ['AI大模型']` 并把其余标签的到位率写进 review-checklist §15；**不要** `assert len(chips) == len(tags)` 让整条链停在存草稿前。标签缺失不触发平台杠杆（简介/分区/合集才是），为一个可选项白跑一遍上传不划算。同时**禁止**为了凑数点推荐行里的同名 chip——推荐行点击会追加**别的**标签（坑 240）。
+
+- **🔴 大小写不是「平台规则会翻转」，而是「每个 tag 有固定规范形态」（v3.75.0 坑 350，1031 实测推翻旧解释）**。旧文档把 1030 的「`Claude` 大写被吞、`claude` 小写才落」与 1031 的「`deepseek` 小写被吞、`DeepSeek` 大写才落」解释成「规则每期相反」，**这是错的**——两期其实是同一件事：`claude` 规范形态是小写、`DeepSeek` 规范形态是大写，1031 只是把 1030 的结论错误外推到了另一个 tag。同屏铁证是 B站推荐标签行本身并列两种形态：`… | OpenAI | 账户风控 | claude | ai新闻 | …`。
+  **正确做法**：探测阶段把「推荐标签：」整行抓下来当**规范形态表**（最便宜的真源，不需要试错）；变体顺序固定「推荐行原样 → 原样 → 首字母大写 → 全小写」，命中即把实际形态记进 review-checklist 的 `tag_forms`。**禁止把某个 tag 的大小写结论外推到另一个 tag。**
+
+- **🔴 标签输入框同页有两个（v3.75.0 坑，1031 实测）**：`input[placeholder*="创建标签"]` 在 DOM 里有 2 个，实测 `i=0` 可见（`w=286`）、`i=1` 隐藏（`w=0`、`h=0`）。`.first` 今天恰好命中可见的那个，**DOM 顺序一变就会静默填进隐藏框**（`fill()` 成功、chips 不变）。选输入框必须筛可见性：`[...document.querySelectorAll('input[placeholder*="创建标签"]')].find(e => e.offsetParent && e.getBoundingClientRect().width > 0)`，禁止 `.first` 赌顺序。
+
+- **🔴 标签相关的一切比较统一走 `lower()` 归一化（v3.75.0 坑，1031 实测）**：同一份脚本里 cleanup 用 `c not in TAGS`（区分大小写）、断言用 `c.lower() == t.lower()`（不区分），**重跑时会把平台已规范化的 chip 当脏标签删掉再补**。1031 实测 chips 同时含 `openai` 与 `DeepSeek`，一旦重跑 upload 脚本，`openai` 会被 cleanup 判脏删除。统一写法：cleanup `c.lower() not in {t.lower() for t in TAGS}`、skip `t.lower() in {c.lower() for c in chips()}`。
 
 #### 11.8 加入合集（自定义下拉框）
 
@@ -4091,6 +4134,12 @@ sr.querySelectorAll('video').length >= 1
 
 **How to apply:** ① 抖音验收判据加上 `videos >= 1`，写进 checklist；② 恢复草稿后第一件事就是数 `video` 元素，不要先看字段；③ 发现视频丢失就在同一草稿页重传，不要删草稿重来（坑 295：横幅消费掉就没了）；④ 重传后必须再暂存一次，否则草稿仍是空的。
 
+**🔴 v3.75.0 三条补充（1031 实测）**：
+
+- **坑 349 —— 判定必须在「恢复后的回读页」完成，禁止在跳转后复判。** 第二次「暂存离开」后页面会**跳回发布页**（`uploadArea=true`、`vids=0`、`cover slots []`），此时再取封面/视频判据必然为空。1031 因此印出 `DY_E2E_FAILED`，而草稿其实完好（`readback` 阶段已记录 `vids=1 / decl / 双封面 1536×1151 + 1006×1343`，事后只读复核 `hasResume=true`）。**修法：每步成功后立刻把回读结果存进 `result` 字典，最终判定只读字典；确需终态确认就重新打开发布页看「继续编辑」横幅。**
+- **坑 358 —— 封面判据用槽位 `img` 尺寸，不要 grep「竖封面缺失」文本。** AI 推荐封面生成期间该文案会**瞬时为真**（首轮 `covers: True False | ... Ai智能推荐封面生成中...`），与「用户没上传」无法区分。真判据：`document.querySelectorAll('.coverControl-CjlzqC')` 逐个取 `img.naturalWidth/naturalHeight`，横 `nw>=300`、竖 `nw>=300 && nh>nw`。1031 实测 `[{'nw':1536,'nh':1151},{'nw':1006,'nh':1343}]` 一次判对。
+- **坑 361 —— 把易失步骤放在暂存之后迭代。** 1031 首轮在**暂存之前**因封面断言失败中止，好处是零残留（`hasResume: false` 已验），坏处是白跑 15 分钟（29MB 上传 + 元信息 + 封面全废）。**草稿是迭代的存档点，不是最后一步。**
+
 ### 🔴 验收判据自欺 + 合集静默失败 + 一条被证伪的推断（v3.66.0 / 2026-10-26 日报实测，坑 310-316）
 
 **问题**：本期流水线全链跑完、日志全绿、`MP_VERIFY` 报 `collection: true`、文稿"看起来完美"——但公众号合集字段实际一直是「未添加」。收尾时另写了一个只看 `.js_article_tags_content` 的深度回读才发现，补挂后才真正完整。
@@ -4238,6 +4287,8 @@ sr.querySelectorAll('video').length >= 1
 ### 🔴 B站上传 VIDEO 路径必须用 publish.json.title 非 bilibili.title（v3.52.0 / 2026-10-17 实测，坑 258）
 
 **问题**：1017 视频渲染成功（`news-pipeline/2026-10-17/video/【2026-10-17】OpenCode免费开放两个国产模型，DeepSeek搜索开始收费 | 今日羊报AI.mp4`），但 `bili_upload.py upload` 步在 `os.path.getsize(VIDEO)` 处抛 `FileNotFoundError`——脚本里 `VIDEO` 抄的是 `publish.json.platform.bilibili.title`（`…收费｜4条重磅AI新闻一次看完 | 今日羊报AI.mp4`），而实际产物文件名用的是 `publish.json.title`（无「｜4条重磅AI新闻一次看完」段）。
+
+**v3.75.0 补充（1031 实测，坑 357）**：`gen_publish_*.py` 自身 `from PIL import Image`（读封面尺寸做断言），用 `python3 -I` 跑会 `ModuleNotFoundError: No module named 'PIL'` —— `-I` 丢弃 user site-packages。**需要 PIL 的脚本（`gen_publish` / `gen_covers_local` / `gen_scenes_api`）一律 `python3` 不带 `-I`**；`-I` 只留给处理不可信输入的脚本（见 SAFETY 说明）。
 
 **根因**：`publish.json` 有两个标题字段：
 - `title` = `【YYYY-MM-DD】{核心标题}… | 今日羊报AI`（列表标题，**也是渲染/归档文件名**，Phase 9/10.4 用此）
@@ -5407,7 +5458,7 @@ browser_handle_dialog(accept=true)
 | 作品描述 | 标准 input | **`fill()`** 或 placeholder 匹配（React 受控） | ✅ 高 |
 | 作品简介 | 文本区域 | 坐标点击 + `keyboard.type` | ✅ 高 |
 | 横封面4:3 | 自定义编辑器 | 语义「横封面4:3」→ force「上传封面」→ setFiles → **text/evaluate「完成」** | ⚠️ 需 force+等预览 |
-| 竖封面3:4 | 自定义编辑器 | 弹窗或标签上方点击 → force 上传 → setFiles → **text/evaluate「完成」** | ⚠️ 草稿页无弹窗 |
+| 竖封面3:4 | 自定义编辑器 | 弹窗或标签上方点击 → force 上传 → setFiles → **text/evaluate「完成」** | ⚠️ 草稿页无弹窗。**🔴 v3.75.0：叶子「编辑封面」必须限定在 `.coverControl-CjlzqC`[1] 的 rect 内（坑 359）；弹窗内 `.semi-slider-handle` 必须拖最小档（坑 360）；判据只能用槽位 `img.naturalWidth/naturalHeight`，不能 grep「竖封面缺失」文本（坑 358）** |
 | 完成按钮 | 非标准 role | **`locator('text=完成')` / evaluate**，**不要**依赖 `getByRole('button','完成')` | ⚠️ count 常为 0 |
 | 合集 | listbox | 点击下拉框 → snapshot 找 ref → 精确点击 | ✅ 高 |
 | 自主声明 | 弹窗 | 点击打开 → 选择选项 → 确定 | ✅ 高 |
@@ -5427,7 +5478,7 @@ browser_handle_dialog(accept=true)
 
 **权限已在预授权阶段获得，直接执行。完整实现见 `templates/platform-zhihu.md`。**
 
-**入口**：`https://www.zhihu.com/creator/manage/creation/article` → 点击「立即创作」。
+**入口**：`https://www.zhihu.com/creator/manage/creation/article` → 点击「立即创作」。**🔴 v3.75.0：该按钮可能整个不存在**（1031 实测 `hasCreate: False` 而账号登录正常、侧栏「草稿箱」在）→ 直接 `ctx.new_page(); page.goto('https://zhuanlan.zhihu.com/write')` 即可，编辑器直出（标题 + 正文都在）。**登录判据改为「侧栏有『草稿箱(N)』/『创作主页』且无扫码登录」，「立即创作」缺席只当 UI 变体，不得判未登录停机**（坑 353 同族的假阴性）。
 
 **八步（顺序不可跳）**：① 立即创作 → ② 标题 → ③ 正文（先文本后插图，图必须传到平台） → ④ **正文前插成片视频** → ⑤ 添加封面 → ⑥ 创作声明「包含 AI 辅助创作，作者对内容负责」 → ⑦ 专栏收录「今日羊报 AI」 → ⑧ 保存草稿（等自动保存）。
 
@@ -5443,7 +5494,7 @@ browser_handle_dialog(accept=true)
 
 | 项 | 实测结果 |
 |---|---|
-| 立即创作 | 点击后**新开标签页** `https://zhuanlan.zhihu.com/write`（当前页 URL 不变） |
+| 立即创作 | 点击后**新开标签页** `https://zhuanlan.zhihu.com/write`（当前页 URL 不变）。**🔴 v3.75.0：该按钮可能不存在（1031 实测 `hasCreate: False`）→ 直接 `ctx.new_page()` + `goto('https://zhuanlan.zhihu.com/write')` 等价可用** |
 | 标题 | `textarea[placeholder="请输入标题（最多 100 个字）"]` |
 | 正文 | `div.public-DraftEditor-content`（Draft.js，`innerHTML` 直赋无效）；**合成 `ClipboardEvent` + `DataTransfer` 比真剪贴板更稳**（无需 `grant_permissions`） |
 | 正文块 | `div.public-DraftEditor-content [data-block="true"]`；`VIDEO` / `IMG` / `TXT` 三类靠 `.Editable-video` / `img` 判别 |
@@ -5452,7 +5503,8 @@ browser_handle_dialog(accept=true)
 | 视频落位 | 插在光标块；光标置文档开头 → block 0 自动空文本 + block 1 VIDEO，即**在正文之前**（需求硬要求） |
 | 封面 | `input[type=file][accept=".jpeg, .jpg, .png"]`（class `UploadPicture-input`） |
 | 创作声明 | 在「发布设置」面板：`div.css-be2u3` → `label` 文本==`创作声明` → `button[role=combobox]` → `.Select-option` 文本 `包含 AI 辅助创作 作者对内容负责`；回读须归一化零宽字符，实测得到 `包含AI辅助创作作者对内容负责` |
-| 专栏 | 判据是 `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 **`checked`**，不是页面文本（坑 343）；真值 `「今日羊报 AI」`（半角空格 + 大写 I） |
+| 专栏 | 判据是 `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 **`checked`**，不是页面文本（坑 343）；真值 `「今日羊报 AI」`（半角空格 + 大写 I）。**🔴 v3.75.0 坑 352：判据必须覆盖三级——第 0 级「开关压根没开」（1031 实测默认 `不发布到专栏` checked=true、combo 为 null）、第 1 级「开了但 combo 为空」、第 2 级「combo 选错」。开开关须 `label[for="PublishPanel-columnLabel-1"]` 的 rect 中心 `page.mouse.click`（坑 340）** |
+| 草稿箱验收 | **必须硬 goto `?type=article`**（v3.75.0 坑 353）：点「草稿箱」tab 会落到 `?type=answer`，只列回答草稿 → 标题必然查不到（假阴性）。正解 `page.goto('https://www.zhihu.com/creator/manage/creation/draft?type=article')`。**🔴 坑 365：文章一旦被发布，草稿会从草稿箱消失——验收必须在上传当场做并留存读数；事后回查发现标题不在草稿箱时，先去文章页看有没有 `发布于 <时间>`，再比对正文长度/图数/视频数，才能分清「已发布」与「真丢失」** |
 | 保存草稿 | **没有保存按钮——知乎文章自动保存**；底部出现 `刚刚 · 草稿`，URL 变 `/p/<id>/edit` 即已落库 |
 | 内容来源 | 面板底部提示「发布新闻类的内容需要明确标注信息来源」，建议「添加来源」 |
 | 危险按钮 | `发布`（`Button--pri`）——永不点击 |
@@ -5461,7 +5513,11 @@ browser_handle_dialog(accept=true)
 
 **验收必带的结构性计数**：`videos == 1 && videoPlayable == 'true'` + `IMG` 块数 == 源文图数 + `__IMG__` 残留 == 0 + 全文无字面 `**` + 声明回读 + 专栏 radio checked。任何一步含 `Backspace` 之后都要重数一遍视频/图片，别假设它们还在。
 
-**失败处理**：登录页 → 记 `login_required` 留页给用户；「立即创作」找不到 / 声明选项找不到 / 专栏匹配不到 → **停在该步报告**，不换选择器盲试（连续两次落空即定性）。
+**🔴 v3.75.0 坑 354：`ZHIHU_DRAFT_OK` 只证明四件事，不能当全量验收。** 现脚本的 `ok` 只含 `videos==1 / playable / decl / bodyLen>800 / IMG 数` —— **封面数、专栏两级、字面 `**` 三项全不在内**；1031 专栏断言先崩、手工修好才跑 verify，若没修这一行照样印 OK。修法：三项并入 `ok`，`read_state` 增 `column` 字段。另 `all` 捆绑包**不含 footer**（`if step == 'footer':` 对比相邻的 `if step in ('all','column'):`）→ 坑 341 的 `**` 验收永远不会自动跑，须把它抽进 verify 门禁。
+
+**块数守恒可当免费回归断言**（坑 342 的指纹）：1031 实测 `正文 2532 字 / 32 块 / 占位 6` → `6 IMG / 0 占位` → 加视频后 `34 块 / videos 1 / playable=true`。数量不守恒 = 有块被退格吃掉，比事后看正文长度更早暴露。
+
+**失败处理**：登录页 → 记 `login_required` 留页给用户；声明选项找不到 / 专栏匹配不到 → **停在该步报告**，不换选择器盲试（连续两次落空即定性）。**「立即创作」找不到不算失败**（v3.75.0，见上表，改走 `/write` 直开）。
 
 ### 🟡 B站封面上传不可靠（v1.9.1 新增）
 **问题**：B站隐藏 file input 的 accept 属性不包含图片类型（只有视频格式），且通过封面编辑弹窗上传的图片不一定被应用。
@@ -6695,6 +6751,204 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.75.0（2026-10-31 五平台全量实跑：验收判据自欺的四个新形态 + 两条被推翻的旧解释，坑 348-361）
+
+本期日报 411 帖，成片 29,268,513 B / 8431 帧 / 281.088s / 锚点 0.7785，五平台全部落到「草稿或已确认」状态。真正值得写进 skill 的不是任何选择器，而是**五处判据把成功读成失败、把失败读成成功**。
+
+#### 坑 348：视频号「草稿 vs 已发表」要用操作按钮集判，不能用时间戳或页面文本
+
+两个列表的卡片是**两套完全不同的组件**：
+
+| | 草稿箱 `post/draftListManager` | 已发表 `post/list` |
+|---|---|---|
+| 卡片 class | `post-draft-item` | `post-feed-item` |
+| 时间选择器 | `.post-time .time-label` | `.center-info .time-label` |
+| 操作按钮集 | **仅 `编辑 / 删除`** | `复制视频ID / 视频ID / 了解详情 / 视频链接 / 分享 / 弹幕管理 / 评论管理 / 修改描述和封面 / 可见权限 / 删除` |
+
+**两条判据都失效过的具体方式**：
+
+1. **时间戳互斥是假象**。实测两侧时间戳零重叠，于是「重叠 = 草稿也在发表列表」这条推断看起来很硬。但真相是**选择器不同**：用 `.post-feed-item .time-label` 去抓草稿箱，得到空集——空集与「没有重叠」无法区分。1031 我们就一度据此写出「本期视频号变成已发表事故」的错误结论，实际草稿箱 `(7)` 首条 11:16 就是本期草稿。
+2. **页面文本 / 页签计数也不可靠**。`草稿箱 (7)` 与 `视频 (192)` 只是两个计数，不告诉你哪条在哪边；`已声明原创` 两类卡片都有。
+
+**唯一稳定判据 = 操作按钮集**（两类互斥，且不依赖任何选择器猜谜）：
+
+```js
+const cls = (typeof n.className === 'string') ? n.className : '';
+const isDraft = /post-draft-item/.test(cls);
+const isPost  = /post-feed-item/.test(cls);
+// 或按叶子文本判，跨平台通用：
+const ops = [...card.querySelectorAll('*')].filter(x => !x.children.length)
+              .map(x => (x.textContent || '').trim()).filter(Boolean);
+const published = ops.includes('复制视频ID') && ops.includes('可见权限');
+const draft     = ops.includes('编辑') && !ops.includes('复制视频ID');
+```
+
+**How to apply:** ① 判「草稿落库没有」一律查草稿列表里 `post-draft-item` 的首条；② 判「是不是误发表了」一律查发表列表里 `post-feed-item` 的操作按钮集；③ **不要**用「条目出现在哪个列表」这种单点证据——两个列表都可能因为 SPA 路由、tab 未刷新而给错结果（另见坑 353 知乎同族）；④ 发现已发表条目时，先问用户是否本人手动发的，**不要自己动手删除或改可见性**（1031 实测：10:02 那条就是用户手动发的，已确认保留）。
+
+#### 坑 349：抖音 e2e 的终态复查在已跳走的页面上取值 → 假阴性
+
+1031 第二轮 e2e 全绿到 `readback`：
+
+```
+readback: {"title":"今日羊报AI 10月31日","descLen":364,"tags":[...5个...],
+           "vids":1,"decl":"作者声明：内容为个人观点或见解","missingV":false,"missingDual":false}
+```
+
+紧接着第二次「暂存离开」成功（`save#2 clicked: True`），然后：
+
+```
+final state: {"hasResume": true, "hasZancun": false, "uploadArea": true, "vids": 0}
+readback cover slots: [] rb_covers_ok= False
+DY_E2E_FAILED
+```
+
+页面在暂存成功后**跳回了发布页**（`uploadArea=true`、`vids=0`、封面槽位不存在），而 `rb_covers_ok` 恰好在跳转之后取值。事后只读复核：`hasResume=true`、`resumeSeg="你还有上次未发布的视频，是否继续编辑？"` —— **草稿完好无损，`DY_E2E_FAILED` 是纯假阴性**。
+
+**铁律：最终判定只能引用「在本步页面上已经取到的快照」。** 具体落实为三条：
+
+1. 每一步成功后**立刻**把该步的回读结果存进 `result` 字典，后续只读字典、不再回 DOM；
+2. 任何「暂存/保存/发布」之后的页面可能已经不是原页面，**禁止在跳转后复判前一步产物**；
+3. 若确需终态确认，**重新打开该平台的草稿入口**（抖音 = 发布页看「继续编辑」横幅），而不是在当前页找前一步的 DOM。
+
+#### 坑 350：B站标签「大小写规则每期翻转」是错误模型
+
+1030 期结论是「`Claude` 大写被吞、`claude` 小写才落」，1031 期实测反过来（小写 `deepseek` 三次被吞、大写 `DeepSeek` 一次落 chip），于是 1031 的脚本注释写成了「规则不稳定，两期相反」。**这个因果是错的。**
+
+真模型：**每个 tag 在平台标签库里有各自的固定规范形态**，是 per-tag 稳定属性。
+
+- `claude` → 必须小写（1023 `bili-resume` 与 1030 两期独立验证）
+- `DeepSeek` → 必须大写（1023 首轮 `chips now: [..., 'DeepSeek', ...]` 一次落；1031 小写三次被吞）
+- `OpenAI` → 大写（1031 期同一次运行里，`openai` 小写却首次就落 —— 说明大小写不是「全站统一规则」）
+
+**同屏证据**：B站自己的推荐标签行并列着两种形态 ——
+`推荐标签： | 深度学习 | 人工智能 | 今日羊报AI | AI | 工具 | 前端 | 文件 | 机器学习 | Google | 新闻 | OpenAI | 账户风控 | claude | ai新闻 | Codex | AI日报`
+
+**How to apply:** ① 探测阶段把「推荐标签：」整行抓下来当**规范形态表**（这是最便宜的真源，不需要试错）；② 变体顺序固定为「推荐行原样 → 原样 → 首字母大写 → 全小写」，命中即记进 review-checklist 的 `tag_forms` 字段；③ **禁止把某一期某个 tag 的结论外推到另一个 tag**——1031 的 `deepseek` 小写正是照抄 1030 的 `claude` 小写教训造成的；④ 删掉「规则翻转」这类因果解释，它属于坑 315 同族（一次观测 + 顺理成章的解释 ≠ 已验证因果）。
+
+#### 坑 351：标签断言不许阻断存草稿（SKILL 早就写了，派生模板没同步）
+
+`SKILL.md` 明文规定「断言写成『记录缺了哪个，但不阻断存草稿』… 不要 `assert len(chips) == len(tags)` 让整条链停在存草稿前」，但 `bili_upload_1031.py:205` 照旧 `assert not missing`。后果：`declaration set` 之后直接抛 `AssertionError: tags missing: ['deepseek']`，**简介 → 合集 → 存草稿 → 草稿箱核验四步全部没跑**，必须手工续跑。同款阻断写法在全仓 10 期脚本里都存在。
+
+**分级原则（写进所有平台脚本）**：
+
+| 级别 | 字段 | 失败时 |
+|---|---|---|
+| 阻断 | 标题 / 分区 / 封面 / 简介 / 合集 / 创作声明 / 视频本体 | `assert` 停链 |
+| 记录 | 标签 / 话题（缺一两个不影响内容） | `log` + 写入 checklist 的 `missing_*`，**继续走到存草稿** |
+
+**派生器要连模板一起改**：这条规则的失效不是因为不知道，是因为改的是一期脚本、没改 `data/_video_template_*/`。**下次改模板时把模板一起改，否则每期派生都会复发。**
+
+#### 坑 352：知乎专栏有两级失败，判据要覆盖第 0 级
+
+坑 346 讲的是「开关已勾、专栏选错」。1031 遇到的是**上游形态：开关压根没开**。
+
+```
+AssertionError: 未选中「发布到专栏」: '不发布到专栏'
+DOM: [{"id":"PublishPanel-columnLabel-1","checked":false,"label":"发布到专栏"},
+      {"id":"PublishPanel-columnLabel-0","checked":true, "label":"不发布到专栏"}]
+      combo: null          ← 关态下 combobox 不存在
+```
+
+手工修复路径（本期唯一成功路径）：取 `label[for="PublishPanel-columnLabel-1"]` 的 `getBoundingClientRect()` 中心 → `page.mouse.click(x,y)`（坑 340：Vue radio 的 `.click()` 静默无效）→ 再点开 combobox → 在 `.Select-option` 里按 `innerText.replace(/\s/g,'') === '「今日羊报AI」'` 命中后取 rect 中心点击。
+
+**判据要三分支，不要一句话笼统报错**：
+
+```python
+if not sel['found']:              raise AssertionError('找不到专栏设置区，发布设置可能未展开')
+if sel['checkedLabel'] != '发布到专栏': raise AssertionError(f'第0级失败：开关未开（{sel["checkedLabel"]!r}）')
+if not sel.get('combo'):          raise AssertionError('第1级失败：开关已开但 combo 不存在')
+if want not in norm(sel['combo']): raise AssertionError(f'第2级失败：专栏选错（{sel["combo"]!r}）')
+```
+
+另两个细节：**选项文本带书名号** `「今日羊报AI」`，比较时两边剥 `「」` 与空白；该账号专栏总数只有 2 个，「默认就是目标专栏」不是可依赖假设。此外 `assert re.sub(r'\s','',WANT) in sel['combo']` 在 combo 为 `None` 时会抛 `TypeError`，必须先 `if not sel.get('combo')` 拦。
+
+#### 坑 353：知乎草稿箱验收必须硬 goto `?type=article`，点 tab 会落到 `?type=answer`
+
+点「草稿箱」tab 后 URL 变为 `.../draft?type=answer`，页面上只有回答草稿 → 「正文含本期标题: False」，**看起来像草稿丢了**。硬 goto 后：
+
+```
+https://www.zhihu.com/creator/manage/creation/draft?type=article
+→ 草稿箱(24) 回答草稿20 文章草稿3 想法草稿1
+→ 首条「一个 8KB 文件替掉 207 个工具：上下文成本第一次被算成了具体数字」
+```
+
+**规则：验收一律 `page.goto('https://www.zhihu.com/creator/manage/creation/draft?type=article')`，禁止「点 tab 再 grep」。** 记忆钩子：`?type=answer|article|zvideo` 对应 回答/文章/视频 三类草稿，默认是 `answer`。
+
+#### 坑 354：`ZHIHU_DRAFT_OK` 只证明四件事，不能当全量验收
+
+```python
+ok = (st['videos'] == 1 and st['videoPlayable'] == 'true'
+      and st['decl'] == DECL_WANT and st['bodyLen'] > 800
+      and sum(1 for b in st['blocks'] if b.startswith('IMG|')) == N_IMGS)
+```
+
+缺三项：**封面数 `coverImgs >= 1`**、**专栏两级判据**、**字面 `**` 残留**。1031 专栏断言先崩、手工修好后才跑 verify —— 若没修，这一行照样印 OK。
+
+**修法**：把三项并入 `ok`，`read_state` 增加 `column` 字段采集。文档里 `ZHIHU_DRAFT_OK` 的语义要写成「**只证明视频/声明/正文/图数**」，不能当全量验收（对应 `platform-zhihu.md` §3.12 的九项判据，脚本只覆盖 4 项）。
+
+另：`all` 捆绑包**不含 footer**（`if step == 'footer':` 对比相邻的 `if step in ('all','column'):`），所以坑 341 的「字面 `**` 验收」永远不会自动跑。修法：把 `**` 残留检查从 `step_footer` 抽出来并进 verify 门禁。
+
+#### 坑 355：「未回写 = 未修复」——临时探针里的修复不算修复
+
+1031 全程的修复（知乎专栏坐标点击、B站标签变体、抖音封面槽位限定）**都只活在 heredoc 里的临时 playwright 代码**：`zhihu_upload_1031.py` 的 mtime 仍是 `Oct 30 22:08`，脚本内 `grep mouse.click` 只命中旧有的三行。
+
+**规则**：任何在浏览器里手工验证通过的修复，必须**当场回写对应 `step_*` 函数**，并**立刻单跑该 step 自证**（`python3 zhihu_upload_1031.py column`）。没跑过那一步，就只能写「人工探针验证过」，不能写「策略已实测」。
+
+**为什么重要**：派生器把脚本从上一期复制过去，缺陷会跟着走。1031 的 `bili_continue_1031.py` 就是这样一颗哑雷——tab 匹配用 `endswith('/platform/upload/video/frame')` 不认 query string，而真实编辑页是 `?type=draft&draftId=4056595` → 列表为空 → `[0]` 抛 IndexError；docstring 还写着「前次在分区断言处中止」，而当日日志是 `partition verified: 人工智能`（一次过）。三个派生脚本本期一个都没跑，所以没炸。
+
+**派生后的硬检查（加到派生器 ASSERT 清单）**：① 续跑类脚本的 tab 选择必须是**子串匹配** `'upload/video/frame' in url`，禁止 `endswith`/精确等值；② docstring 里的「前次失败原因」必须是模板占位，不许把上期叙述照抄进来——这属于坑 241 的**注释层残留**，比代码残留更隐蔽，`py_compile` 查不出。
+
+#### 坑 356：轮询命令的退出码不是被监视脚本的退出码
+
+`Exit code 1` 与成功正文同时出现：
+
+```
+[bili-resume] chips before desc: [...6 个...]
+BILI_RESULT: {"saved_url": true, "title_in_draftbox": true}
+```
+
+原因在轮询命令本身：`tail -12 log; ps -p 63224 -o etime=` —— 进程已退出，`ps -p` 返回 1，整条命令于是 exit 1。后台任务文件的真实结论是 `[exited with code 0]`。
+
+**规则**：判后端脚本成败只认两处 —— ① 脚本自己打印的 `*_RESULT:` 行；② 后台任务 output 文件末行的 `[exited with code N]`。**轮询/监视命令的退出码不参与判定**。写监视命令时不要把 `ps -p` 放在最后一条，改成 `ps -p X >/dev/null || echo GONE`。
+
+#### 坑 357：`gen_publish_*.py` 依赖 PIL，禁用 `python3 -I`
+
+`python3 -I gen_publish_1031.py` → `ModuleNotFoundError: No module named 'PIL'`（`-I` 丢弃 user site-packages）。与 `gen_scenes_api` 同族。**所有需要 PIL 的脚本一律 `python3` 不带 `-I`；`-I` 只用于运行「不可信输入」的处理脚本。**
+
+#### 坑 358：抖音封面判据必须用槽位 `img` 尺寸，文本「竖封面缺失」是假阴性
+
+首轮用 `s['missingV']`（页面文本含「竖封面缺失」）判，得到 `covers missing: True,False` → 中止；但日志同一时刻显示 `Ai智能推荐封面生成中...` —— **AI 推荐封面生成期间该文案会瞬时为真**，与「用户没上传竖封面」无法区分。
+
+真判据（槽位实图尺寸）：
+
+```js
+Array.from(document.querySelectorAll('.coverControl-CjlzqC')).map(s => {
+  const im = s.querySelector('img');
+  return im ? {nw: im.naturalWidth, nh: im.naturalHeight} : null;
+});
+// 横封面 nw>=300；竖封面 nw>=300 且 nh > nw
+```
+
+1031 实测 `[{'nw':1536,'nh':1151},{'nw':1006,'nh':1343}]` —— 横 4:3、竖 3:4，一次判对。
+
+#### 坑 359：抖音「编辑封面」叶子搜索必须限定在竖槽位 rect 内
+
+全局搜 `textContent === '编辑封面'` 会命中**横向槽位**的浮层（1031 首轮得到 `{'x': 528, 'y': 202}`，那是横槽位），打开错误弹窗，上传后仍判「竖封面缺失」。**必须**先在竖槽位 `page.locator('.coverControl-CjlzqC').nth(1)` 上 `hover`，再在回调里用槽位 `bounding_box()` 做 `inSlot` 矩形过滤（1031 修正后得到 `{'x': 661, 'y': 202}`）。
+
+#### 坑 360：抖音竖封面弹窗的 `.semi-slider-handle` 必须拖到最小档
+
+点击与方向键都无效，只有 `mouse.move → down → 分 12 步 move → up` 生效。1031 实测 `slider dragged: 778.5 -> {'handle': 775, 'rail': 779}`。不拖最小档，3:4 海报两端的字会被裁掉，平台判「封面存在文字展示不全问题」。
+
+#### 坑 361：抖音 e2e 要把易失步骤放在暂存**之后**迭代
+
+1031 首轮在**暂存之前**因封面断言失败中止 —— 好处是零残留草稿（验证过 `hasResume: false`、内容管理页无本期条目），坏处是白跑 15 分钟（29MB 上传 + 元信息 + 封面全废）。**迭代封面这类易失步骤时，先把草稿暂存下来，再在恢复的草稿页上反复调封面**；草稿是迭代的存档点，不是最后一步。
+
+#### 坑 365：草稿一旦被发布就从草稿箱消失——验收必须当场做
+
+1031 知乎上传当场：`文章草稿 2→3`，首条即本期标题，`ZHIHU_DRAFT_OK`。同日下午回查：`草稿箱(23) 回答草稿20 文章草稿2` —— **本期标题不在草稿箱**；而文章页显示 `发布于 2026-10-31 09:53・广东`、正文 2679 字、视频 1、图 7。经向用户确认是**本人手动发布**（脚本内 `grep 发布` 只命中「发布设置」「发布到专栏」，无提交动作）。
+
+**规则**：① 草稿验收必须在**上传当场**完成并留存读数——事后回查的「查不到」不能反推「当时没存上」；② 回查发现标题不在草稿箱时，**先去文章页看有没有 `发布于 <时间>`**，再比对正文长度/图数/视频数，才能分清「已发布」和「真丢失」；③ 汇报如实写「上传当时为草稿，之后用户手动发布」，不要含糊成「草稿状态正常」。视频号同族（1031 也有用户手动发表条目），判别方法见坑 348 的操作按钮集。
 
 ### v3.74.0（2026-10-30 知乎二次实跑：raw CDP 全链 + 专栏默认值陷阱，坑 344-347）
 
