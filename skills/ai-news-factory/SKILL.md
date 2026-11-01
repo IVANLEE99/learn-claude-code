@@ -1,12 +1,26 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.76.0
+version: 3.77.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.76.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.77.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.77.0 核心改进（2026-11-01 1101 日报实跑：**playwright 挂起的真根因找到了**，坑 373-382）**
+>
+> 本期最大的收获是一条**推翻了 v3.65.0 结论**的根因：`connect_over_cdp` 挂在 `ws connected` 之后，**不是**「daemon 时段性抖动，等 40 分钟自愈」——是**浏览器里有 renderer 已冻结的标签页，playwright 在 attach-all 阶段卡死在它们身上**。这个误判让我在本期空转约 7 小时（坑 373）。
+>
+> ① **playwright 挂起 = 存在冻结 target，不是等它自愈**（坑 373）。诊断：用 raw `websockets`（`proxy=None` + 清 `http_proxy` 环境变量）逐个 page target 发 `Runtime.evaluate` ping，**超时的就是冻结页**；证据形态是「16 个 page 里 8 个 ping 超时」。修法：对冻结 target 发 **browser 进程级 `Page.navigate` 到 `about:blank`**（不关标签、不丢用户数据，不受权限阻拦），立即恢复。**禁止**再按旧的「等 40 分钟」或「切 raw CDP 重写整条链」处理。
+> ② **月末派生必须用显式日期映射表**（坑 374）。108 期的「日号 +1」批量替换在月末会产出 `2026-10-32` 这种非法日期。
+> ③ **`# 标题` 前缀会污染知乎标题框**（坑 375）。稿件首行是 Markdown 一级标题，`load_title` 与 `build_html` **两处**都要 `lstrip('#')`，否则标题框里是 `# Claude 风控...`，且两处不一致会触发 `TITLE == title_md` 断言。
+> ④ **知乎稿件派生必须插图片标记**（坑 376）。不插 `![场景i](wechat-images/scenei.jpg)` 就 `imgs=0`，正文一张图都没有，而 verify 不会报错。
+> ⑤ **大视频在知乎上传会「看起来成功、实际不落块」**（坑 377）。33.9MB 两轮上传，`Editable-video` 中途出现过 2 个块又全部消失。**上传后必须刷新页面再数一次**，只有刷新后仍在的块才算数。
+> ⑥ **公众号新版编辑器（`appmsg_edit_v2&isNew=1`）剪贴板粘贴失效**（坑 378）。`navigator.clipboard.write` 不报错但 `bodyLen=0`；改用 **DOM 合成 `ClipboardEvent('paste')` + `DataTransfer`** 注入。
+> ⑦ **多编辑页并存会毒化 verify**（坑 379）。页面上堆了 4 个 `appmsg_edit` 标签后，`verify` 抓到空壳页 → bodyLen 0 假红 / 或抓到别人的稿假绿。**开新稿前先关掉本平台所有编辑页**。
+> ⑧ **公众号合集选择器要绕路**（坑 380）：`input[placeholder="请选择合集"]` 点了超时；可靠路径是「点 `.js_article_tags_content` → 点「未添加」→ 输入 → 点 `.select-opt-li` 精确匹配 → 点 `.weui-desktop-btn_primary` 确认」。
+> ⑨ **save 之前禁止任何 goto 型 verify**（坑 381）。视频号首轮失败后我在未保存的 create 页跑 verify（它 goto 草稿箱），把未保存的表单直接弄丢。这是「核验动作本身有破坏性」的第 4 例。
 
 > **🔴 v3.76.0 核心改进（2026-10-31/11-01 月报 + 1101 日报连续实跑：**跨流水线抢标签**把稿子写错，坑 366-372）**
 >
@@ -133,12 +147,56 @@ version: 3.76.0
 4. **beforeunload**：从编辑页离开时弹「将此次编辑保留？」→ 先 `browser_handle_dialog(accept=true)` 或脚本内点「保存/不保存」，否则 `net::ERR_ABORTED`。
 5. 独立脚本结束若用户要核对 UI，可**不** `context.close()`，改为提示用户手动关窗（用户明确要求「不要关太快」时）。
 
-### 🔴 浏览器驱动选择铁律（v3.65.0，坑 306）
+### 🔴 浏览器驱动选择铁律（v3.77.0 重写，坑 306 / 坑 373）
+
+> **⚠️ v3.77.0：本节旧结论「等 40 分钟自愈 / 立刻切 raw CDP 重写整条链」已被 1101 实测推翻。**
+> 真根因是**冻结 target**，可当场修复；不要再空等，也不要为了绕过它把整条上传链改写成 raw CDP。
 
 **判定顺序固定，不许跳步**：
 1. `curl -s http://127.0.0.1:9222/json/version` —— HTTP 端点不通 ⇒ daemon 死了，报告用户，不要自己重开带登录态的窗口。
-2. `curl -s http://127.0.0.1:9222/json | jq length` —— 能列出 target ⇒ **Chrome 侧完全健康**，问题一定在 playwright。
-3. 此时 `connect_over_cdp` 若在 `ws connected` 之后超时（25s / 90s 都一样），**立刻切 raw CDP，禁止再做以下三件事**：加大 timeout、重启 Chrome、`pkill` 任何进程。
+2. `curl -s http://127.0.0.1:9222/json | jq length` —— 能列出 target ⇒ **Chrome 侧健康**，问题在 playwright。
+3. **🔴 先做冻结扫描，再决定驱动**（坑 373，这一步是 v3.77.0 新增且必做）：
+
+```python
+# 用 raw websockets 逐个 page target ping；proxy=None + 清 http_proxy 环境变量
+import asyncio, json, urllib.request
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # 绕开系统代理
+
+async def scan_and_revive():
+    import websockets
+    tabs = json.load(opener.open('http://127.0.0.1:9222/json/list'))
+    dead = []
+    for t in tabs:
+        if t.get('type') != 'page':
+            continue
+        try:
+            async with websockets.connect(t['webSocketDebuggerUrl'].replace('localhost', '127.0.0.1'),
+                                          max_size=1024*1024, proxy=None, open_timeout=4) as w:
+                await w.send(json.dumps({'id': 1, 'method': 'Runtime.evaluate',
+                                         'params': {'expression': '1', 'returnByValue': True}}))
+                await asyncio.wait_for(w.recv(), timeout=3)
+        except Exception:
+            dead.append(t)                       # ← ping 超时 = renderer 已冻结
+    print(f'pages={len(tabs)} dead={len(dead)}')
+    # 修复：browser 进程级导航到 about:blank。不关标签、不丢数据、不需要额外权限。
+    for t in dead:
+        try:
+            async with websockets.connect(t['webSocketDebuggerUrl'].replace('localhost', '127.0.0.1'),
+                                          max_size=1024*1024, proxy=None, open_timeout=5) as w:
+                await w.send(json.dumps({'id': 1, 'method': 'Page.navigate',
+                                         'params': {'url': 'about:blank'}}))
+                await asyncio.wait_for(w.recv(), timeout=6)
+        except Exception:
+            pass
+    print(f'revived {len(dead)}')
+```
+
+4. 修复后**立刻重试 `connect_over_cdp`**。1101 实测：7~8 个冻结 target 导走后，playwright 秒级恢复，公众号/知乎全链正常。
+5. 只有**冻结 target 一个都没有、playwright 仍挂**时，才考虑 raw CDP 兜底（此时成本才值得）。
+
+**禁止的三件事**（无论哪条分支）：加大 timeout、重启 Chrome、`pkill` 任何进程。
+
+**为什么「关闭标签页」不是首选修法**：`Target.closeTarget` / `page.close()` 属破坏性操作，会被权限闸门拦下（1101 实测被拒两次），且可能丢用户未保存的数据。`Page.navigate → about:blank` 在效果上等价（renderer 被重新唤醒），但**不算关闭**，是唯一能自动执行的安全修法。
 
 **raw CDP 最小可用骨架**（复制 `templates/cdp_helper.py` 到本次工作目录再 import，勿手搓）：
 ```python
@@ -6916,6 +6974,143 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **另补两条**：① 知乎「创作声明」控件定位 —— 页面有多个 `[role=combobox]`（投稿至问题 / 创作声明 / 文章话题），按「第一个」取会拿到「投稿至问题」导致选项恒空；必须沿 combobox 向上 ≤4 层找 innerText 以 `创作声明` 开头的那一行；`div.css-be2u3` 本期页面上有 6 个，不可作定位锚点。② 步骤式上传脚本**单步模式下不得关闭标签**（坑 330 补）——`finally` 里只有 `STEP == 'all' and not keep` 才关，否则一步跑完就把已上传的 25 MB 丢掉。
 
 **本期正例**：月报 11,451 主题 / 31 天全覆盖 / PDF 7 页；成片 195.52 s / 25,161,505 B；公众号 `MP_VERIFY_OK`（正文 1391 字 / 9 图 / 封面 / 合集「羊报AI月报」/ 字面 `**` 0）；知乎文章 `2100303881762874483` 刷新后 13 项过 12 项（唯一未过项为坑 370）。
+
+### v3.77.0（2026-11-01 1101 日报实跑：playwright 挂起的真根因 + 月末派生 + 公众号/知乎六坑，坑 373-382）
+
+本期日报 287 帖（296 抓 / 0 err），成片 297.38 s / 33,881,176 B / 1920×1080，锚点 0.7856，8 场景。用户中途指令收敛为「只做公众号 + 知乎」。真正值钱的是**一条推翻旧结论的根因**和**六个会让「看起来成功」骗过验收的新形态**。
+
+#### 坑 373：playwright `connect_over_cdp` 挂起 = 有冻结 target，不是「等自愈」
+
+**旧结论（v3.65.0 坑 306）错在哪**：把「挂在 `ws connected` 之后」判成 daemon 时段性抖动，处置是「等 40 分钟」或「立刻切 raw CDP」。1101 实测：从 04:53 挂到 11:33（**6 小时 40 分**），一次也没自愈；同期 raw `websockets` 库连同一个 browser 端点**收发完全正常**。
+
+**真根因**：daemon 里有若干个 **renderer 已冻结的 page target**。playwright 的 `connect_over_cdp` 要为每个 target 建立投影/注入初始化脚本，**逐个 attach 时卡死在冻结的那个上**，于是整体超时。冻结页的来源是历史操作残留（长页面 wujie、通知页、被系统节流到不响应的标签）。
+
+**诊断与修复代码**见「🔴 浏览器驱动选择铁律」第 3 步。判据一句话：**`/json/list` 里 page 数 − 能 ping 通的 page 数 > 0 ⇒ 就是它**。
+
+**1101 实测数据**：首次扫描 16 个 page / 8 个 dead；第二次（用户手动操作后）10 / 7；两次都是**一次性 `Page.navigate → about:blank` 全部导走后 playwright 立刻恢复**。
+
+**How to apply**：任何 `connect_over_cdp` 超时，**第一步跑冻结扫描**，不要加大 timeout、不要重启 Chrome、不要先想着重写 raw 链。扫描脚本见 `templates/revive_frozen_tabs.py`（`--scan` 只诊断，无参=诊断+修复+校验；退出码 0 正常 / 2 daemon 不通 / 3 修复后仍挂）。
+
+**写这类脚本时的坑（我踩过）**：`sync_playwright` 的校验**必须跑在 asyncio 事件循环之外**。整个 `main()` 是 `async`，直接在协程里调 `sync_playwright().connect_over_cdp()` 会抛 `It looks like you are using Playwright Sync API inside the asyncio loop`，被 `except Exception` 一吃就变成「playwright 仍挂」的**假阴性**（脚本报 exit 3，隔离测试却是好的）。正解 `await loop.run_in_executor(None, _verify_playwright)`。另外 `except` 里要**分类型打印**（超时 / 其他异常），否则假阴性没有指纹。同理，timeout 要随 page 数放大（默认 60s，25 个标签页 attach-all 明显变慢）。
+
+#### 坑 374：月末派生必须用显式日期映射表，不能用「日号 +1」
+
+1101 的上一期是 **10-31**，派生器（1031 版）用 `for d in range(HI, LO-1, -1): replace(f'2026-10-{d}', f'2026-10-{d+1}')` 批量后移一天，在月末直接生成 **`2026-10-32`** 这种非法日期，且 `2026-10-31 → 2026-11-01` 的跨月转换根本没有规则命中。
+
+**How to apply**：派生器检测到 `DATE.month != PREV.month` 时，改用**显式映射表**（全部降序，str.replace 顺序执行只扫一遍）：
+
+```python
+FORMS = [
+    ('2026-10-31', '2026-11-01'), ('10月31日', '11月1日'),
+    ('2026, 10, 31,', '2026, 11, 1,'), ('__wx1031', '__wx1101'),
+    ('_1031', '_1101'), ('1031', '1101'),
+    # 上期链 / 历史滑动窗口各自后移一天
+]
+```
+**裸数字白名单**：只推期号（1031→1101、1030→1031），**绝不**碰 `1024`（生图尺寸）、`1000`（毫秒）、`1080`（分辨率）——1101 实测这三个串在模板里各出现 23/多次，全量替换会直接毁掉生图请求和字幕时间轴。派生后加断言：`1025x1536`、`1536x1031` 这类污染串必须为零。
+
+#### 坑 375：`# 标题` 前缀会污染知乎标题框（两处都要去）
+
+知乎稿件首行是 Markdown 一级标题 `# Claude 风控的反常识样本、…`。`load_title()` 原样返回，标题框里就出现 `# Claude…`（实测 48 字，多出 `# ` 两个字符）。
+
+更隐蔽的是 **`build_html()` 也用同一行做 `title_md`**，改了一处不改另一处，会立刻炸 `assert TITLE == title_md`——而报错位置在 `main()` 里，看起来像是「稿件有问题」。
+
+**How to apply**：`load_title` 与 `build_html` **两处都要** `if title.startswith('#'): title = title.lstrip('#').strip()`。派生模板时把这两行一起带过去。
+
+#### 坑 376：知乎稿派生必须插图片标记，否则正文一张图都没有
+
+从公众号文章派生知乎稿时，我只搬了文字和小标题，漏掉 `![...](...)`。脚本 `build_html` 数下来 `imgs=0`，`step_images` 输出 `0 IMG blocks, placeholders left=0` —— **断言全过、零报错，稿子里就是没图**。
+
+**How to apply**：派生后立刻断言 `md.count('![') == 预期图数`。补图的正解是**在每个 `## ` 小节之后插** `![场景{i}](wechat-images/scene{i}.jpg)`，插完重跑 `body` 步（会重贴带占位符的正文），再 `images` 步逐个替换。
+
+#### 坑 377：大视频在知乎上传「看起来成功、实际不落块」
+
+33.9 MB / 297 s 的成片：`set_input_files` 返回成功，等待窗口里 `Editable-video` **短暂出现过 2 个**，随后全部消失，`videos=0`。两轮上传（第一轮等了约 13 分钟）都是一样结果。同期 25 MB / 196 s 的月报视频是可以的。
+
+**How to apply**：
+1. 上传后**刷新页面再数一次** —— 只在刷新后仍存在的 `.Editable-video` 才算数（对应「刷新核验才是真落库」的老规矩）。
+2. `videos` 超过 1 时**不要立刻去重**：1101 实测 `videos: 2` 是「还在转码」的中间态，几秒后自己变 0。去重前先等至少 60 s 并连续两次回读稳定。
+3. 若刷新后仍为 0，判定「该平台当前不接受这个体积」；**征询用户**后按「无视频存草稿」收尾，并在验收里写明视频缺失，不要为了凑 `videos==1` 无限重试烧时间。
+
+#### 坑 378：公众号新版编辑器剪贴板粘贴静默失败
+
+`appmsg_edit_v2&action=edit&isNew=1`（点「新的创作」后新开的编辑器）上，旧有的 `navigator.clipboard.write([new ClipboardItem(...)])` + `keyboard.press('Meta+V')` 路径**不报错但正文为 0**（`bodyLen=0` → `body paste failed bodyLen=0`）。同一脚本在旧版 `appmsg_edit` 页上是好的。
+
+**How to apply**：粘贴失败（`bodyLen` 仍 < 800）时，改用 **DOM 合成 paste 事件 + DataTransfer** 直接投进正文 ProseMirror：
+
+```javascript
+(html) => {
+  const pm = document.querySelectorAll('.ProseMirror')[1];   // [0]=标题, [1]=正文
+  pm.focus();
+  const dt = new DataTransfer();
+  dt.setData('text/html', html);
+  dt.setData('text/plain', html.replace(/<[^>]+>/g, ' '));
+  pm.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true}));
+}
+```
+1101 实测：一次注入 2424 字 + 8 个图片占位符，全部就位。**注意**：正文非空时合成 paste 是「追加」不是「替换」（老坑），所以注入前先 `Meta+A` + `Backspace` 清空。
+
+#### 坑 379：同平台多编辑页并存会毒化 verify
+
+一次失败后重跑 `open`，页面上堆成 3~4 个编辑器：`appmsg_edit ×2` + `appmsg_edit_v2&isNew=1`（空壳）。`verify` 按 `appmsg_edit in url` 取**第一个**，抓到空壳页 → `bodyLen: 0`、`appmsgid: false` → 假红；反过来若抓到上一个草稿，则会拿别人的内容打 OK（**假绿**）。
+
+**How to apply**：
+1. 每个平台开工前**先关掉本平台所有编辑页**（`page.close()` 允许，是本次运行自己开的），再 `open` 新开。
+2. 选编辑页时按**内容指纹**选：`/edit` 且 `ProseMirror[1].innerText.length > 800` 且 `#title` 非空，而不是取第一个。
+3. 用户说「重头开始，新开 tab」时，**照做**——先关闭、再新开，不要在旧页上修补。
+
+#### 坑 380：公众号合集选择器的可靠路径
+
+`input[placeholder="请选择合集"]` 在页面上常驻，但 `locator.click(timeout=10000)` 稳定超时（元素在但不可交互）。合集因此一直没挂上，`MP_VERIFY` 里 `collection: false`。
+
+**How to apply**（1101 唯一成功路径）：
+
+```python
+# ① 点合集字段控件
+page.evaluate("() => { const t = document.querySelector('.js_article_tags_content'); if (t) t.click(); }")
+page.wait_for_timeout(1200)
+# ② 若显示「未添加」，先点它
+page.evaluate("""() => { const els=[...document.querySelectorAll('*')].filter(e=>e.offsetParent);
+  const u=els.find(e=>(e.textContent||'').trim()==='未添加'); if(u) u.click(); }""")
+page.wait_for_timeout(1000)
+# ③ 输入 + 点候选项（文本带「」书名号，比对时剥掉）
+inp = page.locator('input[placeholder="请选择合集"]').first
+inp.click(timeout=8000); inp.fill('今日羊报')
+page.wait_for_timeout(2600)
+page.evaluate("""() => { const o=[...document.querySelectorAll('.select-opt-li')].filter(e=>e.offsetParent);
+  const t=o.find(e=>(e.innerText||'').trim().replace(/「|」/g,'')==='今日羊报 AI');
+  if(t) t.click(); }""")
+# ④ 点主按钮「确认」（原始/赞赏弹窗也有「确认」，必须用 primary class 限定）
+page.evaluate("""() => { const bs=[...document.querySelectorAll('.weui-desktop-btn_primary')]
+  .filter(e=>e.offsetParent && /^确认$/.test((e.innerText||'').trim()));
+  if(bs.length) bs[0].click(); }""")
+```
+回读判据：`.js_article_tags_content` 的文本 == `「今日羊报 AI」`。**设完必须再 save 一次**，合集变更不会自动落库。
+
+**踩过的坑**：一次误选成「羊报AI月报」（候选列表里几个名字很像），回读才发现。所以第 ③ 步的比对**必须整串相等**，不能用 `in`。
+
+#### 坑 381：save 之前禁止任何 goto 型 verify（核验有破坏性，第 4 例）
+
+视频号首轮在封面弹窗上失败（`element-gone`），编辑页里视频/描述都填好了但**还没保存**。我为了看状态跑了 `verify`——它是 `goto(draftListManager)` 的——直接把未保存的 create 页导走，草稿内容全部丢失。
+
+同族前三例：抖音「核验点一次即毁稿」、公众号「重跑 body 不清图」、1028「测防护本身执行了真实动作」。
+
+**How to apply**：
+- 任何 goto 型 verify 的执行条件必须是「**本步已保存**」。
+- 想看未保存页面的状态，只用 `evaluate` 读 DOM，**不要导航**。
+- 步骤式脚本里给 verify 加前置断言：`assert saved_or_idle, '未保存时禁止 goto 型核验'`。
+
+#### 坑 382：知乎专栏下拉只认坐标点击；radio 与 combo 要分两步走
+
+`step_column` 里点 radio 之后直接读 combo，拿到的是**上次用过的专栏**（1101 是「羊报AI周刊」）。点 combobox 打开下拉时，DOM `element.click()` 时灵时不灵（有时下拉根本没开、`options` 为空），而 **Playwright 真实点击（`locator.click(force=True)`）稳定打开**。
+
+**How to apply**：
+1. 先点 radio「发布到专栏」（Vue 只认坐标或 label 点击）。
+2. 再**单独一步**用真实点击打开 combobox：`page.locator('.ColumnSetting-ColumnSelector button[role=combobox]').click(force=True)`。
+3. 候选项文本带 `「」`，比对前剥引号：`text.replace(/[\s​「」]/g, '') == '今日羊报AI'`。
+4. 选中后回读 combo 文本 + radio `checked` **双证**，任一不符即失败。
+
+**本期正例**：daily 287 帖；报告 29,261 B / press 11,270 B / PDF 420,676 B（54 required / 47 forbidden）；成片 297.38 s / 33,881,176 B，锚点 0.7856，块边界 Δ≤113 ms；公众号 `MP_VERIFY_OK`（正文 2284 字 / 占位符 0 / 封面 qpic / 合集「今日羊报 AI」）；知乎 `/p/2100325021763761235/edit`（正文 5794 字 / 7 图 / 声明 / 专栏双证；**视频 0，已征得用户同意**）。
 
 ### v3.75.0（2026-10-31 五平台全量实跑：验收判据自欺的四个新形态 + 两条被推翻的旧解释，坑 348-361）
 
