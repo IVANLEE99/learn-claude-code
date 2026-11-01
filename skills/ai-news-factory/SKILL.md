@@ -1,12 +1,24 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.75.0
+version: 3.76.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.75.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.76.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.76.0 核心改进（2026-10-31/11-01 月报 + 1101 日报连续实跑：**跨流水线抢标签**把稿子写错，坑 366-372）**
+>
+> 本期最贵的一条，不是选择器失效，而是**两条流水线互相抢同一个浏览器标签，导致整篇月报写进了日更稿**。按危害排序：
+>
+> ① **`/tmp/<platform>-<date>-tab.txt` 跨期共享 = 双向串稿**（坑 366）。坑 330 引入「失败保留标签 + 附着复用」时没说清：**下一期脚本会捡走上一期留下的标签**。`zhihu_upload_1101.py` 用 `ctx.pages` 里第一个 `zhuanlan.zhihu.com/*/edit` 定位自己 → 捡走了月报脚本留下的那个 → 月报的标题/正文/8 图/视频/封面/声明/专栏全部写进日更稿，而月报本身**从未存在**；反向也发生过（日更标题被写进月报文章）。**铁律：任何写平台的脚本，第一步必须做「我是谁」断言 —— URL 含本期文章 id/episode 标记，且标题 == `publish.json` 里的值，不符立即 abort。** 标签复用文件必须带期间标识（`/tmp/zhihu-<DATE>-tab.txt`），且**存的是「内容指纹」而不是裸 tab id**。
+> ② **「写进去 = 已保存」在知乎上传控件上不成立，而且不是永远不成立，是「延迟成立」**（坑 367）。`DOM.setFileInputFiles` 对知乎 `display:none` 的 file input 返回成功但 `input.files.length` 恒为 0（ASCII 路径、复位面板、真实鼠标点击、「导入视频」弹窗四条路全试过）；改用 Playwright `locator.set_input_files()` 一次成功 —— **同一台机器同一个 CDP，两条注入链的结论相反**。更要命的是：视频卡片**延迟出现**，我在等待窗口里反复重试，最终累积出 **5 个** 视频块。
+> ③ **`img` 计数必须按来源分类**（坑 368）。知乎正文配图 `src` 带 `draft_token=<文章id>`，而 `naturalWidth === 1920` 的是**视频封面缩略图**。用 `naturalWidth` 数图会把 9 数成「8 图 + 1 多余」，用 `draft_token` 才是准的。
+> ④ **「制造一次编辑来触发自动保存」是有破坏性的动作**（坑 369）。我用 `selectNodeContents(末块) + execCommand('delete')` 触发保存，结果 Draft.js 把**视频原子块和结尾段前半句一起删了**，且自动保存已把破坏写进草稿。安全做法：标题末尾加/删零宽字符。
+> ⑤ **知乎「创作声明」不随草稿持久化**（坑 370），与坑 318 视频号「视频标注」同族 —— 只在发布时提交。验收里**不能**把它标 PASS，正确说法是「已在编辑器选中，发布前需再设一次」。
+> ⑥ **`ZHIHU_DRAFT_OK` 类门禁必须含「我是谁」**（坑 371）：把身份断言当作第 0 项，否则在别人的稿子上跑出来的 13 项检查会全部「看起来像那么回事」。
+> ⑦ 另固化两条：**公众号标题区是第 0 个 ProseMirror，`el.click()` 不送焦点**（坑 372，`Input.insertText` 被静默丢弃 → `#title` 恒空）；**步骤式上传脚本在单步模式下不得关闭标签**（坑 330 补）。
 
 > **🔴 v3.75.0 核心改进（2026-10-31 五平台全量实跑：**验收判据自己骗自己**的四个新形态 + 两条被推翻的旧解释，坑 348-361、365）**
 >
@@ -144,6 +156,33 @@ ws = await websockets.connect(target['webSocketDebuggerUrl'],
 先 `DOM.enable`，且 shadowRoot 内的 input 必须先 `Array.from(shadowRoot.querySelectorAll(...))`
 拿到数组 objectId，再用 `Runtime.getProperties` 按下标取 node objectId（直接 `querySelector` 会拿到 null）。
 
+#### 🔴 v3.76.0 重要修正：文件上传**不要**在 raw CDP 上死磕，先试 Playwright（坑 367）
+
+上面那条「文件上传走 `DOM.setFileInputFiles`」在本机对**部分站点无效**：知乎的
+`input.VideoUploadButton-fileInput` 与 `input.UploadPicture-input` 都是 `display:none`，
+CDP 调用返回 `{}`（看起来成功）但 `input.files.length` **恒为 0**，`/json` 里也一直是 `files: 0`。
+本期在它上面连续试错四轮全部失败（详见下方「四轮失败清单」）。
+
+**判据与顺序**：
+1. 先跑一次 Playwright 连通性探针：`connect_over_cdp('http://localhost:9222')` 若能在秒级返回，
+   **文件上传一律用 Playwright `locator.set_input_files()`** —— 它与 raw CDP 走**不同的注入链**，
+   在同一个 daemon 上、同一台机器上，结论可以完全相反。
+2. 只有在 Playwright 整体挂起（坑 306）时，才退回 raw CDP，并且**上传后必须回读 `input.files.length`**：
+   `0` 即刻判失败并停手，不要用「等卡片出现」去掩盖它。
+3. **两种驱动可以在同一会话里分工**：raw CDP 做 DOM 探测（快、无 `locator` 语义），
+   Playwright 只做 `set_input_files` —— 本期月报最终就是这么跑通的。
+
+**四轮失败清单（照抄可省两小时）**：
+
+| 尝试 | 结果 |
+|---|---|
+| `DOM.setFileInputFiles` + 中文/带 `【】\|` 的原始路径 | `files: 0` |
+| 同上 + 复制到纯 ASCII 路径 `/tmp/zh-monthly-2026-10.mp4` | `files: 0`（**排除路径编码**） |
+| 面板可能处于「已开」状态 → 先复位再点（`input` 数量回到 0 再重新挂载） | `files: 0` |
+| DOM `button.click()` vs 真实 `Input.dispatchMouseEvent` 坐标点击 | 前者挂载 input、后者反而销毁面板 |
+| 点「导入视频」开 Modal 弹窗，再用弹窗内的 `input` | Modal 里命中的仍是同一个 `display:none` input，`files: 0` |
+| **Playwright `locator.set_input_files()`** | ✅ 一次成功，约 40 s 出可播放卡片 |
+
 ### 🔴 标题与正文是两个独立编辑区（v3.65.0，坑 307）
 
 公众号编辑器有**两个 `.ProseMirror`**：`[0]` 是标题、`[1]` 是正文，另有一个隐藏的 `#title` 输入框同步标题。
@@ -156,6 +195,25 @@ ws = await websockets.connect(target['webSocketDebuggerUrl'],
 2. 写正文：**重新**点 `.ProseMirror[1]` → 断言 `activeElement` 是它 → 再 `Meta+A` + 粘贴/`execCommand('insertHTML')`；
 3. 每次替换正文后立刻回读 `bodyLen` **和** 首个正文段落的前 20 字，两者都对才算写成；
 4. 正文被覆盖只能「全选删除 → 重新插入整段 HTML」，**不要增量修补**。
+
+> **🔴 v3.76.0 坑 372：`el.click()` 不会把焦点送进 ProseMirror —— 必须用 `.focus()`。**
+> 月报公众号上传实测：`document.querySelectorAll('.ProseMirror')[0].click()` 之后
+> `document.activeElement` 仍然是 `body`，随后 `Input.insertText` 被**静默丢弃**，
+> 隐藏的 `textarea#title` 恒为空，表现为 `AssertionError: title not synced: ''`。
+> 正解：
+> ```python
+> foc = await ed.eval('''(() => { const p = document.querySelectorAll('.ProseMirror')[0];
+>     if (!p) return null; p.focus(); return {focused: document.activeElement === p}; })()''')
+> assert foc and foc['focused'], f'title ProseMirror not focusable: {foc}'
+> await ed.eval('''(() => { const p = document.querySelectorAll('.ProseMirror')[0];
+>     const s = window.getSelection(); const r = document.createRange();
+>     r.selectNodeContents(p); s.removeAllRanges(); s.addRange(r); return true; })()''')
+> await ed.send('Input.insertText', {'text': TITLE})
+> # 双回读：隐藏 textarea 的 value + ProseMirror 的 textContent
+> assert ed.eval('#title 的 value') == TITLE
+> assert ed.eval("ProseMirror[0] 的 textContent") == TITLE
+> ```
+> 同理适用于所有「先点进去再 `Input.insertText`」的编辑器：**点击≠聚焦**，判据是 `document.activeElement`。
 
 ### 🔴 「保存草稿」的成功判据只能是落库（v3.65.0，坑 308）
 
@@ -4032,6 +4090,46 @@ async def main():
 
 **本期收益**：封面确认按钮一开始点错位置（弹窗其实没开），修好后只重跑封面那一步，没有重传视频。
 
+#### 🔴🔴 v3.76.0 补丁：附着复用是**双向**的，会跨流水线抢稿（坑 366）
+
+上面这套骨架有一个当时没写下来的前提：**它是给「同一期的多次重跑」设计的，不是给「不同期脚本共存」设计的。**
+
+2026-10-31→11-01 实跑，同一个 `/tmp/zhihu-monthly-2026-10-tab.txt` 在同一台机器的两个会话里被复用：
+
+1. 月报脚本留下标签 `22EE…`（正在编辑月报）；
+2. 1101 日更脚本 `zhihu_upload_1101.py` 用 `ctx.pages` 里**第一个 `zhuanlan.zhihu.com/*/edit`** 定位自己 → 捡走了 `22EE…`；
+3. 月报后续所有写入（标题/正文/8 图/视频/封面/声明/专栏）**全部落进日更稿**，而月报本身**从未存在**；
+4. 反向也发生过：日更脚本把 1101 标题写进了月报文章 `2100303881762874483`。
+
+**铁律（对所有平台的写操作脚本）**：第一步必须做「我是谁」三条自证 —— 已固化成可直接 import 的模块 `templates/issue_guard.py`：
+
+```python
+import sys, os
+sys.path.insert(0, os.path.expanduser('~/.claude/skills/ai-news-factory/templates'))
+from issue_guard import (WrongIssueError, claim_tab_file, find_own_page,
+                         guard_editor_tab, guard_from_publish_json)
+
+# ① 标签复用文件带期次，禁止 /tmp/<platform>-tab.txt
+tab_file = claim_tab_file('zhihu', '2026-10')          # → /tmp/zhihu-2026-10-tab.txt
+
+# ② 认领标签：禁止「取 ctx.pages 里第一个匹配项」，必须逐页读标题再比对
+page = find_own_page(ctx, '/p/2100303881762874483/edit', title=TITLE,
+                     title_getter=lambda pg: pg.evaluate(TITLE_JS))
+assert page, '本期编辑器标签不存在 —— 新建，不要认领别人的'
+
+# ③ 写之前 / 验收之前各跑一次（纯只读，可反复调用）
+guard_editor_tab(page, 'zhihu',
+                 article_id='2100303881762874483',
+                 title=TITLE,
+                 body_signature='2026年10月，AI 圈的讨论重心')
+```
+
+`guard_editor_tab` 只在三条全过时返回；任何一条不符抛 `WrongIssueError`，**异常消息里带「实际读到什么」**（url / 标题 / 正文头），一看就知道是「被抢了」还是「选择器变了」。支持 `zhihu` / `wechat` / `bilibili` 三个平台；抖音/视频号没有稳定 id，用 `find_own_page` + 标题 + 描述首句。
+
+**为什么这条比任何选择器都重要**：内容错位时，所有单项检查都会给出「合理读数」（标题对得上正文、图片 8 张、视频可播）。**判据自己不会告诉你它在读谁的稿子。**
+
+**善后**：一旦发现串稿，先只读盘点两边（标题/正文首句/块数/图数/视频数/声明/专栏），**确认哪一边被改动了什么，再决定改哪边**；不要凭记忆「恢复」。本期日更稿核查结果是各项均与日更流水线预期终态一致（我改过的专栏后被日更脚本覆盖回原状），但仍建议人工过一眼再发布。
+
 ### 🔴 公众号上传源 `wechat-images/` 不是派生产物，漏生成会让 images 步撞 `FileNotFoundError`（v3.71.0 / 2026-10-30 公众号实测，坑 331）
 
 派生脚本只机械替换文本，**不负责把公众号的上传配图目录生成出来**。1030 期 `news-pipeline/2026-10-30/wechat-images/` 全程缺失——它不是脚本「从某处拷贝」出来的，是要**本地把 `images/scene*.png` 现场转成 JPEG** 才有的上传源。跑到 `wechat_upload_1030.py images` 才在 `set_input_files(scene1.jpg)` 处炸 `os.stat FileNotFoundError`——**此时编辑器已打开、正要一题一图**，只能回来自补。
@@ -5498,20 +5596,33 @@ browser_handle_dialog(accept=true)
 | 标题 | `textarea[placeholder="请输入标题（最多 100 个字）"]` |
 | 正文 | `div.public-DraftEditor-content`（Draft.js，`innerHTML` 直赋无效）；**合成 `ClipboardEvent` + `DataTransfer` 比真剪贴板更稳**（无需 `grant_permissions`） |
 | 正文块 | `div.public-DraftEditor-content [data-block="true"]`；`VIDEO` / `IMG` / `TXT` 三类靠 `.Editable-video` / `img` 判别 |
-| 图片 | `input[type=file][accept*="image/webp"]`（常驻 DOM），上传落在**光标所在块**；先贴 `<p>__IMG__</p>` 占位再逐张替换 |
-| 视频 | `button[aria-label="视频"]` 开弹窗；真 input 是 `input.VideoUploadButton-fileInput`（**弹窗前已在 DOM**），可直接传；约 10–15 s 出卡片，判 `.Editable-video` 的 `data-video-playable === 'true'` |
-| 视频落位 | 插在光标块；光标置文档开头 → block 0 自动空文本 + block 1 VIDEO，即**在正文之前**（需求硬要求） |
-| 封面 | `input[type=file][accept=".jpeg, .jpg, .png"]`（class `UploadPicture-input`） |
-| 创作声明 | 在「发布设置」面板：`div.css-be2u3` → `label` 文本==`创作声明` → `button[role=combobox]` → `.Select-option` 文本 `包含 AI 辅助创作 作者对内容负责`；回读须归一化零宽字符，实测得到 `包含AI辅助创作作者对内容负责` |
+| 图片 | `input[type=file][accept*="image/webp"]`（常驻 DOM）；先贴 `<p>__IMG__</p>` 占位再逐张替换。**v3.76.0 坑 368 两条计数铁律**：① **占位符 -1 ≠ 图片 +1**——失败的替换会「吃掉占位符但不产生卡片」，每步必须同时回读 `img` 数；② **配图只认 `src` 含 `draft_token=<文章id>` 的 `img`**，`naturalWidth === 1920` 的是**视频封面缩略图**，按 `naturalWidth` 数会把 8 图数成 9。上传成功后常残留一个只含 `__IMG__` 的空块，要单独清掉（判 `innerText === '__IMG__'` 且块内无 `img`） |
+| 视频 | `button[aria-label="视频"]` 开弹窗；真 input 是 `input.VideoUploadButton-fileInput`。**🔴 v3.76.0 坑 367：raw CDP 的 `DOM.setFileInputFiles` 对它是无效的**——该 input 是 `display:none`，CDP 返回 `{}`（成功）但 `input.files.length` 恒为 0，喂完 `/json` 一直显示 `files: 0`；ASCII 路径、复位面板、真实鼠标点击、「导入视频」弹窗四条替代路全部无效。**必须用 Playwright 的 `page.locator('input.VideoUploadButton-fileInput').first.set_input_files(VIDEO)`**，同一 CDP 端口上一试就成（约 40 s 出卡片，25 MB / 196 s 文件）。判 `.Editable-video` 的 `data-video-playable === 'true'` |
+| 视频落位 | **🔴 v3.76.0 坑 367 修正上表旧结论**：知乎媒体块**一律追加到文档末尾**，光标位置不决定落点。想放文首只有一条路 —— **先插视频、再粘正文**（实测得到 block 1 = 视频）。事后搬动全部失败：光标置顶无效、`Ctrl+X`/`Ctrl+V` 剪切粘贴无效（`vids` 仍为 1）、**HTML5 拖拽（DataTransfer + dragover/drop）会直接把视频块删掉且不可恢复** |
+| 视频去重 | **🔴 v3.76.0 坑 367：视频卡片「延迟出现」**。每轮 `set_input_files` 都会成功，但在等待窗口里反复重试会**累积成多个视频块**（实测一次会话堆到 5 个）。上传后**不要立刻重试**；稳定后按块去重到 1 个：选中 `vs[vs.length-1].closest('[data-block]')` → 断言块内除视频外无正文文本 → `Range.selectNode(块)` + `Backspace`；每删一个立刻回读块数/视频数/图片数 |
+| 封面 | `input.UploadPicture-input`（`accept=".jpeg, .jpg, .png"`）。**v3.76.0 实测：raw CDP 对它同样无效，用 Playwright `set_input_files`**。判据不能用「页面有 `上传封面` 字样」（模板常驻，恒真）；真判据 = 发布设置面板里 `添加文章封面` 占位消失 |
+| 创作声明 | 在「发布设置」面板，**按父级文案定位**：页面上有多个 `[role=combobox]`（投稿至问题 / 创作声明 / 文章话题…），按「第一个 combobox」取会拿到「投稿至问题」→ 选项列表为空 → 误报「找不到声明选项」。正解：沿 combobox 向上 ≤4 层找 innerText 以 `创作声明` 开头的那一行。`div.css-be2u3` **不唯一**（本期页面 6 个，第一个是「投稿至问题」），不可作定位锚点。选项文本 `包含 AI 辅助创作 作者对内容负责`；回读须归一化零宽字符。**🔴 v3.76.0 坑 370：该项刷新后稳定回落为「无声明」**（两个标签各复现，共 3 次），与坑 318 视频号「视频标注」同族——**只在发布时随请求提交，草稿不落库**。验收**不得**标 PASS，对外说法是「已在编辑器选中，发布前需再设一次」 |
 | 专栏 | 判据是 `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 **`checked`**，不是页面文本（坑 343）；真值 `「今日羊报 AI」`（半角空格 + 大写 I）。**🔴 v3.75.0 坑 352：判据必须覆盖三级——第 0 级「开关压根没开」（1031 实测默认 `不发布到专栏` checked=true、combo 为 null）、第 1 级「开了但 combo 为空」、第 2 级「combo 选错」。开开关须 `label[for="PublishPanel-columnLabel-1"]` 的 rect 中心 `page.mouse.click`（坑 340）** |
 | 草稿箱验收 | **必须硬 goto `?type=article`**（v3.75.0 坑 353）：点「草稿箱」tab 会落到 `?type=answer`，只列回答草稿 → 标题必然查不到（假阴性）。正解 `page.goto('https://www.zhihu.com/creator/manage/creation/draft?type=article')`。**🔴 坑 365：文章一旦被发布，草稿会从草稿箱消失——验收必须在上传当场做并留存读数；事后回查发现标题不在草稿箱时，先去文章页看有没有 `发布于 <时间>`，再比对正文长度/图数/视频数，才能分清「已发布」与「真丢失」** |
-| 保存草稿 | **没有保存按钮——知乎文章自动保存**；底部出现 `刚刚 · 草稿`，URL 变 `/p/<id>/edit` 即已落库 |
+| 保存草稿 | **没有保存按钮——知乎文章自动保存**；底部出现 `刚刚 · 草稿`，URL 变 `/p/<id>/edit` 即已落库。**🔴 v3.76.0 坑 369：制造编辑来触发保存是有破坏性的 —— `selectNodeContents(末块) + execCommand('delete')` 会把视频原子块和结尾段前半句一起删掉，且自动保存已把破坏写进草稿。安全做法：标题末尾加一个零宽字符 `​` 再删掉，正文一个字节都不碰** |
 | 内容来源 | 面板底部提示「发布新闻类的内容需要明确标注信息来源」，建议「添加来源」 |
 | 危险按钮 | `发布`（`Button--pri`）——永不点击 |
 
 **坑 334-343**（详见 `templates/platform-zhihu.md` §4）：创作声明控件是 combobox 且 `css-be2u3` 被多字段复用（须按 label 文本定位）；无保存按钮只能靠自动保存验收；「立即创作」开新标签；新闻类有「内容来源」要求；**视频卡片是原子块，退格整块删（338）**；**`Shift+Home` 在 Draft.js 里会选到整篇开头，一次退格毁掉全文（339）**；**Vue tab/radio 的 `.click()` 静默无效，须 `page.mouse.click` 坐标（340）**；**整行加粗判断漏掉「行首加粗+行内正文」，页面留字面 `**`（341）**；**`Backspace` 走 Draft.js 内部选区而非 DOM 选区，可删错块（342）**；**专栏选中态 grep 文本恒真（343）**。
 
-**验收必带的结构性计数**：`videos == 1 && videoPlayable == 'true'` + `IMG` 块数 == 源文图数 + `__IMG__` 残留 == 0 + 全文无字面 `**` + 声明回读 + 专栏 radio checked。任何一步含 `Backspace` 之后都要重数一遍视频/图片，别假设它们还在。
+**验收必带的结构性计数**：`videos == 1 && videoPlayable == 'true'` + `IMG` 块数 == 源文图数 + `__IMG__` 残留 == 0 + 全文无字面 `**` + 声明回读 + 专栏 radio checked。任何一步含 `Backspace` 之后都要重数一遍视频/图片（本轮实测：它吃掉了一个视频原子块 + 结尾段前半句）。
+
+**🔴 v3.76.0 坑 371：门禁第 0 项必须是「我是谁」。** 在跑上面任何一项之前，先断言
+
+```python
+assert MONTHLY_OR_DAILY_ARTICLE_ID in page.url          # URL 含本期文章 id
+assert page_title_input_value == publish_json_title      # 标题 == 本期标题
+assert body_first_line.startswith(本期首句签名)           # 正文首句属于本期
+```
+
+三条缺一，检查再多也会「看起来像那么回事」：本期整篇月报写进了日更稿，而所有 13 项检查在**错误的文章上**全部给出合理读数（标题对得上正文、图片 8 张、视频可播）。**判据自己不会告诉你它在读谁的稿子。**
+
+**刷新核验（终态）才是真落库**：`page.reload()` 后重读全部计数。本期刷新后暴露出三个只有刷新才看得见的问题——创作声明回落（坑 370）、视频变成 2 个（坑 367 延迟累积）、配图数需按 `draft_token` 重算（坑 368）。
 
 **🔴 v3.75.0 坑 354：`ZHIHU_DRAFT_OK` 只证明四件事，不能当全量验收。** 现脚本的 `ok` 只含 `videos==1 / playable / decl / bodyLen>800 / IMG 数` —— **封面数、专栏两级、字面 `**` 三项全不在内**；1031 专栏断言先崩、手工修好才跑 verify，若没修这一行照样印 OK。修法：三项并入 `ok`，`read_state` 增 `column` 字段。另 `all` 捆绑包**不含 footer**（`if step == 'footer':` 对比相邻的 `if step in ('all','column'):`）→ 坑 341 的 `**` 验收永远不会自动跑，须把它抽进 verify 门禁。
 
@@ -6751,6 +6862,60 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.76.0（2026-10-31→11-01 月报 + 1101 日报连续实跑：跨流水线抢标签把整篇稿子写错，坑 366-372）
+
+本期月报（10 月，11,451 主题 / 31 天全覆盖）与 1101 日报在同一台机器、同一时段跑，暴露出**一类全新的事故**：不是选择器失效，而是**两条流水线互相抢同一个浏览器标签**。本期真正值得写进 skill 的有七条，前三条都属于「判据在错误的对象上给出了正确的读数」。
+
+#### 坑 366：`/tmp/<platform>-<date>-tab.txt` 跨期共享 → 双向串稿
+
+坑 330 引入「失败保留标签 + 附着复用」时，前提是「同一期的多次重跑」。**不同期脚本共存时它会把标签交出去。**
+
+实跑序列：
+1. 月报脚本留下 `/tmp/zhihu-monthly-2026-10-tab.txt` → 标签 `22EE…`，正在编辑月报；
+2. 1101 日更脚本 `zhihu_upload_1101.py` 用 `ctx.pages` 里**第一个** `zhuanlan.zhihu.com/*/edit` 认领编辑器 → 选中 `22EE…`；
+3. 月报的标题/正文/8 图/视频/封面/声明/专栏**全部写进日更稿**；月报本身**从未存在于草稿箱**（草稿箱 `文章草稿3` 只有日更稿 + 两条 10-30 无标题稿）；
+4. 反向也发生：日更脚本把 1101 标题写进了月报文章 `2100303881762874483`。
+
+**Why:** 错位之后，13 项检查（标题、正文长度、8 图、视频可播、封面、专栏…）**全部给出合理读数** —— 因为标题框里确实是「本期」标题（只是那期的），正文确实是那期正文。判据没有任何一项会报错。
+
+**How to apply:** ① 复用文件名带期次：`/tmp/{platform}-{DATE}-tab.txt`；② **禁止**「取 `ctx.pages` 里第一个匹配项」，必须逐页读标题/正文首句再比对；③ 每个写平台的脚本第一步做三条自证（URL 含本期 id、标题 == `publish.json`、正文首句签名），任一不符立刻 abort；④ 发现串稿先只读盘点两边再决定改哪边，**不要凭记忆恢复**。
+
+#### 坑 367：知乎文件上传 —— raw CDP 无效，必须 Playwright；且上传「延迟生效」
+
+`DOM.setFileInputFiles` 对知乎 `display:none` 的 `input.VideoUploadButton-fileInput` / `input.UploadPicture-input` 返回成功但 `input.files.length` 恒为 0。四轮替代路全部失败（ASCII 路径 / 复位面板 / 真实鼠标坐标点击 / 「导入视频」Modal）。换成 Playwright `locator.set_input_files()` 一次成功。
+
+第二层：**视频卡片延迟出现**。在等待窗口里反复重试会**累积**——本期一次会话堆到 **5 个**视频块（全部 playable=true）。上传后不要立刻重试；稳定后去重到 1 个（选中末块 → 断言块内无正文 → `Range.selectNode` + `Backspace` → 每次回读三项计数）。
+
+**Why:** 「喂了文件」和「文件进了 input」是两件事；「input 有了文件」和「卡片渲染出来」又是两件事。每一层都可能延迟或被静默吞掉。
+
+**How to apply:** Playwright 能连通就用它做 `set_input_files`；raw CDP 只做 DOM 探测。喂完立刻回读 `input.files.length`，为 0 即判失败停手。
+
+#### 坑 368：`img` 计数必须按来源分类
+
+知乎正文配图 `src` 带 `draft_token=<文章id>`；`naturalWidth === 1920` 的是**视频封面缩略图**。按 `naturalWidth` 数会把「8 图 + 1 个视频封面」数成 9。正解：`img[src*=draft_token=<id>]`。另：占位符 -1 **不等于**图片 +1，每步必须同时回读 `img` 数。
+
+#### 坑 369：「制造一次编辑来触发自动保存」是有破坏性的动作
+
+为让知乎自动保存，用 `selectNodeContents(末块) + execCommand('delete')` —— Draft.js 把**视频原子块和结尾段前半句一起删了**，且自动保存已把破坏写进草稿（`vids 1→0`，`bodyLen 1846→1706`）。
+
+**How to apply:** 触发保存只用**标题**（末尾加零宽字符 `​` 再删掉），正文一个字节都不碰。任何「为了凑一个 input 事件」而在正文里做删除的操作都禁止。
+
+#### 坑 370：知乎「创作声明」不随草稿持久化（与坑 318 同族）
+
+编辑器内选中后回读正确，**整页刷新后稳定回落为「无声明」**，两个标签各复现，共 3 次；即使之后触发正文级编辑保存也一样。判定为「只在发布时随请求提交」。验收**不得**标 PASS，对外说法是「已在编辑器选中，发布前需再设一次」。
+
+#### 坑 371：门禁第 0 项必须是「我是谁」
+
+见坑 366 的 How to apply ③。把身份断言写进 `read_state()` 的第一项，而不是写在脚本注释里。
+
+#### 坑 372：公众号标题区 `el.click()` 不送焦点
+
+`document.querySelectorAll('.ProseMirror')[0].click()` 后 `document.activeElement` 仍是 `body` → `Input.insertText` 被静默丢弃 → `#title` 恒空 → `AssertionError: title not synced: ''`。必须 `.focus()` 并断言 `document.activeElement === p`，之后再双回读（隐藏 `textarea#title` 的 value + ProseMirror 的 textContent）。
+
+**另补两条**：① 知乎「创作声明」控件定位 —— 页面有多个 `[role=combobox]`（投稿至问题 / 创作声明 / 文章话题），按「第一个」取会拿到「投稿至问题」导致选项恒空；必须沿 combobox 向上 ≤4 层找 innerText 以 `创作声明` 开头的那一行；`div.css-be2u3` 本期页面上有 6 个，不可作定位锚点。② 步骤式上传脚本**单步模式下不得关闭标签**（坑 330 补）——`finally` 里只有 `STEP == 'all' and not keep` 才关，否则一步跑完就把已上传的 25 MB 丢掉。
+
+**本期正例**：月报 11,451 主题 / 31 天全覆盖 / PDF 7 页；成片 195.52 s / 25,161,505 B；公众号 `MP_VERIFY_OK`（正文 1391 字 / 9 图 / 封面 / 合集「羊报AI月报」/ 字面 `**` 0）；知乎文章 `2100303881762874483` 刷新后 13 项过 12 项（唯一未过项为坑 370）。
 
 ### v3.75.0（2026-10-31 五平台全量实跑：验收判据自欺的四个新形态 + 两条被推翻的旧解释，坑 348-361）
 

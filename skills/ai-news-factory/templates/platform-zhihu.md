@@ -254,16 +254,15 @@ page.locator('input[type=file][accept*="image/webp"]').first.set_input_files(pat
 
 ### 3.7 插视频（放在正文之前，需求硬要求）
 
-知乎支持内嵌视频。视频卡片**插在当前光标所在块**，所以光标移到文档最开头即可让它排在正文前面：
+> **🔴 v3.76.0 大改（坑 367）**：本节旧结论「把光标移到文档开头，视频就插在光标块」**是错的**。
+> 知乎媒体块**一律追加到文档末尾**，光标位置不决定落点。四轮搬动尝试全部失败（光标置顶 / Cut-Paste / HTML5 拖拽）。
+> **唯一可靠做法：先插视频、再粘正文。** 下文的代码保留「光标置顶」只是为了置编辑器于可编辑态，不要指望它改变落点。
 
 ```python
-# 1) 光标移到第一个块的开头
+# 1) 编辑器获得焦点（落点不受它影响，见上方警示）
 page.evaluate("""() => {
   const el = document.querySelector('div.public-DraftEditor-content');
   el.focus();
-  const first = el.querySelector('[data-block="true"]') || el;
-  const r = document.createRange(); r.setStart(first, 0); r.collapse(true);
-  const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
 }""")
 # 2) 点工具栏「视频」（会弹出「导入视频」弹窗）
 page.evaluate("""() => {
@@ -272,61 +271,115 @@ page.evaluate("""() => {
   }
   return false;
 }""")
-# 3) 直接对弹窗里的 input 传文件——它点开弹窗前就已经在 DOM 里
-page.locator('input.VideoUploadButton-fileInput').first.set_input_files(VIDEO)
+page.wait_for_timeout(2000)
+# 3) 用 Playwright 传文件 —— 【必须】Playwright，不能用 raw CDP 的 DOM.setFileInputFiles
+inp = page.locator('input.VideoUploadButton-fileInput')
+assert inp.count() >= 1, '视频 file input 未挂载'
+inp.first.set_input_files(VIDEO)
 ```
 
-- 上传约 10–15 s 后出现视频卡片，用 `dataset.videoPlayable === 'true'` 判可播放
-- 落位结果：block 0 是自动生成的空文本块，block 1 才是 VIDEO —— **视频确实在正文之前**
+- 上传约 **40 s** 后出现视频卡片（25 MB / 196 s 文件），用 `dataset.videoPlayable === 'true'` 判可播放
+- **延迟生效陷阱**：每轮 `set_input_files` 都会成功，但在等待窗口里反复重试会**累积**成多个视频块（本期曾堆到 5 个）。上传后不要立刻重试；稳定后去重到 1 个：
+
+```python
+# 去重：删掉多余的视频块（保留第 1 个）
+while state['vids'] > 1:
+    page.evaluate("""() => {
+      const root = document.querySelector('div.public-DraftEditor-content');
+      root.focus();
+      const vs = [...root.querySelectorAll('.Editable-video')];
+      const blk = vs[vs.length - 1].closest('[data-block="true"]');
+      const rg = document.createRange(); rg.selectNode(blk);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(rg);
+    }""")
+    page.keyboard.press('Backspace')
+    page.wait_for_timeout(1500)
+    state = read_state(page)          # 每次回读块数/视频数/图片数
+```
+
 - 视频卡片是**单个原子块**，整体删除/移动都按块走（坑 338）
 
 ### 3.8 添加封面
+
+> **v3.76.0 实测**：`input.UploadPicture-input` 同样是 `display:none`，raw CDP 的 `DOM.setFileInputFiles` 无效，
+> 必须用 Playwright `set_input_files`。判据不能用「页面文本里有『上传封面』」——该字样常驻模板，**恒真**；
+> 真判据 = 发布设置面板里 `添加文章封面` 占位消失。
 
 ```python
 # 点「添加封面」展开上传区，再对 accept 为图片的 input 传文件
 page.evaluate("""() => {
   for (const e of document.querySelectorAll('*')) {
-    if ((e.innerText||'').trim() === '添加封面' && e.offsetParent && e.children.length === 0) { e.click(); return; }
+    if (/^(添加封面|设置封面)$/.test((e.innerText||'').trim()) && e.offsetParent && e.children.length === 0) { e.click(); return; }
   }
 }""")
-page.locator('input[type=file][accept=".jpeg, .jpg, .png"]').first.set_input_files(COVER)
+page.wait_for_timeout(2500)
+inp = page.locator('input.UploadPicture-input')
+assert inp.count() >= 1, '封面 input 未挂载'
+inp.first.set_input_files(COVER)
+page.wait_for_timeout(3000)
+# 判据：面板里「添加文章封面」占位消失
+panel = page.evaluate("""() => { const p = document.querySelector('.css-13mrzb0'); return p ? p.innerText : ''; }""")
+assert '添加文章封面' not in panel, f'封面未生效: {panel[:80]}'
 ```
 
 封面用 `news-pipeline/<DATE>/images/horizontal-4-3.png`（知乎文章封面为横图位，4:3 可接受）。
 
 ### 3.9 设创作声明（必做）
 
+> **🔴 v3.76.0 两处修正（坑 370）**
+> ① **`div.css-be2u3` 不能当定位锚点**：本期页面上它有 **6 个**，第一个是「投稿至问题」。
+> ② **页面上有多个 `[role=combobox]`**（投稿至问题 / 创作声明 / 文章话题…），按「第一个」取会拿到
+> 「投稿至问题」→ 选项列表为空 → 误报「找不到声明选项」。必须**沿 combobox 向上 ≤4 层**找
+> innerText 以 `创作声明` 开头的那一行。
+> ③ **该字段不随草稿持久化**：编辑器内选中后回读正确，整页刷新后稳定回落为「无声明」（两个标签各复现，共 3 次）。
+> 与坑 318 视频号「视频标注」同族——只在发布时随请求提交。验收**不得**标 PASS。
+
 ```python
-# 1) 打开创作声明下拉
-page.evaluate("""() => {
-  const norm = s => (s||'').replace(/[\\s\\u200b]/g,'');
-  for (const box of document.querySelectorAll('div.css-be2u3')) {
-    const lab = box.querySelector('label');
-    if (!lab || norm(lab.textContent) !== '创作声明') continue;
-    const combo = box.querySelector('button[role=combobox]');
-    if (combo) { combo.click(); return; }
-  }
-}""")
-# 2) 选目标项
-page.evaluate("""() => {
-  const norm = s => (s||'').replace(/[\\s\\u200b]/g,'');
-  const want = norm('包含 AI 辅助创作 作者对内容负责');
-  for (const e of document.querySelectorAll('.Select-option')) {
-    if (norm(e.innerText) === want && e.offsetParent) { e.click(); return; }
-  }
-}""")
-# 3) 回读（必须去掉零宽字符再比）
-cur = page.evaluate("""() => {
-  const norm = s => (s||'').replace(/[\\s\\u200b]/g,'');
-  for (const box of document.querySelectorAll('div.css-be2u3')) {
-    const lab = box.querySelector('label');
-    if (!lab || norm(lab.textContent) !== '创作声明') continue;
-    const c = box.querySelector('button[role=combobox]');
-    return c ? norm(c.innerText) : null;
+# 1) 定位「创作声明」那一行的 combobox（不是第一个 combobox！）
+pos = page.evaluate("""() => {
+  for (const c of [...document.querySelectorAll('button.Select-button')].filter(e => e.offsetParent)) {
+    let p = c;
+    for (let i = 0; i < 4 && p; i++, p = p.parentElement) {
+      const t = (p.innerText || '').replace(/\\s+/g, ' ').trim();
+      if (t.startsWith('创作声明') && t.length < 80) {
+        c.scrollIntoView({block: 'center'});
+        const r = c.getBoundingClientRect();
+        return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2),
+                cur: (c.innerText || '').trim()};
+      }
+    }
   }
   return null;
 }""")
-assert cur == '包含AI辅助创作作者对内容负责', f'创作声明未生效: {cur!r}'
+assert pos, '创作声明 combobox 未找到'
+# 坐标点击（坑 340）；DOM .click() 对部分控件静默无效
+page.mouse.click(pos['x'], pos['y'])
+page.wait_for_timeout(3000)
+
+# 2) 选目标项（选项渲染 ≥3 s）
+opt = page.evaluate("""() => {
+  for (const e of document.querySelectorAll('*')) {
+    if (e.children.length || !e.offsetParent) continue;
+    if ((e.innerText||'').replace(/\\s+/g,' ').trim() !== '包含 AI 辅助创作 作者对内容负责') continue;
+    const r = e.getBoundingClientRect();
+    return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)};
+  }
+  return null;
+}""")
+assert opt, '声明选项未渲染'
+page.mouse.click(opt['x'], opt['y'])
+page.wait_for_timeout(2500)
+
+# 3) 回读（当前会话内应为目标值；刷新后会回落，见上方 ③）
+cur = page.evaluate("""() => {
+  const b = [...document.querySelectorAll('button.Select-button')].filter(e => e.offsetParent)
+    .find(e => { let p = e; for (let i = 0; i < 4 && p; i++, p = p.parentElement) {
+      const t = (p.innerText||'').replace(/\\s+/g,' ').trim();
+      if (t.startsWith('创作声明')) return true; } return false; });
+  return b ? b.innerText.trim() : null;
+}""")
+assert '包含' in (cur or '') and 'AI 辅助创作' in (cur or ''), f'创作声明未生效: {cur!r}'
+print('声明已在编辑器中选中；注意：草稿不保存该项，发布前需再设一次')
 ```
 
 ### 3.10 专栏收录
@@ -391,27 +444,72 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 2. **不要点「发布」**（`Button--pri`，危险按钮，scripts 里禁止出现对其的点击）
 3. 到草稿箱核验：**必须硬 goto `https://www.zhihu.com/creator/manage/creation/draft?type=article`**（v3.75.0 坑 353）。**不要**「点侧栏『草稿箱』再 grep」——点 tab 后 URL 会变成 `?type=answer`，只列**回答草稿**，文章标题必然查不到，看起来像草稿丢了（1031 实测：点 tab 得 `正文含本期标题: False`；硬 goto 后首条正是本期标题）。记忆钩子：`?type=answer|article|zvideo` 对应 回答/文章/视频 三类草稿，默认 `answer`
 
+> **🔴 v3.76.0 坑 369：不要用「在正文里删点什么」来触发自动保存。**
+> 本期为制造一次 input 事件，写了 `selectNodeContents(末块) + execCommand('delete')` ——
+> Draft.js 把**视频原子块和结尾段前半句一起删了**（`vids 1→0`，`bodyLen 1846→1706`），
+> 且自动保存已把破坏写进草稿。
+> **安全做法：只在标题末尾加一个零宽字符 `​` 再删掉**，正文一个字节都不碰：
+> ```python
+> page.evaluate("""() => {
+>   const ta = document.querySelector('textarea[placeholder*="请输入标题"]');
+>   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+>   window.__origTitle = ta.value;
+>   ta.focus(); setter.call(ta, ta.value + '​');
+>   ta.dispatchEvent(new Event('input', {bubbles: true}));
+> }""")
+> page.wait_for_timeout(6000)
+> page.evaluate("""() => {
+>   const ta = document.querySelector('textarea[placeholder*="请输入标题"]');
+>   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+>   setter.call(ta, window.__origTitle);
+>   ta.dispatchEvent(new Event('input', {bubbles: true}));
+> }""")
+> page.wait_for_timeout(8000)
+> ```
+
 ### 3.12 上传验收判据
+
+**🔴 v3.76.0：门禁第 0 项必须是「我是谁」。** 在跑下面任何一项之前先断言 —— 本期整篇月报写进了日更稿，
+而所有 13 项检查在**错误的文章上**全部给出了合理读数：
+
+```python
+assert ARTICLE_ID_THIS_ISSUE in page.url                     # /p/<id>/edit 里的 id 必须属于本期
+assert page_title_value == publish_json.platform.zhihu.title # 标题必须等于本期标题
+assert body_first_line.startswith(BODY_SIGNATURE)            # 正文首句属于本期
+```
+
+**🔴 配图计数按来源分类（坑 368）**：正文配图 `src` 带 `draft_token=<文章id>`；
+`naturalWidth === 1920` 的是**视频封面缩略图**，按尺寸数会把 8 图数成 9。
+
+```python
+body_imgs = page.evaluate("""(id) => [...document.querySelectorAll('div.public-DraftEditor-content img')]
+    .filter(i => (i.src || '').includes('draft_token=' + id)).length""", ARTICLE_ID)
+```
+
+**🔴 终态必须「刷新后重读」**：`page.reload()` 再跑一遍全部计数。
+本期刷新后才暴露三个问题——创作声明回落（坑 370）、视频变成 2 个（延迟累积，坑 367）、配图需按 `draft_token` 重算（坑 368）。
 
 | 项 | 判据 |
 |---|---|
+| 我是谁（第 0 项）| URL 含本期文章 id **且** 标题 == `publish.json` **且** 正文首句 == 本期签名（坑 371） |
 | appmsg 级 ID | 编辑页 URL 变为 `zhuanlan.zhihu.com/p/<id>/edit`（说明已落库为草稿） |
 | 标题 | `textarea` value 与 TITLE 完全一致 |
 | 正文 | `div.public-DraftEditor-content` innerText 长度 > 800 |
-| 视频 | `.Editable-video` 数 == 1 且 `data-video-playable == 'true'`；块序在第一个正文块之前。**判块序要看前 3 块的 kind 序列**（如 `0:TXT(空) 1:VIDEO 2:正文`），**不要**看日志里的 `first block: TXT|`——那行用 `startswith(('VIDEO','TXT'))` 取第一个匹配块，正文场景下永远是 TXT，与视频是否插入无关（v3.75.0 坑，1031 实测）|
-| 图片 | `IMG` 块数 == 源文图片数，且无 `__IMG__` 残留 |
-| 封面 | 封面槽位有图（`img` naturalWidth > 200 或槽位显示已上传态）。**必须并入 `ZHIHU_DRAFT_OK` 的 `ok` 表达式**——旧版漏了它，封面缺失也照印 OK（v3.75.0 坑 354）|
-| 创作声明 | combobox 回读归一化后 == `包含AI辅助创作作者对内容负责` |
+| 视频 | `.Editable-video` 数 == **1**（不是 ≥1，坑 367 会堆出多个）且 `data-video-playable == 'true'`；块序看前 3 块的 kind 序列。**判块序要看前 3 块的 kind 序列**（如 `0:TXT(空) 1:VIDEO 2:正文`），**不要**看日志里的 `first block: TXT|`——那行用 `startswith(('VIDEO','TXT'))` 取第一个匹配块，正文场景下永远是 TXT，与视频是否插入无关（v3.75.0 坑，1031 实测）|
+| 图片 | `img[src*=draft_token=<文章id>]` 数 == 源文图片数，且无 `__IMG__` 残留。**不要用 `naturalWidth` 数**（会把视频封面缩略图算进来，坑 368）|
+| 封面 | 发布设置面板里 `添加文章封面` 占位**消失**；不要用页面文本含「上传封面」判（恒真）。**必须并入 `ok` 表达式**（v3.75.0 坑 354）|
+| 创作声明 | combobox 回读归一化后 == `包含AI辅助创作作者对内容负责`。**🔴 v3.76.0 坑 370：该项刷新后会回落为「无声明」（只在发布时提交），故「刷新后核验」时此项必 FAIL，属预期行为——报告须如实写「未持久化」，不得标 PASS** |
 | 专栏 | **三级判据**（v3.75.0 坑 352 修正）：① 开关是否打开（radio `PublishPanel-columnLabel-1` 的 `checked`）② 打开后 `combo` 是否存在（关态下为 `null`）③ combo 文本归一化后是否 == 目标专栏。**只判第 2 级会漏掉「开关压根没开」这一上游形态**（1031 实测默认就是「不发布到专栏」checked=true）|
-| 字面星号 | 全文块文本不含 `**`（坑 341）。**必须并入 `ok`**——`all` 捆绑包不含 footer，旧版永远不会自动跑（v3.75.0 坑 354）|
-| 块数守恒 | `len(blocks) == 正文块数 + 2`（+视频卡片 +自动空块）；1031 实测 32 → 34。数量不守恒 = 有块被 `Backspace` 吃掉（坑 342 的指纹）|
+| 字面星号 | 全文块文本不含 `**`（坑 341）。**必须并入 `ok`**（v3.75.0 坑 354）|
+| 块数守恒 | `len(blocks) == 正文块数 + 2`（+视频卡片 +自动空块）；1031 实测 32 → 34。数量不守恒 = 有块被 `Backspace` 吃掉（坑 342/369 的指纹）|
 | 危险动作 | 全程未点击「发布」 |
+| **刷新后重读** | 上述全部重跑一遍。刷新后仍成立才算「落库」，唯一预期例外是创作声明（坑 370）|
 
 **🔴 `ZHIHU_DRAFT_OK` 的真实语义（v3.75.0 坑 354）**：当前脚本的 `ok` 只含 `videos==1 / playable / decl / bodyLen>800 / IMG 数` 五项，**它只证明视频、声明、正文、图数四件事**，不证明封面、专栏、无字面星号。看到 OK 不等于全绿——要么把三项并进 `ok`，要么在 checklist 里另行逐项回读。
 
 ---
 
-## 4. 坑（坑 334–355、362–365）
+## 4. 坑（坑 334–355、362–372）
 
 ### 坑 334：创作声明是 combobox 不是 select；「必须先展开面板」被 1031 推翻
 - 控件结构：`div.css-be2u3` → `label`（文本 `创作声明`）→ `button[role=combobox]`
@@ -539,6 +637,58 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 - **判定**：草稿被「提升」成正式文章后从草稿箱移除。**这不是草稿丢失，也不是自动化点的发布**（脚本内 `grep 发布` 只命中「发布设置」「发布到专栏」，无提交动作）；**但发布动作由谁触发尚未确认**——公众号（10:59 进「近期发表」、近期草稿退回 10-12）与视频号（10:02 已发表条目）同日出现同族现象，三处都无流水线日志。**在用户明确答复前，只记「上传当时为草稿，其后出现在已发表列表，来源待确认」**
 - **规则**：① 草稿验收必须在**上传当场**完成并留存读数，事后回查的「查不到」不能反推「当时没存上」；② 回查发现标题不在草稿箱时，**先去文章页看有没有 `发布于 <时间>`**，再看正文长度/图片数/视频数是否与上传时一致，才能判断是「已发布」还是「真丢失」；③ 汇报时如实写「上传当时为草稿，之后该条目出现在已发表列表（来源待确认）」，不要含糊成「草稿状态正常」，也不要替用户下结论说是谁发的
 
+### 坑 366：跨流水线抢同一个知乎标签，整篇稿子写错（v3.76.0 / 2026-10-31→11-01 实测）
+
+**现象**：整篇月报（标题/正文/8 图/视频/封面/声明/专栏）写进了 1101 日更稿 `2100056075546448877`，而月报本身**从未存在于草稿箱**（草稿箱 `文章草稿3` 只有日更稿 + 两条 10-30 无标题稿）。反向也发生：日更脚本把 1101 标题写进了月报文章 `2100303881762874483`。
+
+**链路**：
+1. 月报脚本留下 `/tmp/zhihu-monthly-2026-10-tab.txt` → 标签 `22EE…`（正在编辑月报）；
+2. `zhihu_upload_1101.py` 用 `ctx.pages` 里**第一个** `zhuanlan.zhihu.com/*/edit` 认领编辑器 → 选中 `22EE…`；
+3. 之后所有「月报」操作全部落进日更稿。
+
+**为什么一直没被发现**：所有单项检查都给出了合理读数 —— 标题框里确实是「某个本期标题」、正文确实是「某期正文」、图片 8 张、视频可播。**判据不会告诉你它在读谁的稿子。**
+
+**规则**：
+- 复用文件名带期次：`/tmp/zhihu-<DATE>-tab.txt`；
+- **禁止**「取 `ctx.pages` 里第一个匹配项」，必须逐页读标题/正文首句再比对；
+- 每个写脚本第一步做三条自证（见 §3.12 第 0 项），任一不符立即 abort；
+- 发现串稿先**只读盘点两边**（标题/正文首句/块数/图数/视频数/声明/专栏），确认哪边被改了什么再决定动谁，**不要凭记忆恢复**。
+
+### 坑 367：知乎文件上传必须用 Playwright；且上传「延迟生效」会累积（v3.76.0 / 2026-10-31→11-01 实测）
+
+**第一层：raw CDP 无效。** `DOM.setFileInputFiles` 对 `display:none` 的 `input.VideoUploadButton-fileInput` / `input.UploadPicture-input` 返回 `{}`（看起来成功）但 `input.files.length` 恒为 0。四轮替代路全部失败：ASCII 路径 / 复位面板（先确保 `input` 数量归零再重新挂载）/ 真实 `Input.dispatchMouseEvent` 坐标点击 / 点「导入视频」开 Modal 再用弹窗内 input。**换 Playwright `locator.set_input_files()` 一次成功。**
+
+**第二层：卡片延迟出现，重试会累积。** 每轮 `set_input_files` 都成功，但在等待窗口里反复重试 → 本期一次会话堆出 **5 个**视频块（全部 `playable=true`），刷新后又出现 2 个。
+
+**规则**：① 文件上传优先 Playwright（它与 raw CDP 走不同注入链，同一台机器结论可以相反）；② 喂完立刻回读 `input.files.length`，为 0 即判失败停手，不要用「等卡片出现」掩盖；③ 上传后不要立刻重试；④ 稳定后去重到 1 个（选中末块 → 断言块内无正文 → `Range.selectNode` + `Backspace` → 每次回读三项计数）。
+
+### 坑 368：`img` 计数必须按来源分类（v3.76.0 / 2026-11-01 实测）
+
+正文配图 `src` 带 `draft_token=<文章id>`；`naturalWidth === 1920` 的是**视频封面缩略图**。按 `naturalWidth > 300` 数会把「8 图 + 1 视频封面」数成 9，进而判「多了一张」或与源文不符。正解：`img[src*=draft_token=<文章id>]`。
+
+另：占位符 -1 **不等于**图片 +1 —— 失败的替换会吃掉占位符但不产生卡片，每一步必须同时回读 `img` 数。
+
+### 坑 369：不要用「在正文里删点什么」触发自动保存（v3.76.0 / 2026-11-01 实测）
+
+为了制造一次 input 事件，写了 `selectNodeContents(末块) + execCommand('delete')` —— Draft.js 把**视频原子块和结尾段前半句一起删了**（`vids 1→0`，`bodyLen 1846→1706`），且自动保存已把破坏写进草稿。
+
+**规则**：触发保存只用**标题**（末尾加/删零宽字符 `​`），正文一个字节都不碰。任何「为了凑一个 input 事件」而在正文里做删除的操作都禁止。
+
+### 坑 370：创作声明不随草稿持久化（v3.76.0 / 2026-11-01 实测，与坑 318 同族）
+
+编辑器内选中后回读正确，**整页刷新后稳定回落为「无声明」**（两个标签各复现，共 3 次）；即使之后触发正文级编辑保存也一样。判定为「只在发布时随请求提交」。
+
+**规则**：验收**不得**标 PASS；对外说法是「已在编辑器选中，发布前需再设一次」。与坑 318 视频号「视频标注」同族。
+
+### 坑 371：门禁第 0 项必须是「我是谁」（v3.76.0）
+
+见坑 366。把身份断言写进 `read_state()` 的第一项，而不是写在脚本注释里。三条：URL 含本期文章 id / 标题 == `publish.json` / 正文首句签名。
+
+### 坑 372：公众号标题区 `el.click()` 不送焦点（v3.76.0 / 2026-10-31→11-01 月报实测）
+
+（虽属公众号，但与知乎同批修复，写在此处以免遗漏）
+`document.querySelectorAll('.ProseMirror')[0].click()` 后 `document.activeElement` 仍是 `body` → `Input.insertText` 被静默丢弃 → 隐藏 `textarea#title` 恒空 → `AssertionError: title not synced: ''`。必须 `.focus()` 并断言 `document.activeElement === p`，再双回读（`#title` 的 value + ProseMirror 的 textContent）。
+
 ---
 
 ## 5. 与其他平台的差异速查
@@ -574,19 +724,19 @@ A   U+41     I  U+49   ← 大写 I，不是小写 l
 | 2 | 「立即创作」行为 | **新开标签页** → `https://zhuanlan.zhihu.com/write`；**按钮缺席时直接 `ctx.new_page()` + goto `/write` 等价可用** | ✅ 已测（v3.75.0 补回退） |
 | 3 | 标题容器 | `textarea[placeholder="请输入标题（最多 100 个字）"]` | ✅ 已测 |
 | 4 | 正文容器 | `div.public-DraftEditor-content`（Draft.js；`innerHTML` 直赋无效，须剪贴板 paste） | ✅ 已测 |
-| 5 | 创作声明控件 | `div.css-be2u3` → `label`=创作声明 → `button[role=combobox]` → `.Select-option` | ✅ 已测 |
-| 6 | 创作声明选项文案 | `包含 AI 辅助创作 作者对内容负责`（回读归一化零宽字符后 = `包含AI辅助创作作者对内容负责`） | ✅ 已测（已实设并回读成功） |
+| 5 | 创作声明控件 | **按父级文案定位**：沿 `button.Select-button` 向上 ≤4 层找 innerText 以 `创作声明` 开头的那一行。**~~`div.css-be2u3`~~ 不可用**（本期页面 6 个，第一个是「投稿至问题」）；页面上另有多个 `[role=combobox]`，按「第一个」取会拿到「投稿至问题」→ 选项恒空（v3.76.0 坑 370） | ✅ 已测（v3.76.0 修正） |
+| 6 | 创作声明选项文案 | `包含 AI 辅助创作 作者对内容负责`（回读归一化零宽字符后 = `包含AI辅助创作作者对内容负责`）。**🔴 该项不随草稿持久化：刷新后回落「无声明」（3 次复现）。只在发布时提交，与坑 318 同族** | ✅ 已测（v3.76.0 坑 370） |
 | 7 | 专栏默认值 | **默认是「不发布到专栏」（`PublishPanel-columnLabel-0` checked=true），此时 combo 为 `null`；手动开启后 combo 默认值是上次用过的专栏（1031 实测「虢礫緙嘞」）**（v3.75.0 推翻旧记录，坑 352） | ✅ 已测（v3.75.0 修正） |
-| 8 | 封面 input | `input[type=file][accept=".jpeg, .jpg, .png"]`（class `UploadPicture-input`） | ✅ 已测 |
+| 8 | 封面 input | `input.UploadPicture-input`（`accept=".jpeg, .jpg, .png"`）。**🔴 v3.76.0：raw CDP `DOM.setFileInputFiles` 对它无效（`files.length` 恒 0），必须 Playwright `set_input_files`**；判据 = 面板里 `添加文章封面` 占位消失（「上传封面」字样常驻，恒真） | ✅ 已测（v3.76.0 修正） |
 | 9 | 保存机制 | **无保存按钮，自动保存**；底部 `刚刚 · 草稿`；URL 变 `/p/<id>/edit` | ✅ 已测 |
 | 10 | 草稿列表入口 | 创作者中心侧栏「草稿箱(N)」 | ✅ 已测 |
 | 11 | 额外发现 | 发布设置含「投稿至问题 / 文章话题 / 定时发布 / 送礼物设置 / **内容来源**」；内容来源提示新闻类须标注来源 | ✅ 已测 |
 | 12 | 视频工具栏按钮 | `button[aria-label="视频"]`，点击弹出「导入视频」`Modal-content` | ✅ 已测 |
-| 13 | 视频上传 input | `input.VideoUploadButton-fileInput`，**弹窗前已在 DOM**，可直接 `set_input_files` | ✅ 已测 |
-| 14 | 视频落位 | 插在光标所在块；光标置文档开头 → block 0 自动空文本、block 1 为 VIDEO（即在正文之前） | ✅ 已测 |
-| 15 | 视频可播放判据 | `.Editable-video` 的 `dataset.videoPlayable === 'true'`，上传约 10–15 s | ✅ 已测 |
-| 16 | 视频持久化 | 刷新页面后视频卡片与前后文本均完好 | ✅ 已测 |
-| 17 | 图片上传 input | `input[type=file][accept*="image/webp"]`，上传落在光标块 | ✅ 已测 |
+| 13 | 视频上传 input | `input.VideoUploadButton-fileInput`，**`display:none`；raw CDP `DOM.setFileInputFiles` 返回成功但 `input.files.length` 恒 0**（ASCII 路径 / 复位面板 / 真实鼠标点击 / 导入弹窗四条路全试过）→ **必须用 Playwright `set_input_files`**（v3.76.0 坑 367） | ✅ 已测（v3.76.0 修正） |
+| 14 | 视频落位 | **~~插在光标所在块~~ 已被推翻**：知乎媒体块**一律追加到文档末尾**，光标不决定落点。唯一把视频放文首的办法 = **先插视频、再粘正文**（实测 block 1 = VIDEO）。事后搬动全部失败：光标置顶无效、Cut/Paste 无效、HTML5 拖拽会直接删掉视频块（v3.76.0 坑 367） | ✅ 已测（v3.76.0 修正） |
+| 15 | 视频可播放判据 | `.Editable-video` 的 `dataset.videoPlayable === 'true'`，**25 MB / 196 s 文件约 40 s**（旧记 10–15 s 偏乐观）。**卡片延迟出现，等待期内反复重试会累积成多个视频块（本期堆到 5 个），必须去重到 1 个**（v3.76.0 坑 367） | ✅ 已测（v3.76.0 修正） |
+| 16 | 视频持久化 | 刷新页面后视频卡片与前后文本均完好；**但刷新后可能出现 2 个视频块（延迟上传的第二次生效）**，需再核对 `vids == 1` | ✅ 已测（v3.76.0 补） |
+| 17 | 图片上传 input | `input[type=file][accept*="image/webp"]`。**占位符 -1 ≠ 图片 +1**（失败的替换会吃掉占位符但不产生卡片）；上传成功后常残留只含 `__IMG__` 的空块需单独清。**配图计数只认 `src` 含 `draft_token=<文章id>` 的 `img`**，`naturalWidth===1920` 的是视频封面缩略图（v3.76.0 坑 368） | ✅ 已测（v3.76.0 修正） |
 | 18 | 专栏真实选中判据 | **两级**：`.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 `checked` **且** combobox 文本归一化 == 目标专栏名（只判 `checked` 会漏掉「开关开了但选错」，v3.75.0 最终版） | ✅ 已测 |
 | 19 | 草稿箱 URL | `zhihu.com/creator/manage/creation/draft?type=article\|answer\|zvideo`，子标签「文章草稿」。**必须硬 goto `?type=article`**；点侧栏 tab 会落 `?type=answer` 只列回答草稿（v3.75.0 坑 353） | ✅ 已测（v3.75.0 修正） |
 | 20 | 端到端 | 视频 1（playable）+ 图 6 + 封面 1 + 创作声明 + 专栏，`ZHIHU_DRAFT_OK`。**注意该标志只覆盖视频/声明/正文/图数四项**，封面、专栏、字面星号须另行回读（v3.75.0 坑 354） | ✅ 已测（1030 / 1031 两期实跑） |
