@@ -1,13 +1,23 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.77.0
+version: 3.78.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.77.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.78.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.78.0 核心改进（2026-11-02 1102 日报实跑：公众号跨期抢标签 + 生图端点白天不可用，坑 383-389）**
+>
+> ① **公众号分步脚本会跨期抢标签**（坑 383）——比 1101 那次更隐蔽：`open` 步设的 `window.__wxXXXX` 标记**随进程退出丢失**，`title/body/images/save` 各步的 `editor_page()` 兜底分支「任意 appmsg+action=edit+type=77 且有 .ProseMirror」就抓到了**上期周报的草稿**。症状链极具欺骗性：1102 标题写进周报稿、`body` 步因 `cur > 800` 走 skip、`bodyLen = 1558` 看着「稳定」其实全是周报正文、7 个图片占位符全部 `not-found, skip`、`verify` 因 `ln > 800` 判过。**修法：公众号全链必须单进程跑完**，身份判据 = `#title == publish.json 标题`，新建草稿必须**标题为空**才算新建，每步先断言身份再动手。
+> ② **rainflow 白天直连不可用**（坑 384）：同一请求直连在 ~440KB 处 `curl(56) Connection reset`（211s / 300s / 532s 全断），**走本地代理 `-x http://127.0.0.1:7897` 54s 完整返回 2.27MB**。生图对 rainflow 端点默认带 `-x`；超时 `--max-time` 必须 ≥300s（`gpt-image-2` 单张 120s+，旧值 120 会把**成功响应**判成端点失败）。
+> ③ **本地 PIL 兜底图会被「已存在」判据骗过**（坑 385）：兜底图同样满足 `1920x1080 / ar≥1.6 / 无绿边`，`gen_scenes` 的 exists-OK 分支把它当已生成，**API 默不作声全部跳过还在日志里打 8/8 OK**。修法：用 `images/_missing.txt` 记录哪些场景是兜底图，标记里的场景下一轮优先重出 API，全部成功才清标记。
+> ④ **issue-word 断言炸了 = 描述该补，不是断言该放宽**（坑 386）：视频号/抖音 description 短，`Instant` / `二三十` 常缺席，先炸的是断言。补描述是正解。
+> ⑤ **知乎「发布到专栏」默认是关的**（坑 387）：真控件是 `.RadioButtonSet-label`（两个：发布到专栏 / 不发布到专栏），旧代码只读 `radio.closest('label[for]').innerText`（拿到空串）且**不做点击动作**，恒判「未选中」。而且 **combo 默认值是上次用过的专栏**（实测默认「羊报AI周刊」），必须点开 `.Select-option` 选本期专栏。
+> ⑥ **知乎正文的 AI 辅助创作说明必须逐字固定**（坑 388）：禁止改写成「基于 linux.do 社区 … 265 帖 / 18 批 / valid 265」这类带来源平台名与抓取统计的版本（理由见 `templates/platform-zhihu.md §1.4`）。
+> ⑦ **端点模型名不可假设**（坑 389）：settings 里 `_002` 挂的是 `grok-imagine-image-quality`（网关报「分组 nonchat 下无可用渠道」）；elysiver 的 grok 网关默认返回**内网 url**（`10.64.0.5:30103`，客户端不可达），必须传 `response_format: b64_json`，且它只出 768×1152 竖图、不吃 size/aspect_ratio → **当不了 16:9 场景图备胎**。
+>
 > **🔴 v3.77.0 核心改进（2026-11-01 1101 日报实跑：**playwright 挂起的真根因找到了**，坑 373-382）**
 >
 > 本期最大的收获是一条**推翻了 v3.65.0 结论**的根因：`connect_over_cdp` 挂在 `ws connected` 之后，**不是**「daemon 时段性抖动，等 40 分钟自愈」——是**浏览器里有 renderer 已冻结的标签页，playwright 在 attach-all 阶段卡死在它们身上**。这个误判让我在本期空转约 7 小时（坑 373）。
@@ -6974,6 +6984,76 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **另补两条**：① 知乎「创作声明」控件定位 —— 页面有多个 `[role=combobox]`（投稿至问题 / 创作声明 / 文章话题），按「第一个」取会拿到「投稿至问题」导致选项恒空；必须沿 combobox 向上 ≤4 层找 innerText 以 `创作声明` 开头的那一行；`div.css-be2u3` 本期页面上有 6 个，不可作定位锚点。② 步骤式上传脚本**单步模式下不得关闭标签**（坑 330 补）——`finally` 里只有 `STEP == 'all' and not keep` 才关，否则一步跑完就把已上传的 25 MB 丢掉。
 
 **本期正例**：月报 11,451 主题 / 31 天全覆盖 / PDF 7 页；成片 195.52 s / 25,161,505 B；公众号 `MP_VERIFY_OK`（正文 1391 字 / 9 图 / 封面 / 合集「羊报AI月报」/ 字面 `**` 0）；知乎文章 `2100303881762874483` 刷新后 13 项过 12 项（唯一未过项为坑 370）。
+
+### v3.78.0（2026-11-02 1102 日报实跑：公众号跨期抢标签 + 生图端点白天不可用，坑 383-389）
+
+本期日报 257 帖（265 抓 / 0 err / 18 批），成片 244.885 s / 20,473,836 B，锚点 0.7353，8 场景，五平台全草稿。值得单独记的是**一条能在十分钟内毁掉整期稿件的隐蔽串期**，和**一套白天全线不可用的生图端点**。
+
+#### 坑 383：公众号分步脚本跨期抢标签 —— 每一步都「验过了」，验的全是别人的稿
+
+**症状链**（每一步单独看都合理，串起来是灾难）：
+
+| 步骤 | 日志读数 | 真实情况 |
+|---|---|---|
+| `open` | `open OK: .../appmsg?t=media/appmsg_edit&action=edit` | 这个标签是**上期周报的草稿**（`appmsgid=100001846`） |
+| `title` | `title OK len 64` | 1102 标题写进了周报稿，周报标题被覆盖 |
+| `body` | `structure check: no-dialog` / `bodyLen: 1558` / `body saved, bodyLen stable: 1558` | `cur > 800` → 走 skip 分支；1558 字全是周报正文，1102 正文一个字没进 |
+| `images` | 7 个 `PLACEHOLDER_IMG_n: already replaced, skip` / `placeholders remaining: 0` | 周报稿里没有占位符 → 全部 not-found → skip；`= 0` 是「本来就没有」不是「都换完了」 |
+| `verify` | `ln > 800` 判过 | 在周报稿上判过 |
+
+**根因**：`editor_page(ctx)` 的兜底分支只要「任意 `appmsg` + `action=edit` + `type=77` 且有 `.ProseMirror`」。`open` 步设的 `window.__wx1102 = 1` 标记**只活在那个进程的标签页里**——七个步骤是七个独立进程，标记根本不是跨进程的持久身份，于是每一步都在重新猜。
+
+**修法（已固化为 `mp_<date>_run.py`）**：
+1. **全链单进程**跑完 `open → title → body → images → cover → collection → save → verify`，标记才不会丢。
+2. 身份判据 = **`#title` 的 value 归一化后 == `publish.json` 标题**；`allow_empty` 分支只在「新建草稿」时用，且**必须真的为空**才认（空 = 刚建的；有标题 = 捡来的旧稿，关掉重开）。
+3. 每步动手前 `assert_identity()`；正文断言**首句签名 + 尾句签名**双向（本期 `1. 无限没了，用量翻倍` / `十一月第二天`）。
+4. `images` 步的 `not-found` **不能一律当「已替换」**——先数占位符总数，`0` 且图数量对得上才算过。
+
+**破坏已发生时的恢复顺序**：先用正文首句确认这是哪一期的稿子（「一周之内，订阅的价签被算穿了」= W43 周报）→ 只把它的标题改回去（`#title` 直接赋值 + `input`/`change` 事件 + 保存为草稿）→ 复核正文/图数/封面未变 → 再给本期**另建**新稿。**不要**在原稿上改正文试图「修好」。
+
+#### 坑 384：rainflow 白天直连全线 reset，必须走本地代理
+
+同一 prompt、同一端点，直连 `curl(56) Connection reset by peer`：211 s（440 KB / 2.1 MB）、300 s（911 KB）、532 s（450 KB）三次全断；**加 `-x http://127.0.0.1:7897` 后 54 s 完整返回 2,277,141 B**。网关在 Cloudflare 后面，直连出口不稳定。
+
+- 生图脚本对 **rainflow 端点默认带 `-x http://127.0.0.1:7897`**（其它网关不加）。
+- `--max-time` **≥ 300s**：`gpt-image-2` 单张 120 s+，旧的 `--max-time 120 / timeout 130` 会把**成功的响应**当端点失败（curl exit 28 → `CalledProcessError` → 日志写「endpoint except」），8 个场景能被误判成 7 个失败。
+- 清理产物要容错：`os.remove()` 清理不存在的文件会抛 `FileNotFoundError`，被外层 `except` 记成「端点失败」，把真实原因（下载没落盘）彻底盖住。
+
+#### 坑 385：本地 PIL 兜底图会被「已存在」判据骗过，API 静默全跳过
+
+`gen_scenes` 的 exists-OK 判据是「能严格解码 + `ar ≥ 1.6` + 底边无绿带」，而**本地 PIL 兜底图完全满足这三条**（1920×1080 / ar 1.778 / 无绿边）。于是：先生成兜底图顶住流水线 → 端点恢复后再跑 `gen_scenes` → 每条都 `exists OK (1920, 1080)` **一张都不重出**，日志还打 `DONE. generated: 8 / 8 missing: []`。
+
+修法：`images/_missing.txt` 记录「哪些场景是兜底图」；`need_api()` 先查标记，标记里的场景**无视 exists-OK 强制重出**；全部成功后才 `rm` 标记。成片里若混进兜底图，风格会明显跳（本期场景 4 就是扁平矢量夹在 7 张 3D 渲染里）——**渲染前必须 `ls images/` 看文件大小**，API 出的 1.2–1.8 MB，兜底图 ~90 KB，一眼能分开。
+
+#### 坑 386：issue-word 断言炸了，说明描述该补，不是断言该放宽
+
+公众号/视频号/抖音的 description 是短文案，本期 `Instant`、`二三十` 在视频号描述里缺席 → `AssertionError: missing issue word: Instant`。这是**断言在正常工作**：本期最重要的事实没写进简介。正解是把 `Instant 还保持无限`、`把额度用出二三十倍` 补进描述，重出 `publish.json`，而不是删断言。
+
+#### 坑 387：知乎「发布到专栏」默认是关的，且 combo 默认值是上次用过的专栏
+
+```
+ColumnSetting-ColumnSelector
+  └ .css-vtcda0
+      └ label  (两个)
+          ├ .RadioButtonSet-label「发布到专栏」   ← 默认未选
+          └ .RadioButtonSet-label「不发布到专栏」 ← 默认选中
+```
+
+旧 `step_column` 两个毛病：① `radio.closest('label[for]').innerText` 拿到空串（文本在 `.RadioButtonSet-label` 里，不在 `label[for]` 上）；② **只读不点**，永远停在默认档，于是恒报 `未选中「发布到专栏」`。
+
+正解顺序：点 `.RadioButtonSet-label` 里文本为 `发布到专栏` 的那个 → 等 2s → 点 `button[role=combobox]` → 等 2.2s → 点 `.Select-option` 里含本期专栏名的那个（**默认值是上次用过的专栏**，本期默认「羊报AI周刊」，要的是「今日羊报AI」）→ 回读 `.RadioButtonSet-label` 的 checked 状态 + combo 文本双确认。
+
+#### 坑 388：知乎 AI 辅助创作说明必须逐字固定，禁止带来源平台名与抓取统计
+
+见 `templates/platform-zhihu.md §1.4`。本期初稿写成「本文由「今日羊报 AI」基于 linux.do 社区 2026-10-31 16:05 至 2026-11-02 00:05（32 小时窗口）的公开讨论整理生成：双源合并去重后落入窗口 265 帖，全量抓取正文（18 批，valid 265，err 0）……」——那段答的是「数据从哪来」，不是细则问的「AI 用在哪、谁负责」，且把第三方平台名写进了正文。派生脚本里这段要当**常量**。
+
+#### 坑 389：端点模型名不可假设，grok 网关当不了 16:9 备胎
+
+- settings 的 `_002` 挂的是 `grok-imagine-image-quality`，网关报「分组 nonchat 下模型 grok-imagine-image-quality 无可用渠道」。`GEN_IMG_MODEL_*` 的值必须逐端点核对，不能假设都叫 `gpt-image-2`。
+- elysiver 的 grok 网关默认返回**内网直链**（`http://10.64.0.5:30103/v1/media/images/...`），客户端不可达，日志表现为「download did not land」。必须传 `response_format: b64_json`。
+- 即便如此它也只出 **768×1152 竖图**，传 `size: 1536x1024` / `aspect_ratio: 16:9` 都不生效 → **当不了 16:9 场景图备胎**，只能兜底竖版封面这类本来就要竖图的场景。
+
+**本期正例**：日报 257 帖；PDF 258,701 B；成片 244.885 s / 20,473,836 B / 7,345 帧；字幕复验（取自渲染后 mp4）median +0.144 s，8 个场景切点 Δ≤1 ms；公众号 `appmsgid=100001849` bodyLen 2,023 / 占位符 0 / 合集「今日羊报 AI」；视频号 draftItems=9 / feedItems=0 / 本期按钮集〔编辑,删除〕；知乎 `/p/2100580824991131409` `ZHIHU_DRAFT_OK`。
 
 ### v3.77.0（2026-11-01 1101 日报实跑：playwright 挂起的真根因 + 月末派生 + 公众号/知乎六坑，坑 373-382）
 
