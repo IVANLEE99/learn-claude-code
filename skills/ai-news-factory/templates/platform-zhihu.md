@@ -95,6 +95,18 @@
 >
 > 派生脚本里请把这段当**常量**（和标题、尾部 CTA 一样），不要跟着日报统计字段拼串。
 
+> **🔴 v3.79.0 补强（W43 周报复发）：这条规则必须写进「派生器模板」，否则下一期原样复活。**
+> 坑 388 在 1102 日报脚本里已经落地成硬断言，但 **W43 周报的知乎稿从更早的模板派生**，于是同一句错话又出现了：
+> > 本文由「羊报AI周刊」基于 **linux.do 社区** 2026-10-26 至 2026-11-01 的公开讨论整理生成：周内去重 2453 帖，过滤后收录 2365 帖……
+>
+> **状态：该期稿件已按固定句改正。**
+> **铁律：`AI_DISCLOSURE` 常量与禁词断言属于「随 skill 演进」的部分，派生时从 `templates/` 拷，不要从上一期脚本拷。** 派生后立刻跑：
+> ```bash
+> grep -c 'linux\.do\|linuxdo\|linux do' <新稿>.md   # 必须 0
+> grep -c '本文由作者主导选题'            <新稿>.md   # 必须 1
+> ```
+> **适用范围不止知乎**：公众号图文、视频口播、字幕、B站/抖音/视频号简介、封面大字，全部禁止出现来源平台名（skill 主文档 v3.17.0 已有此规则，本期再次踩到说明它只写在「注意事项」里、没写进派生器自检）。**派生后对全部产出物跑一遍禁词 grep，不要只查知乎稿。**
+
 ### 1.5 标题规则
 
 - 上限 **100 字**（编辑器 placeholder 明示「最多 100 个字」）
@@ -113,6 +125,39 @@
 - 补图正解：在**每个 `## ` 小节之后**插 `![场景{i}](wechat-images/scene{i}.jpg)`，插完重跑 `body` 步（会重贴带占位符的正文），再跑 `images` 步逐个替换占位块。
 
 **② 视频块是否真落块**（坑 377）：见 §3.7 末尾的上传可靠性说明。
+
+### 1.7 派生源铁律：从 `templates/` 拷，不要从上一期脚本拷（坑 395）
+
+**W43 周报实例**：`坑 388` 的 `AI_DISCLOSURE` 硬断言两天前就在 1102 日报脚本里了，但周报的知乎稿**从更早的模板派生**，于是同一句错话原样复活；同期的 `cdp_w43.py` 也还是旧箭头判定，本期又炸出 `async async`（而 `templates/cdp_helper.py` 早在 v3.67.0 就改成了括号深度扫描）。
+
+**为什么会这样**：上一期脚本是「那天正确的快照」，不是「今天正确的源」。拷它可以跑通，但它把**已经修好的坑一起拷回了解放前**。
+
+**派生第一件事（写进派生器脚本头部注释）**：
+
+```bash
+cp templates/cdp_helper.py        scripts/cdp_<id>.py        # ✅
+cp ../<上期>/scripts/cdp_*.py     scripts/cdp_<id>.py        # ❌ 会把旧 bug 带回来
+```
+
+`AI_DISCLOSURE`、禁词表、`assert_identity`、`assert_editor`、`_is_arrow_at_top` 都属于**随 skill 演进**的部分，一律从 `templates/` 取。
+
+**派生后立刻跑的四条自检**（缺一条就别往下走）：
+
+```bash
+D=<新期目录>
+# 1. AI 声明：固定句在、平台名不在
+grep -c '本文由作者主导选题' "$D/zhihu-article-"*.md           # 必须 1
+grep -c 'linux\.do\|linuxdo\|linux do' "$D/zhihu-article-"*.md  # 必须 0
+# 2. helper 没落后于模板
+diff <(sed -n '/_is_arrow_at_top/,/return False/p' "$D/scripts/cdp_"*.py) \
+     <(sed -n '/_is_arrow_at_top/,/return False/p' templates/cdp_helper.py) && echo HELPER_OK
+# 3. 图片标记数 == 预期
+grep -c '!\[' "$D/zhihu-article-"*.md
+# 4. 全产出物禁词（不只知乎稿）
+grep -rn 'linux\.do\|linuxdo\|linux do' "$D"/*.md "$D"/publish.json
+```
+
+**判据形态归位**：`坑 355`（未回写 = 未修复）说的是「临时探针里的修复不算修复」；坑 395 是它的**第二种形态**——修复只写进了当期实例，没写进派生源。共同点是「下次还会犯」，区别是前者在内存里、后者在文件系统里，**更隐蔽**——因为在当期脚本里能搜到那句断言，看着像已经修好了。
 
 ---
 
@@ -209,13 +254,33 @@ page.goto('https://zhuanlan.zhihu.com/write', wait_until='domcontentloaded')
 | 图片块 | 块内 `img`（src 含 `pic-private.zhihu.com`） |
 | 视频上传 input | `input.VideoUploadButton-fileInput`（**打开弹窗前就已存在于 DOM**） |
 | 视频工具栏按钮 | `button[aria-label="视频"]` |
-| 图片上传 input | `input[type=file][accept*="image/webp"]` |
+| 图片上传 input | **`input[accept*="image/webp"]`**（正文配图专用，常驻 DOM）。**🔴 v3.79.0 坑 392：编辑器里常驻 3 个 `input[type=file]`，按用途分开**——① 导入文档 `.pdf,.md,.txt,…` ② **正文配图 `image/webp,image/jpg,…`** ③ 封面 `.jpeg, .jpg, .png`（class `UploadPicture-input`）。**禁止按索引取**（`inputs[1]` 会拿错），**也别用 `input[type=file]` 全取**——点工具栏「图片」会**动态挂第 4 个 `image/*` input**，等待结束时它通常已被替换成空壳，往里塞文件返回 `files=1` 但什么都不发生 |
 | 封面 | `input[type=file][accept=".jpeg, .jpg, .png"]`（class `UploadPicture-input`） |
 | 创作声明 | `div.css-be2u3` 中 `label` 文本 == `创作声明` → 其 `button[role=combobox]` |
 | 创作声明选项 | `.Select-option`，目标文本 `包含 AI 辅助创作 作者对内容负责` |
 | 专栏收录 | `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 **`checked` 属性**；真实专栏名 `「今日羊报 AI」`（中间是半角空格 U+20，末位是大写 I） |
 | 保存状态 | 底部 `刚刚 · 草稿` / `N 分钟前 · 草稿`（**自动保存，无「保存草稿」按钮**） |
 | 危险按钮 | `发布`（`Button--pri`）、`预览`（安全但无用） |
+
+> **🔴 v3.79.0 坑 390：`/p/<id>` 阅读页也有 `div.public-DraftEditor-content`，别把它当编辑器。**
+> 已发布的知乎文章阅读页实测：`hasTitleInput: false` / `editorCount: 1` / `dataBlocks: [1]` / `editorTexts: [" "]` / `bodyLen: 0` / `title: ""`。也就是说「有编辑器容器」「标题空」「正文空」**三条全部成立**——旧 `assert_editor` 因此把一篇已经发出去的文章认成「刚建好的空草稿」，后续步骤全在原稿上跑。
+> **URL 判据必须要求 `/edit` 结尾**：
+> ```python
+> assert st['url'].startswith('https://zhuanlan.zhihu.com/write') \
+>     or re.search(r'zhuanlan\.zhihu\.com/p/\d+/edit', st['url']), \
+>     f'FATAL: 不是可编辑页面 {st["url"][:90]}'
+> ```
+> 知乎评论框也用同一套 Draft.js，这是站点固有形态，不是异常。**任何「页面长得像编辑器」的判据都要反问：阅读态会不会也命中。**
+
+> **🔴 v3.79.0 坑 391：`input.files.length === 1` 不能证明图片进了正文。**
+> W43 实测：3 张图每张都回读 `files.length === 1`，占位符也确实从 10 减到 7，但正文 `draft_token` 图数**恒为 0**——`blob:` 预览能渲染，**永远不换成 `pic-private.zhihu.com` 真链**。且失败**不稳定**：进页面后的第一张能成，之后每张都被静默丢弃（首张 CORS 正常，后续被拦）。
+> **唯一有效判据**：块内 `img.src` 含 `draft_token=<文章id>`。`files.length` 只证明「文件进了 input」，不证明「进了正文」。
+> **处置**：连续 2 张 `imgTok` 不增立刻停手切 `locator.set_input_files`（走坑 392 的稳定 input），**不要重试第 3 次**——重试只会把一个空块顶到别处，制造坑 393 的错位。
+
+> **🔴 v3.79.0 坑 393：逐张替换占位符会让后续图片整体错位，占位符数量不是进度指示器。**
+> W43 实测块映射：`scene3` 落在应在 `scene2` 的位置、`scene4`/`scene5` 各错一格、`scene2` 被挤到文末成第 11 张——而「占位符归零 / IMG 块数 = 10」全部是绿的。
+> **根因**：占位符被吃掉 ≠ 图落到了那个位置。Draft.js 里图片落在**当前光标处**，光标位置取决于上次操作后的选区。先连续失败 3 次再成功时，前 3 个空块会被后来的图顶上去。
+> **必做校验**：把正文每张图下载算 MD5 ↔ 本地 `zhihu-images/scene*.jpg` 建反查表，逐块比对位次。**位次错就全部删除重插**，不要「只补缺的那张」。
 
 ### 3.4 填标题
 
@@ -791,7 +856,7 @@ body_imgs = page.evaluate("""(id) => [...document.querySelectorAll('div.public-D
 | 14 | 视频落位 | **~~插在光标所在块~~ 已被推翻**：知乎媒体块**一律追加到文档末尾**，光标不决定落点。唯一把视频放文首的办法 = **先插视频、再粘正文**（实测 block 1 = VIDEO）。事后搬动全部失败：光标置顶无效、Cut/Paste 无效、HTML5 拖拽会直接删掉视频块（v3.76.0 坑 367） | ✅ 已测（v3.76.0 修正） |
 | 15 | 视频可播放判据 | `.Editable-video` 的 `dataset.videoPlayable === 'true'`，**25 MB / 196 s 文件约 40 s**（旧记 10–15 s 偏乐观）。**卡片延迟出现，等待期内反复重试会累积成多个视频块（本期堆到 5 个），必须去重到 1 个**（v3.76.0 坑 367） | ✅ 已测（v3.76.0 修正） |
 | 16 | 视频持久化 | 刷新页面后视频卡片与前后文本均完好；**但刷新后可能出现 2 个视频块（延迟上传的第二次生效）**，需再核对 `vids == 1` | ✅ 已测（v3.76.0 补） |
-| 17 | 图片上传 input | `input[type=file][accept*="image/webp"]`。**占位符 -1 ≠ 图片 +1**（失败的替换会吃掉占位符但不产生卡片）；上传成功后常残留只含 `__IMG__` 的空块需单独清。**配图计数只认 `src` 含 `draft_token=<文章id>` 的 `img`**，`naturalWidth===1920` 的是视频封面缩略图（v3.76.0 坑 368） | ✅ 已测（v3.76.0 修正） |
+| 17 | 图片上传 input | **正文配图专用 = `input[accept*="image/webp"]`**。**🔴 v3.79.0 坑 392：编辑器常驻 3 个 `input[type=file]`（导入文档 / 正文配图 / 封面），点工具栏「图片」还会动态挂第 4 个 `image/*`，禁按索引取**。**占位符 -1 ≠ 图片 +1**（失败的替换会吃掉占位符但不产生卡片）；**`files.length===1` 也不等于进了正文**（坑 391：`blob:` 预览渲染但不换真链）。**配图计数只认 `src` 含 `draft_token=<文章id>` 的 `img`**，`naturalWidth===1920` 的是视频封面缩略图（坑 368）。**位次须按块↔场景哈希校验**（坑 393） | ✅ 已测（v3.79.0 修正） |
 | 18 | 专栏真实选中判据 | **两级**：`.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 `checked` **且** combobox 文本归一化 == 目标专栏名（只判 `checked` 会漏掉「开关开了但选错」，v3.75.0 最终版） | ✅ 已测 |
 | 19 | 草稿箱 URL | `zhihu.com/creator/manage/creation/draft?type=article\|answer\|zvideo`，子标签「文章草稿」。**必须硬 goto `?type=article`**；点侧栏 tab 会落 `?type=answer` 只列回答草稿（v3.75.0 坑 353） | ✅ 已测（v3.75.0 修正） |
 | 20 | 端到端 | 视频 1（playable）+ 图 6 + 封面 1 + 创作声明 + 专栏，`ZHIHU_DRAFT_OK`。**注意该标志只覆盖视频/声明/正文/图数四项**，封面、专栏、字面星号须另行回读（v3.75.0 坑 354） | ✅ 已测（1030 / 1031 两期实跑） |

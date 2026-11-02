@@ -1,12 +1,24 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.78.0
+version: 3.79.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.78.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.79.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.79.0 核心改进（2026-11-02 W43 周报实跑：判据全绿，对象是错的，坑 390-395）**
+>
+> 本期六个坑**没有一个出在平台改版上**——全部出在我们自己的代码与判据里，而且其中五条的日志读数都是绿的。最值钱的一条在**修复的传播路径**上：`坑 388`（AI 声明禁带平台名）两天前已经在 1102 日报脚本里落地成硬断言，但 **W43 周报的知乎派生器是抄更早的版本写出来的**，于是同一句错话在新稿子里原样复活——`本文由「羊报AI周刊」基于 linux.do 社区 … 2453 帖 / 2365 帖整理生成`。**「改在实例里」不等于「改在派生源里」**（这是坑 355「未回写 = 未修复」的第二种形态）。**该稿已按固定句改正。**
+>
+> ① **`assert_editor` 会把「已发布文章的只读页」判成空草稿**（坑 390）。知乎 `/p/<id>`（**没有 `/edit`**）页面上同样存在 `div.public-DraftEditor-content`——实测 1 个空 `data-block`、无标题 textarea、`bodyLen=0`、`title=''`。旧判据「URL 含 `/p/<id>` **或** `/write`」+「标题空」+「正文空」这三条**同时成立**，等于把一篇已经发出去的文章认成「刚建好的空草稿」。**必修：URL 必须以 `/edit` 结尾**。
+> ② **`files.length === 1` 不能证明图片进了正文**（坑 391）。本期 3 张图 `input.files.length` 全是 1、占位符也确实被吃掉，但 `draft_token` 图数恒为 **0**——`blob:` 预览出得来，永远不换成 `pic-private.zhihu.com`。而且它**不是稳定失败**：进页面后的第一张能成，之后每张都被静默丢弃。判据只能是「块内 `img.src` 含 `draft_token=<文章id>`」。
+> ③ **知乎编辑器常驻 3 个 file input，按用途分开**（坑 392）：导入文档（`.pdf,.md,…`）/ 正文配图（`image/webp,image/jpg,…`）/ 封面（`.jpeg, .jpg, .png`，class `UploadPicture-input`）。工具栏点击还会**动态挂一个 `image/*` 的新 input**，那个是陷阱——等待动作结束时它已被替换成空壳。定位一律用 `input[accept*="image/webp"]`，禁止 `input[type=file]` 按索引取。
+> ④ **逐张替换占位符会让后续图片整体错位**（坑 393）。本期块映射实测：`scene3` 落在应在 `scene2` 的位置、`scene4`/`scene5` 各错一格、`scene2` 跑到文末变成第 11 张。**用「占位符在不在」当进度指示器是错的**，必须建立块→场景的哈希映射再判位次。
+> ⑤ **公众号封面操作会往正文尾部塞图**（坑 394）。「图片库选封面」失败重试两次，正文尾部留下 **2 份 `cover.png`**（1536×1152 PNG）。存草稿前必须按「正文只应有 sceneN.jpg、不应有 PNG」清一遍。
+> ⑥ **派生器抄旧 helper = 已修的 bug 原样复活**（坑 395）。W43 的 `cdp_w43.py` 仍是 `' =>' in src.split(')')[0]` 的旧箭头判定，本期又炸出 `async async`；skill 里 `templates/cdp_helper.py` 早已改成括号深度扫描。**派生第一件事：从 `templates/` 拷 helper 与断言常量，不要从上一期脚本拷。**
+>
 
 > **🔴 v3.78.0 核心改进（2026-11-02 1102 日报实跑：公众号跨期抢标签 + 生图端点白天不可用，坑 383-389）**
 >
@@ -7054,6 +7066,170 @@ ColumnSetting-ColumnSelector
 - 即便如此它也只出 **768×1152 竖图**，传 `size: 1536x1024` / `aspect_ratio: 16:9` 都不生效 → **当不了 16:9 场景图备胎**，只能兜底竖版封面这类本来就要竖图的场景。
 
 **本期正例**：日报 257 帖；PDF 258,701 B；成片 244.885 s / 20,473,836 B / 7,345 帧；字幕复验（取自渲染后 mp4）median +0.144 s，8 个场景切点 Δ≤1 ms；公众号 `appmsgid=100001849` bodyLen 2,023 / 占位符 0 / 合集「今日羊报 AI」；视频号 draftItems=9 / feedItems=0 / 本期按钮集〔编辑,删除〕；知乎 `/p/2100580824991131409` `ZHIHU_DRAFT_OK`。
+
+### v3.79.0（2026-11-02 W43 周报实跑：修好的东西在派生器里复活，坑 390-395）
+
+W43 周报（2026-10-26~11-01，10 个场景 / 10 张配图 / 1 条视频，用户最终手动上传发布）。本期没有新的平台改版，六个坑全部出在**我们自己的代码与判据**上，其中坑 395 是根因级的。
+
+#### 坑 390：`assert_editor` 把「已发布文章的只读页」判成空草稿
+
+**症状**：脚本一路 `open OK`，随后 `title` / `body` / `images` 全在原稿上跑。实测该标签 URL 是 `zhuanlan.zhihu.com/p/2100562931201196145`——**没有 `/edit`**，是已经发出去的文章阅读页。
+
+只读页上探针读数：
+
+```
+hasTitleInput: false        ← 没有标题 textarea
+editorCount: 1              ← 但 DraftEditor 存在
+dataBlocks: [1]             ← 一个空块
+editorTexts: [" "]          ← 空的
+bodyLen: 0   title: ""      ← 断言全过
+```
+
+**根因**：旧 `assert_editor` 的 URL 判据写的是
+
+```python
+assert st['url'].startswith('https://zhuanlan.zhihu.com/write') or art_id_from_url(st['url'])
+```
+
+`art_id_from_url` 从 `/p/(\d+)` 取 id，**阅读页同样命中**。于是「URL 像编辑器」+「标题空」+「正文空」三条同时成立——一篇已发布的文章被认成刚建好的空草稿。
+
+**修法（已写死）**：URL 判据只认 `/edit` 结尾。
+
+```python
+assert st['url'].startswith('https://zhuanlan.zhihu.com/write') \
+    or re.search(r'zhuanlan\.zhihu\.com/p/\d+/edit', st['url']), \
+    f'FATAL: 不是可编辑页面 {st["url"][:90]}'
+```
+
+**同类指纹**：任何「页面长得像编辑器」的判据，都要问一句「**阅读态会不会也命中**」。知乎阅读页保留 Draft.js 容器（评论框也用同一套），这是它的固有形态，不是异常。
+
+#### 坑 391：`input.files.length === 1` 不能证明图片进了正文
+
+**症状**：3 张图逐个注入，每张都回读 `files.length === 1`，占位符也确实从 10 减到 7 —— 看着像成功。但正文 `draft_token` 图片数**恒为 0**。
+
+进一步观察：`blob:` 预览能渲染出来，但**永远不换成 `pic-private.zhihu.com` 真链**。
+
+**失败不是稳定的**：进页面后的**第一张**能成（首次 CORS 正常），之后每一张都被静默丢弃。这解释了为什么「单张测试通过 → 批量跑全灭」。
+
+**判据改正**：唯一有效判据是**块内 `img.src` 含 `draft_token=<文章id>`**。
+
+```python
+imgTok = len([i for i in body.querySelectorAll('img')
+              if 'draft_token=' in (i.src or '')])
+```
+
+`input.files.length` 只能证明「文件进了 input」，**不能证明「进了正文」**——这是坑 367 的判据版表述，v3.76.0 记了现象没记这条推论。
+
+**处置**：一旦连续 2 张 `imgTok` 不增，立刻停手切 Playwright（`locator.set_input_files` 走稳定 input，见坑 392），不要重试第 3 次。
+
+#### 坑 392：知乎编辑器有 3 个常驻 file input，按用途分开；工具栏还会动态挂第 4 个
+
+实测 `document.querySelectorAll('input[type=file]')`：
+
+| 序号 | accept | class | 用途 |
+|---|---|---|---|
+| 0 | `.pdf,.md,.txt,.ppt,.pptx,.xlsx,.xls,.docx,.doc,.webp,.png,.jpg,.mobi,.epub,.csv,.azw3,.html,.htm` | — | 导入文档 |
+| 1 | `image/webp,image/jpg,image/jpeg,image/png,image/avif,image/heic,image/heif,.avif,.heic,.heif,image/gif` | — | **正文配图** |
+| 2 | `.jpeg, .jpg, .png` | `UploadPicture-input` | 封面 |
+
+**陷阱**：点工具栏「图片」按钮会**动态挂载一个新的 `image/*` input**，旧的那个保留过期状态。等待动作结束时新 input 往往已被替换成空壳——往里塞文件同样返回 `files=1`，但什么都不发生。**本期有 3 张图就是死在这条路上。**
+
+**定位铁律**：
+
+```python
+# ✅ 正确：按 accept 子串取稳定 input
+page.locator('input[accept*="image/webp"]').first.set_input_files(path)
+
+# ❌ 错误：按索引取，会拿到导入文档 input
+inputs[1].set_input_files(path)
+
+# ❌ 错误：input[type=file] 全取，动态那个混进来
+```
+
+封面同理，按 `accept` 含 `.jpeg, .jpg, .png` 且 class 为 `UploadPicture-input` 定位。
+
+#### 坑 393：逐张替换占位符会让后续图片整体错位
+
+**现象**：10 张图全部插完、占位符归零、`IMG` 块数也对——但位次全错：
+
+| 块位 | 实插场景 | 应在位置 | 判定 |
+|---|---|---|---|
+| 6 | scene3 | 场景2 之后 | ✗ 错一格 |
+| 10 | scene4 | 场景3 之后 | ✗ 错一格 |
+| 14 | scene5 | 场景4 之后 | ✗ 错一格 |
+| 22 | scene2 | — | ✗ 多余的重复图 |
+| 23 | scene6 | 场景6 之后 | ✓ |
+
+也就是说：**先连续失败 3 次、再成功时，前 3 张的「空块」被后来的图顶了上去**，而 `scene2` 被挤到文末。
+
+**根因**：把「占位符数量减少」当进度指示器。占位符被吃掉 ≠ 一张图落到了那个位置——Draft.js 里占位符所在块被删后，图片落在**当前光标处**，而光标位置取决于上一次操作后的选区，不是占位符的原始位置。
+
+**判据（必须做）**：建 **块 → 场景** 的哈希映射，再判位次。
+
+```python
+# 1. 把正文每张图下载下来，算 MD5
+# 2. 与本地 zhihu-images/scene*.jpg 的 MD5 建反查表
+# 3. 逐块比对「这个位置应该是哪个场景」
+```
+
+本期靠这一步才定位到错位（仅靠块数 / `imgTok` 全是绿的）。
+
+**修法**：位次错就**全部删除重插**，并在每张插入后立刻校验 `imgTok` 与块位次同比递增；不要「只补缺的那张」。
+
+#### 坑 394：公众号封面操作会往正文尾部塞图
+
+**现象**：正文本该 20 张 `sceneN.jpg`，实际尾部多了 **2 份 `cover.png`**（1536×1152 PNG）——来自两次失败的「图片库选封面」尝试（fileid `100001842` / `100001845`）。
+
+判据很容易假绿：`loaded: 21/20` 看着像「多了一张，无所谓」。
+
+**存草稿前必做的清理**：
+
+```python
+# 正文配图只应有 sceneN.jpg，不应出现 PNG / cover
+assert not any(i['src'].lower().endswith('.png') for i in body_imgs), \
+    f'正文混入封面 PNG: {[i["src"] for i in body_imgs if i["src"].lower().endswith(".png")]}'
+```
+
+**同族**：任何「插图类」操作（封面预览、素材库插入、从正文选择）都可能**反向污染正文**。凡是「为了设某属性而插图」的步骤，做完都要重数正文图。
+
+#### 坑 395：派生器抄旧 helper = 已修的 bug 原样复活（本期根因）
+
+**这是本期最贵的一条。** `坑 388`（AI 声明禁带平台名）在 1102 日报脚本里已经落地成硬断言：
+
+```python
+AI_DISCLOSURE = ('本文由作者主导选题、核实与撰写，使用 AI 辅助整理公开信息与润色文字；'
+                 '所有事实性内容均经作者人工核对，作者对最终内容负责。')
+assert AI_DISCLOSURE in _md
+for _bad in ('linux.do', 'linuxdo', 'linux do'):
+    assert _bad not in _md
+```
+
+但 **W43 周报的知乎稿是抄更早的模板派生的**，于是同一句错话原样复活：
+
+> 本文由「羊报AI周刊」基于 **linux.do 社区** 2026-10-26 至 2026-11-01 的公开讨论整理生成：周内去重 2453 帖，过滤后收录 2365 帖……
+
+同一期，`cdp_w43.py` 里的箭头判定还是旧的 `' =>' in src.split(')')[0]`，本期又炸出 `async async`——而 `templates/cdp_helper.py` 早已改成括号深度扫描（v3.67.0 坑 316）。
+
+**根因是一条工作流缺陷**：派生时从**上一期脚本**拷贝，而不是从 `templates/` 拷贝。上一期脚本是「那天正确的快照」，不是「今天正确的源」。
+
+**修法（派生第一件事，已写死）**：
+
+1. **helper 一律从 `templates/` 拷**：`cp templates/cdp_helper.py scripts/cdp_<id>.py`，不要 `cp ../<上期>/scripts/cdp_*.py`。
+2. **断言常量从 `templates/` 拷**：`AI_DISCLOSURE`、禁词表、`assert_identity`、`assert_editor` 都属于「随 skill 演进」的部分，不随期次变。
+3. **派生后立刻跑一致性自检**：
+
+```bash
+# AI 声明与平台名：两处都查
+grep -c 'linux\.do\|linuxdo' <新稿>.md          # 必须 0
+grep -c '本文由作者主导选题' <新稿>.md          # 必须 1
+# helper 是否落后于模板
+diff <(sed -n '/_is_arrow/,/return False/p' scripts/cdp_<id>.py) \
+     <(sed -n '/_is_arrow/,/return False/p' templates/cdp_helper.py) && echo HELPER_OK
+```
+
+**判据形态**：`坑 355`（未回写 = 未修复）说的是「临时探针里的修复不算修复」；本期是它的**第二种形态**——**修复只写进了当期实例，没写进派生源**。两者的共同点是「下次还会犯」，区别是前者在内存里，后者在文件系统里，更隐蔽。
+
+**本期正例**：W43 周报 10 场景 / 10 配图 / 1 视频；知乎草稿 `p/2100562931201196145` 55 块（TXT 42 / IMG 10 / VIDEO 1）；公众号正文 20 图 / 封面 mmbiz / 无杂图。**用户最终手动完成五平台上传发布**（坑 215 收口），发布后草稿从草稿箱消失属坑 365 的预期行为。
 
 ### v3.77.0（2026-11-01 1101 日报实跑：playwright 挂起的真根因 + 月末派生 + 公众号/知乎六坑，坑 373-382）
 
