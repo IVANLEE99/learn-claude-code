@@ -1,13 +1,30 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.79.0
+version: 3.80.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.79.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.80.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.80.0 核心改进（2026-11-03 1103 日报全链实跑：断言层必须与内容层一起派生，坑 396-407）**
+>
+> 本期 403 帖（413 进队列 / 28 批 / err=0）→ 视频 304.917 s / 27.3 MB / 1920×1080，锚点 **0.7248**，8 场景；公众号 `MP_VERIFY_OK`（appmsgid=100001862）+ B站 + 知乎三平台草稿全绿。**最值钱的一条不是任何单个坑，而是一个模式**：`坑 241` 只说「内容层必须重写」，今天发现**断言层也必须重写**——派生脚本里的 `checks` / `forbidden` / `issue_words` / `COLLOQ` / 封面大字断言全是上期词。它们不会让成片串期，却会把**正确的内容判成 FAIL**，逼着人去「修」本来对的东西。今天这个模式在 6 个文件里各踩一次（`_md2typ` / `audit` ×2 / `_setup_remotion` / `bili_upload` / `douyin_e2e`）。
+>
+> ① **抓取列表阶段缺代理**（坑 396）：linux.do 直连在 **TLS Client Hello 阶段**就被 `Connection reset by peer`（`curl rc=35`，HTTP 000），而 crawl 阶段一直有 `proxy` 配置、fetch 阶段没有。**1102 直连还能通，说明是本机出网路径变了，不是站点问题**。修法：`_fetch_lists` 的 `launchPersistentContext` 补 `proxy: { server: 'http://127.0.0.1:7897' }`，**并同步改模板**，否则重新派生会退化（坑 395 的同一教训）。
+> ② **锚点必须 `ready` 且 `script_15s` 非空**（坑 397）：当天新入库的 4 个概念（无限承诺折旧 / 转售禁令化 / 额度可视化套利 / 多池编排）全是 `candidate`、`script_15s=""`，**按 bank 规则不可作锚点**。要从 ready 池里选语义贴合的：本期用 `rate_limit`（74 字、reviewed=True、距上次 2026-10-03 已 31 天 > reuse_gap_days=14），并把台词**原样**嵌进场景 7。
+> ③ **锚点占比「压线通过」不算通过**（坑 398）：首次 wav 实测 **0.7994**，距上限 0.80 只差 0.0006。扩写锚点场景后一度掉到 **0.6703**（撞下限），精确回调才落到 **0.7248**。**回调公式**：`scene7_new = pre*(1-r)/r - scene8`（`pre` = scene1..6 时长和，`r` = 目标占比，取 0.75~0.76 留边距）。
+> ④ **`script_15s` 逐字匹配对空白与引号敏感**（坑 399）：库内原文是**半角双引号**且 `API对你说` / `调API` **无空格**；口播排版若改成全角引号或加空格，逐字断言必失败。**照抄必须逐字节一致，一个字符都不能动**。
+> ⑤ **`python3 -I` 丢的不只是 PIL**（坑 400）：`faster_whisper` 同样装在用户级 site-packages，`-I` 下直接 `ModuleNotFoundError`。**凡依赖 pip 用户包的脚本（生图 / 封面 / 字幕 ASR 校验）一律禁用 `-I`**。
+> ⑥ **视频文件名必须取 `publish.json` 的 `video` 字段**（坑 401）：渲染时用了简名 `video-2026-11-03.mp4`，但三平台脚本都读 `pub['video']`（标题全名），`bili_upload` 的 `os.path.exists` 当场炸。**渲染完立刻按 publish 名重命名**，别等上传时才撞。
+> ⑦ **tags 与内容脱节是真问题，不是误报**（坑 402）：`gen_publish` 的「字段与上期雷同」断言抓出 `tags` 仍是 `ChatGPT/OpenAI/Gemini`，而本期主线是 **Claude / Grok / 转售禁令**——一个都不在。断言抓对了。改成本期主语后冲突消失。
+> ⑧ **平台登录态探测不能用宽松文本判据**（坑 403）：`'发表' in bodyText` 会把视频号**登录页的推广文案**「发表和管理视频或直播推流」判成已登录，导致我一度误报「登录恢复」。**公众号只认 `cgi-bin/home` + `token=`；视频号只认 URL 里没有 `login.html`**。
+> ⑨ **CDP 挂起是间歇性的，会自愈**（坑 404）：07:41→08:41 连续 6 次 `connect_over_cdp` 超时，`/json/version` 与 `/json/list` 全程正常（17 个 target），**09:06 自己恢复**。此形态与坑 373 的「冻结 target」不同——HTTP 面一直活着，只是 ws 连不上。**处置：不杀 daemon；先探 HTTP 面，再等或按坑 373 解冻单页**。
+> ⑩ **抖音 `DY_E2E_FAILED` 再次是假阴性**（坑 405）：`vids=1`、`final_resume_banner=true`、`descLen=226`、5 个标签都在，只有 `covers_ok=false`（封面槽读回为空）。**记 `done_with_caveat`——不记 success，也不记 failed**，封面那一项如实标「未验证」。
+> ⑪ **看门狗要防「看着在跑、其实永远跑不完」**（坑 406）：launch wrapper 发现 `daily` 已落盘但 `total<100` 时会 `sleep 600; continue` 永久空转，此后 `alive` 判据恒真 → 看门狗永远报 `RUNNING`、永不通知会话。**修法：单独拦这个形态**（`daily` 存在 + total<100 + launch.log 近 21 分钟内出现 `daily exists but total=`）→ 升级为 `ALERT`。
+> ⑫ **看门狗工程三件套**（坑 407）：① 同一条判定 **30 分钟内不重复写日志**（1102 每 3 分钟刷一行，18 小时写出 51 KB 噪声），但保留 30 分钟一次的心跳；② `alive()` 除 `kill -0` 外**必须校验 cmdline**，防 pid 被系统回收后误判「wrapper 还活着」；③ 新增**终态标记**（`data/logs/<issue>-DONE`），会话收工时 `touch`，看门狗据此退出——不依赖 `state.json` 一定被回写。
+>
 > **🔴 v3.79.0 核心改进（2026-11-02 W43 周报实跑：判据全绿，对象是错的，坑 390-395）**
 >
 > 本期六个坑**没有一个出在平台改版上**——全部出在我们自己的代码与判据里，而且其中五条的日志读数都是绿的。最值钱的一条在**修复的传播路径**上：`坑 388`（AI 声明禁带平台名）两天前已经在 1102 日报脚本里落地成硬断言，但 **W43 周报的知乎派生器是抄更早的版本写出来的**，于是同一句错话在新稿子里原样复活——`本文由「羊报AI周刊」基于 linux.do 社区 … 2453 帖 / 2365 帖整理生成`。**「改在实例里」不等于「改在派生源里」**（这是坑 355「未回写 = 未修复」的第二种形态）。**该稿已按固定句改正。**
@@ -651,6 +668,30 @@ W42 实测可用区间：**S1 Hook 20 字；S2–S8 单段 70–95 字；S9 锚�
 **🔴 月报前置检查**（仅当 `REPORT_MODE=monthly`）：
 - 确认 `data/monthly/{YYYY-MM}.md` 存在；若不存在，提示用户先运行 linuxdo-daily 月报模式生成。
 - 确认 B站/公众号后台已创建合集「羊报AI月报」（首次运行月报前必须人工创建，否则 Phase 11/12 合集选择失败）。
+
+### Phase 0.5: 派生自检（**新增，v3.80.0；不通过不许进 Phase 1**）
+
+> 完整可跑清单见 **`templates/derive-checklist.md`**。这里只列「必须记住的四条」。
+
+**① 派生源只从 `templates/` 拷，不从上一期脚本拷。**
+`cdp_helper.py` / `issue_guard.py` / `gen_captions.py` / `revive_frozen_tabs.py` 属于「随 skill 演进」的部分，上一期脚本是「那天正确的快照」（坑 395）。
+
+**② 内容层与断言层**必须一起重写。**
+这是 v3.80.0 的核心。`坑 241` 只说了内容层，今天的代价是断言层：`checks` / `forbidden` / `issue_words` / `COLLOQ` / 封面大字断言 / `_setup_remotion` 首行断言 / `bili`+`douyin` 的 issue words——**它们不会让成片串期，只会把正确的内容判成 FAIL**。逐文件对照表见 `templates/derive-checklist.md §2`。
+
+**③ 禁词表 × 当日报告交叉 grep（坑 326，每期必跑，且在编译前）。**
+
+```python
+conflicts = [f for f in forbidden if f in md]
+assert not conflicts, f'禁词在 {DATE} 报告中合法出现: {conflicts}'
+```
+
+1103 实测：`workbuddy` / `codebuddy` / `反代封号` / `二三十倍` 是 1102 的禁词，但 1103 的报告**合法引用**它们（新政策禁的正是这类玩法）。**照抄禁词表 = 编译在最后一步炸。**
+
+**④ 锚点先定，再写 script。**
+顺序反了就是整段重写（坑 397）。判据：`ready` + `script_15s` 非空 + `authored_by=ai-concept-narrator` + `reviewed=True` + 距 `last_used` ≥ 14 天。当天新入库的概念**一定不满足**。
+
+---
 
 ### Phase 1: 输入、去重与事件切分
 
@@ -7066,6 +7107,327 @@ ColumnSetting-ColumnSelector
 - 即便如此它也只出 **768×1152 竖图**，传 `size: 1536x1024` / `aspect_ratio: 16:9` 都不生效 → **当不了 16:9 场景图备胎**，只能兜底竖版封面这类本来就要竖图的场景。
 
 **本期正例**：日报 257 帖；PDF 258,701 B；成片 244.885 s / 20,473,836 B / 7,345 帧；字幕复验（取自渲染后 mp4）median +0.144 s，8 个场景切点 Δ≤1 ms；公众号 `appmsgid=100001849` bodyLen 2,023 / 占位符 0 / 合集「今日羊报 AI」；视频号 draftItems=9 / feedItems=0 / 本期按钮集〔编辑,删除〕；知乎 `/p/2100580824991131409` `ZHIHU_DRAFT_OK`。
+
+### v3.80.0（2026-11-03 1103 日报全链实跑：断言层与内容层必须一起派生，坑 396-407）
+
+本期 403 帖（413 进队列 / 28 批 / err=0），日报 23.9 KB / press 10.3 KB / PDF 328,855 B·6 页，成片 304.917 s / 27.3 MB / 1920×1080 / 9147 帧，锚点 **0.7248**，字幕 136 行，ASR 块边界 Δ≤1 ms。公众号 `MP_VERIFY_OK`（appmsgid=100001862，bodyLen 2204，placeholders 0，封面 qpic，合集「今日羊报 AI」）、知乎 `ZHIHU_DRAFT_OK`（2288 字 / 7 图 / 1 视频 / 专栏双证）、B站草稿全绿。
+
+**本期最贵的不是任何单个坑，是一条派生纪律的补全。** `坑 241` 说「语法检查不算数，内容层必须重写」，但没说**断言层也必须重写**。今天在 6 个文件里各踩一次：`_md2typ` 的 `checks`/`forbidden`、`audit` 的 `issue_words` 与 `COLLOQ` 与封面大字断言、`_setup_remotion` 的首行断言、`bili_upload` 与 `douyin_e2e` 的 issue words。这些断言**不会让成片串期**（所以不会被「口径一致性」检查发现），却会把**正确的内容判成 FAIL**。
+
+#### 坑 396：抓取列表阶段没有代理，linux.do 直连在 TLS 握手阶段就被重置
+
+**症状**：抓取链启动后 `_fetch_lists` 一直拿不到列表，或直接抛 `net::ERR_CONNECTION_RESET`。
+
+**诊断证据**（不要凭猜测，跑这两条就能定性）：
+
+```bash
+# 直连：TCP 能连上，但 TLS Client Hello 之后被重置
+curl -sv --max-time 20 https://linux.do/ 2>&1 | grep -iE "Connected|TLS|Recv failure"
+#   * Connected to linux.do (104.20.16.234) port 443
+#   * (304) (OUT), TLS handshake, Client hello (1):
+#   * Recv failure: Connection reset by peer
+
+# 代理：返回 Cloudflare 挑战页（passCloudflare() 能过）
+curl -s --max-time 25 -x http://127.0.0.1:7897 https://linux.do/ | head -c 200
+#   <html dir="ltr"><head><title>Just a moment...</title>
+```
+
+**根因**：`_crawl_*.mjs` 的 `launchPersistentContext` 早就带 `proxy: { server: 'http://127.0.0.1:7897' }`，但 **`_fetch_lists_*.mjs` 从来没有**。1102 期直连还能通，所以这个缺口一直没暴露；1103 开工前实测直连已被重置——**是本机出网路径变了，不是站点问题**。
+
+**修法（两处都要改）**：
+
+```js
+const context = await chromium.launchPersistentContext(PROFILE, {
+  headless: HEADLESS,
+  executablePath: EXEC,
+  proxy: { server: 'http://127.0.0.1:7897' },   // ← 补这一行
+  args: ['--disable-blink-features=AutomationControlled'],
+  viewport: { width: 1440, height: 900 },
+});
+```
+
+1. 改当期 `_fetch_lists_<id>.mjs`；
+2. **同步改派生模板**（`data/_fetch_lists_<上期>.mjs` 或 `templates/` 里的副本），否则下一期重新派生又退化（与坑 395 同一教训）。
+
+**顺带一条判据**：`proxy 7897 down` 与「直连被墙」是两件事。launch wrapper 的 `proxy_ok()` 只能证明本地代理端口活着，**不能证明目标站可达**。真正的可达性判据是「代理下能拿到 `Just a moment` 或 200」。
+
+#### 坑 397：锚点必须 `ready` + `script_15s` 非空，新入库的概念一时用不了
+
+**症状**：`audit` 报 `锚点概念 eligible + 台词逐字使用 — <id> status=candidate 15s=0字 ... reviewed=False`。
+
+**本期实际经过**：1103 的日报主题是「三家同日收紧无限」，我先在概念库里新增了 4 条——`infinity_depreciation`（无限承诺折旧）/ `resale_prohibition`（转售禁令化）/ `quota_visibility_arbitrage`（额度可视化套利）/ `multi_pool_orchestration`（多池编排）。语义上「无限承诺折旧」与本期主线几乎完全贴合，**但它当天入库，状态是 `candidate`、`script_15s` 为空、`reviewed=False`**——按 concept-bank 规则**不可作锚点**。
+
+**正确处置**：从 `ready` 池里选语义最贴合的，接受「换讲法」而不是「换概念定义」。本期选了 `rate_limit`（Rate Limit / 配额，74 字，`authored_by=ai-concept-narrator`，`reviewed=True`，`use_count=3`，`last_used=2026-10-03`，距本期 31 天 > `reuse_gap_days=14`），把它接到「平台把无限改成了会叫号的阀门」这个角度上。
+
+**选锚点的三条硬判据（缺一不可）**：
+
+```python
+assert c['status'] == 'ready'
+assert len(c.get('script_15s') or '') > 50
+assert c['script_meta']['authored_by'] == 'ai-concept-narrator'
+assert c['script_meta']['reviewed'] is True
+# 复用间隔
+assert (today - last_used).days >= 14
+```
+
+**开工顺序修正**：先查 concept-bank 定锚点，**再**写 script/voiceover。反过来做就是整段重写（本期实际发生了一次）。
+
+#### 坑 398：锚点占比「压线通过」不算通过
+
+**本期实测轨迹**：
+
+| 阶段 | scene7 时长 | 总时长 | 锚点占比 | 判定 |
+|---|---|---|---|---|
+| TTS 首轮 | 47.36 s | 276.29 s | **0.7994** | PASS，但距上限仅 0.0006 |
+| 扩写 +176 字后 | 100.61 s | 329.54 s | **0.6703** | FAIL（撞下限） |
+| 精确回调后 | 75.82 s | 304.75 s | **0.7248** | PASS，两侧都有余量 |
+
+**为什么 0.7994 要当作失败处理**：TTS 每次合成时长有 ±1% 波动，0.0006 的余量等于把成败交给随机数。下一次重跑同一个文本就可能越界。
+
+**回调公式**（已知 `pre` = scene1..6 之和、`scene8`，目标占比 `r`）：
+
+```python
+scene7_target = pre * (1 - r) / r - scene8
+# 取 r = 0.75 ~ 0.76，留 0.02+ 边距
+```
+
+**只重跑 scene7 的 TTS**，不要动其他场景（坑 327 的既定对策）。改完必须重新按 wav 头实测，不能用字数估算。
+
+#### 坑 399：`script_15s` 逐字匹配对空白与引号敏感
+
+**症状**：`audit` 报 `台词未逐字出现在口播中`，但肉眼比对「几乎一样」。
+
+**本期实例**：
+
+```python
+# 概念库原文（注意：半角双引号，API 与「对你说」之间无空格）
+'Rate Limit，速率限制。API对你说"你问太快了，等会儿再来"。就像餐厅叫号，一次只进几桌，防止忙不过来。调API遇到它，要么排队要么加钱。'
+
+# 我第一版口播（全角引号 + 加了空格）→ 逐字断言失败
+'Rate Limit，速率限制。API 对你说「你问太快了，等会儿再来」。就像餐厅叫号……调 API 遇到它，要么排队要么加钱。'
+```
+
+**修法**：把 `script_15s` 作为**不可变前缀**拼进去，而不是凭记忆重打：
+
+```python
+EXACT = concept['script_15s']          # 从概念库直接取，不做任何排版
+s7 = EXACT + '这个阀门有个特点：……' + 旧文本[old_len:]
+assert EXACT in full
+```
+
+**通用判据**：凡是「逐字」类断言（`script_15s`、AI 声明、正文签名），一律 `从源文件读取 + 字符串拼接`，禁止手打。
+
+#### 坑 400：`python3 -I` 丢的不只是 PIL，还有 faster_whisper
+
+**症状**：`verify_captions_mp4.py` 用 `python3 -I` 跑，直接 `ModuleNotFoundError: No module named 'faster_whisper'`；去掉 `-I` 立刻正常（1.2.1）。
+
+**根因**：`-I` 会隔离用户级 site-packages（`~/Library/Python/3.12/lib/python/site-packages`），凡是 `pip install --user` 装的东西全部不可见。已知受影响：`PIL`（坑 317/357）、`faster_whisper`（本期）。
+
+**规则（写死）**：
+
+| 脚本类型 | 解释器 |
+|---|---|
+| 生图 `gen_scenes_api_*` | `python3`（不加 `-I`） |
+| 封面 `gen_covers_local_*` | `python3`（不加 `-I`） |
+| 字幕 ASR `verify_captions_mp4` / `gen_captions` | `python3`（不加 `-I`） |
+| 纯标准库脚本（派生器 / merge / build_queue） | `python3 -I` 更安全，可以用 |
+
+**自查命令**：`python3 -I -c "import PIL"` 与 `python3 -I -c "import faster_whisper"` 任一失败，就说明该脚本不能加 `-I`。
+
+#### 坑 401：视频文件名必须取 `publish.json` 的 `video` 字段
+
+**症状**：`bili_upload` 一启动就 `AssertionError: video missing: .../【2026-11-03】三家同一天收紧「无限」…… | 今日羊报AI.mp4`。
+
+**根因**：渲染时我用了简名 `video-2026-11-03.mp4`，但 `publish.json` 的 `video` 字段是**标题全名**，而 B站 / 抖音 / 视频号 / 知乎四个脚本全部读 `pub['video']`。
+
+**修法**：渲染完立刻按 publish 名重命名，别等上传时才撞：
+
+```bash
+python3 - <<'EOF'
+import json, os
+pub = json.load(open('news-pipeline/<DATE>/publish.json'))
+src = 'news-pipeline/<DATE>/video/video-<DATE>.mp4'
+dst = f"news-pipeline/<DATE>/video/{pub['video']}"
+if os.path.exists(src) and not os.path.exists(dst):
+    os.rename(src, dst)
+print('video ->', dst)
+EOF
+```
+
+**判据**：上传前先跑 `ls "$D/video/$(python3 -c "import json;print(json.load(open('$D/publish.json'))['video'])")"`，存在才继续。
+
+#### 坑 402：tags 与内容脱节是真问题，不是误报
+
+**症状**：`gen_publish` 的「字段与上期雷同」断言报 `fields suspiciously identical to previous issue: ['tags', 'platform.bilibili.tags']`。
+
+**第一反应是误报**——标签是栏目常驻词，每期一样很正常。但拆开看内容就发现抓对了：本期主线是 **Anthropic 转售禁令 / Grok 额度腰斩 / 200 USD 守档**，主线厂商是 **Claude 和 Grok**，而 tags 里是：
+
+```python
+# 上期（也是这期初稿）——一个都不在本期主线里
+['今日羊报AI', 'AI日报', 'ChatGPT', 'OpenAI', 'Gemini', 'AI工具']
+```
+
+**修法**：tags 必须覆盖本期主线厂商：
+
+```python
+TAGS = ['今日羊报AI', 'AI日报', 'Claude', 'ChatGPT', 'Grok', 'AI工具']
+BILI_TAGS = ['今日羊报AI', 'AI日报', 'Claude', 'ChatGPT', 'Grok', '人工智能']
+```
+
+**判据**：看到「与上期雷同」的断言命中 `tags`，不要直接加进 `ALLOWED_SAME`——**先问「这些词覆盖本期主线了吗」**。真正常驻的字段只有 `draft_only` / `cover.horizontal` / `cover.vertical` / `platform.bilibili.partition` / `platform.wechat.images` / `anchor.play_order` / `anchor.scene`。
+
+**B站标签大小写仍需现场验证**（坑 232 的延续）：本期 `Claude` 大写被拒，脚本自动回落成小写 `claude` 才落 chip。
+
+#### 坑 403：平台登录态探测不能用宽松文本判据
+
+**本期犯的错**：我用 `'发表' in bodyText` 判断视频号是否登录，得到 `True`，于是报告「视频号登录状态转好了」。实际 URL 是 `https://channels.weixin.qq.com/login.html`——**`'发表'` 来自登录页的推广文案「发表和管理视频或直播推流」**。
+
+**正确判据（按平台固定写死）**：
+
+```python
+# 公众号：必须是后台首页，且带活 token
+ok = 'cgi-bin/home' in url and 'token=' in url
+
+# 视频号：只要还在 login.html 就是没登录
+ok = 'login.html' not in url
+
+# 知乎：/write 或 /p/<id>/edit
+ok = url.rstrip('/').endswith('/write') or re.search(r'/p/\d+/edit$', url)
+
+# B站：创作中心且页面含「投稿」
+ok = 'member.bilibili.com' in url and '投稿' in body
+```
+
+**通用原则**：登录态判据必须是**结构性**的（URL / 特定容器 / 特定控件），不能用**自然语言短语**——推广文案、帮助链接、页脚都会污染文本匹配。这条与坑 305「证据与判据同源」是同一族的反面。
+
+#### 坑 404：CDP 挂起是间歇性的，会自愈；先探 HTTP 面再决定
+
+**本期时间线**：
+
+| 时间 | `connect_over_cdp` | `/json/version` | `/json/list` |
+|---|---|---|---|
+| 07:41 | TimeoutError | 正常 | 正常（17 targets） |
+| 07:52 | TimeoutError | 正常 | 正常 |
+| 08:01 / 08:12 / 08:21 / 08:31 | TimeoutError ×4 | 正常 | 正常 |
+| 09:06 | **恢复正常** | 正常 | 正常 |
+
+**与坑 373 的区别**：坑 373 那次是「冻结 target 导致 attach-all 卡死、6 小时 40 分不自愈」；本期是**HTTP 面全程正常、ws 连不上、约 85 分钟后自愈**。两者表现相近但处置不同，所以**先分层探活**：
+
+```bash
+# 第 1 层：HTTP 面活着吗？
+curl -s --max-time 8 http://127.0.0.1:9222/json/version   # 有 JSON = daemon 活着
+curl -s --max-time 10 http://127.0.0.1:9222/json/list | grep -c '"type"'   # target 数
+
+# 第 2 层：ws 能不能 attach
+python3 -c "from playwright.sync_api import sync_playwright as s; \
+  p=s().start(); b=p.chromium.connect_over_cdp('http://localhost:9222',timeout=12000); print(len(b.contexts))"
+```
+
+**处置矩阵**：
+
+| HTTP 面 | ws attach | 判定 | 动作 |
+|---|---|---|---|
+| 死 | — | daemon 真挂了 | 报用户，**不要自己重启浏览器** |
+| 活 | 超时 | 冻结 target 或临时抖动 | 先等一轮（≥10 分钟）再试；持续失败按坑 373 用 raw websockets 逐个 ping，对超时 target 发 browser 级 `Page.navigate` 到 `about:blank` |
+| 活 | 正常 | 恢复 | 继续 |
+
+**禁止**：杀 daemon、重启 persistent context、改 profile 目录。
+
+#### 坑 405：抖音 `DY_E2E_FAILED` 又一次是假阴性
+
+**本期读数**：
+
+```json
+{"title":"今日羊报AI 11月3日","descLen":226,"vids":1,
+ "tags":["#AI日报","#Claude","#ChatGPT","#Grok","#AI工具"],
+ "decl":"作者声明：内容为个人观点或见解",
+ "covers_ok":false,"cover_slots":[],
+ "final_resume_banner":true,"final_zancun_gone":true}
+```
+
+`vids=1` + `final_resume_banner=true` 已证明**草稿在**；失败的只有 `covers_ok=false`（封面槽位读回为空）。这与 1102 完全同型（坑 349）。
+
+**记录方式（三档，不要合并）**：
+
+| 状态 | 含义 | 写法 |
+|---|---|---|
+| `done` | 全部判据通过 | 直接标 done |
+| `done_with_caveat` | 草稿确认存在，个别字段未验证 | 标 `done_with_caveat`，把未验证项逐条列出 |
+| `failed` | 草稿未落地 | 标 failed 并附证据 |
+
+**本期记为 `done_with_caveat`，封面标 `UNVERIFIED`**——不粉饰成 success，也不误判成 failed。
+
+#### 坑 406：看门狗要防「看着在跑、其实永远跑不完」
+
+**形态**：launch wrapper 的收工判据是 `daily.total >= 100`。一旦 daily 已落盘但 `total < 100`（典型原因：Source A 被 Cloudflare 挑战，只滚到 30 行），它会走这个分支：
+
+```bash
+echo "daily exists but total=${tot} < 100 — NOT declaring done; waiting for session investigation (600s)"
+sleep 600
+continue
+```
+
+**问题**：从这一刻起 `alive "$LAUNCH_PIDFILE"` 恒真 → 看门狗每次都判 `RUNNING — skip`，**永远不会通知会话**。日志看起来很正常（每 10 分钟一条 RUNNING），但实际是死循环。
+
+**修法**：在 RUNNING 判定**之前**单独拦这个形态：
+
+```bash
+if [ -f "$DAILY" ] && [ -f "$LAUNCH_LOG" ] \
+   && grep -q "daily exists but total=" "$LAUNCH_LOG" 2>/dev/null \
+   && [ -n "$(find "$LAUNCH_LOG" -mmin -21 2>/dev/null)" ]; then
+  tot0=$(daily_total)
+  if [ "${tot0:-0}" -lt 100 ]; then
+    emit ALERT "daily total=${tot0} < 100 且 wrapper 在 600s 空转（疑似 CF 拦截）— 须会话介入"
+    exit 0
+  fi
+fi
+```
+
+**注意空窗判据**：用 `-mmin -21` 而不是 `-mmin -5`——wrapper 每 600 秒才写一次这行，窗口太窄会漏判。
+
+#### 坑 407：看门狗工程三件套
+
+**① 判定行必须去重。** 1102 的看门狗每 3 分钟写一行 `VERDICT READY_FOR_SESSION ...`，18 小时写出 **51 KB** 完全相同的行，真正的状态切换被淹没。1103 改为「同一 `verdict + action` 字符串 **30 分钟内不重复写**」，同时保留 30 分钟一次的心跳（证明看门狗自己活着）。
+
+```bash
+emit() {
+  local verdict="$1" action="$2" now last_ts prev_body same age
+  now=$(date '+%s'); same=0; last_ts=0
+  if [ -f "$VERDICT_FILE" ]; then
+    last_ts=$(head -1 "$VERDICT_FILE" | sed 's/^ts=//'); case "$last_ts" in ''|*[!0-9]*) last_ts=0;; esac
+    prev_body=$(tail -n +2 "$VERDICT_FILE")
+    [ "$prev_body" = "verdict=$verdict
+action=$action" ] && same=1
+  fi
+  age=$(( now - last_ts ))
+  { echo "ts=$now"; echo "verdict=$verdict"; echo "action=$action"; } > "$VERDICT_FILE"
+  if [ "$same" = "1" ] && [ "$age" -lt 1800 ]; then return 0; fi   # 30 分钟内同判定不写日志
+  log "VERDICT $verdict action=$action"
+}
+```
+
+**② `alive()` 必须校验 cmdline。** 只 `kill -0` 会被 pid 回收骗到：
+
+```bash
+alive() {  # $1 = pidfile, $2 = 期望的命令行片段
+  local f="$1" pat="$2" pid
+  [ -f "$f" ] || return 1
+  pid=$(cat "$f" 2>/dev/null || true)
+  case "${pid:-}" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  ps -p "$pid" -o command= 2>/dev/null | grep -q "$pat" || return 1
+  return 0
+}
+```
+
+**③ 终态标记，不依赖 state.json 一定被回写。** 会话收工时 `touch data/logs/<issue>-DONE`，看门狗第一件事就是查它，命中即 `DONE` 并退出。这样即使会话忘了改 `state.json`，看门狗也不会永久刷 `READY_FOR_SESSION`。
+
+**本期实测效果**：看门狗从 22:35 跑到 09:14（10 小时 39 分），日志只有 **4 行**（对比 1102 的 51 KB）。
+
+**本期正例（值得复用的两条）**：
+
+1. **知乎专栏 force-click 一次过**。1102 死在这里（`未选中「发布到专栏」: '不发布到专栏'`），本期按坑 382 改成 `locator.nth(i).click(force=True)` 后一次通过：`radio click issued=True` → `column picked: '「今日羊报 AI」'` → `radio='发布到专栏' combo='「今日羊报AI」'` → `column OK`。**同一个修复也写进了模板**（`data/_video_template_1102_scripts/zhihu_upload_1102.py`），所以重新派生不会退化。
+2. **公众号单进程一次过**。按坑 379 的修法用 `mp_1103_run.py` 单进程跑完 open→title→body→images→cover→collection→save→verify，全程 `#title == 本期标题` 身份断言，最终 `MP_VERIFY_OK`（appmsgid=100001862 / bodyLen 2204 / placeholders 0 / cover qpic / 合集选中 / sig_head / sig_tail / stale_1102=false）。**分步跑是坑 379 的来源，不要回退。**
 
 ### v3.79.0（2026-11-02 W43 周报实跑：修好的东西在派生器里复活，坑 390-395）
 
