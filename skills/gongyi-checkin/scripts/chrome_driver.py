@@ -210,6 +210,13 @@ def tab_count(timeout=30):
     )
 
 
+def count_tabs(timeout=30):
+    """Number of tabs in the front window, as an int (0 on failure)."""
+    raw = tab_count(timeout=timeout)
+    m = re.search(r"-?\d+", raw or "")
+    return int(m.group(0)) if m else 0
+
+
 def wait_for(predicate, timeout=45, poll=2.0):
     """Poll `predicate()` (returns truthy string) until timeout."""
     deadline = time.time() + timeout

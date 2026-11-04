@@ -27,8 +27,9 @@ from urllib.parse import urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from chrome_driver import (  # noqa: E402
-    ChromeError, classify, click_checkin, close_extra_tabs, current_url,
-    js, js_retry, navigate, new_tab, probe, tab_count, wait_for,
+    ChromeError, classify, click_checkin, close_extra_tabs, count_tabs,
+    current_url, js, js_retry, navigate, new_tab, osa, probe, tab_count,
+    wait_for,
 )
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -502,6 +503,44 @@ def archive_experience(results, meta):
         fh.write(content)
     return exp_path
 
+def claim_scratch_tab():
+    """Open a dedicated scratch tab and return its index.
+
+    The script MUST NOT reuse the user's tab 1 — the daily Chrome usually has
+    the user's real work open (linux.do threads, project boards, Feishu).
+    Navigating tab 1 away would destroy that state, and closing "extra" tabs
+    would close their work too. So: append one scratch tab, use it, and close
+    only that one at the end.
+    """
+    before = count_tabs()
+    new_tab("about:blank")
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        after = count_tabs()
+        if after > before:
+            # the new tab is the last one
+            return after
+        time.sleep(0.5)
+    return before  # fall back to tab 1 if counting failed
+
+
+def release_scratch_tab(index):
+    """Close only our scratch tab (never the user's)."""
+    if not index:
+        return
+    try:
+        osa(
+            'tell application "Google Chrome"\n'
+            "  try\n"
+            "    close tab %d of front window\n"
+            "  end try\n"
+            "end tell\n" % index,
+            timeout=30,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main():
     ap = argparse.ArgumentParser(description="公益站每日签到")
     ap.add_argument("--dry-run", action="store_true", help="只探测不点击")
@@ -511,7 +550,8 @@ def main():
     ap.add_argument("--folder-id", default=DEFAULT_FOLDER_ID)
     ap.add_argument("--report-only", action="store_true")
     ap.add_argument("--no-login", action="store_true", help="不尝试 LinuxDO 登录")
-    ap.add_argument("--keep-tabs", type=int, default=1, help="保留多少标签页")
+    ap.add_argument("--keep-tabs", type=int, default=1,
+                    help="兼容参数：不再使用（脚本只关自己的临时标签，不动用户标签）")
     args = ap.parse_args()
 
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -545,20 +585,20 @@ def main():
 
     results = []
     started = datetime.now()
-    for idx, entry in enumerate(stations):
-        log("[%2d/%2d] %s" % (idx + 1, len(stations), entry["name"]))
-        res = process_station(entry, tab=1, dry_run=args.dry_run,
-                              do_login=not args.no_login)
-        results.append(res)
-        log("     -> state=%s reward=%s balance=%s | %s"
-            % (res["state"], res["reward"], res["balance"],
-               (res.get("evidence") or "")[:100]))
-        sys.stdout.flush()
-
+    scratch = claim_scratch_tab()
+    log("scratch tab=%d (user tabs untouched)" % scratch)
     try:
-        close_extra_tabs(keep=args.keep_tabs)
-    except Exception:  # noqa: BLE001
-        pass
+        for idx, entry in enumerate(stations):
+            log("[%2d/%2d] %s" % (idx + 1, len(stations), entry["name"]))
+            res = process_station(entry, tab=scratch, dry_run=args.dry_run,
+                                  do_login=not args.no_login)
+            results.append(res)
+            log("     -> state=%s reward=%s balance=%s | %s"
+                % (res["state"], res["reward"], res["balance"],
+                   (res.get("evidence") or "")[:100]))
+            sys.stdout.flush()
+    finally:
+        release_scratch_tab(scratch)
 
     meta = {
         "date": started.strftime("%Y-%m-%d"),
