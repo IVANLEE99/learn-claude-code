@@ -2,3 +2,7 @@
 generated-images/
 news-pipeline/*/api_config.json
 node_modules
+
+# 公益站签到 skill 的运行产物（含真实账户余额/奖励），不入库
+skills/gongyi-checkin/data/
+skills/gongyi-checkin/scripts/__pycache__/
