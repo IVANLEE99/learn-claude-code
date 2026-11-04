@@ -1,13 +1,27 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.80.0
+version: 3.81.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.80.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.81.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.81.0 核心改进（2026-11-04 1104 日报全链实跑：派生器哨兵自伤 + 锚点扩写叠写，坑 408-409，另 4 个旧坑复发）**
+>
+> 本期 372 帖（378 进队列 / 26 批 / err=0，32 分钟跑完）→ 视频 350.763 s / 32.2 MB / 1920×1080 / 10521 帧，锚点 **0.774**（`export_control` 出口管制，第 7 景）；**五平台草稿全成**：公众号 `MP_VERIFY_OK`（appmsgid=100001874）+ 知乎 `ZHIHU_DRAFT_OK` + B站 + 抖音（假阴性）+ 视频号。38 项 audit 门禁首跑 2 个 FAIL、修正后 0 failed。
+>
+> ① **派生器的「哨兵」会吃掉文件头两行**（坑 408，本期最贵）：`_derive_video_1104.py` 把 `# __REWRITE_FOR_1104__` + 自检块插在 `#!/usr/bin/env python3` **之前**，删哨兵时连 `import json, os` 一起删掉 → `_add_concepts_1104.py` 跑出 `NameError: name 'os' is not defined`。**哨兵必须插在 shebang 之后、docstring 之前，或干脆用独立 `.sentinel` 文件**；删完立刻 `ast.parse` + 跑一次。
+> ② **锚点占比压线要回调，且扩写必须整段重写**（坑 409）：首轮 TTS 实测 scene1-6 共 271.3 s / 总 341.1 s = **0.7955**（超出 0.75±0.02 且 >0.79）。按坑 327 扩写 scene7 目标 78 s，但**先用两次 `str.replace`（先加 before 再加 after）导致扩写段叠了两遍**，scene7 变 104 s；整段重写成「基础文本 + 扩展常量」并断言 `count(EXTRA)==1` 后才落到 71.57 s → 占比 **0.774**。
+> ③ **坑 401 复发**：remotion 输出 `video-2026-11-04.mp4`，`publish.json.video` 是中文标题名 → 知乎首行 `AssertionError: publish.json 指向的视频不存在`。**渲染完立刻改名 + 断言存在**，别等上传时才撞。
+> ④ **坑 403 复发（新形态）**：不是判据太松，是**标签页根本不存在**——daemon 里只剩视频号一个标签，`mp_1104_run.py` 直接 `mp home tab not found`。**上传前先列 `/json/list`**，缺哪个平台就用 CDP `PUT /json/new?<url>` 开一个（mp 要带 `token=`，从登录探针取）。
+> ⑤ **坑 262 复发**：知乎 `connect_over_cdp` 在 `ws connected` 之后挂起 **2 次**（各 30 s Timeout），HTTP `/json/version` 全程正常。`templates/revive_frozen_tabs.py` 一次修好（`DEAD: <视频号通知页>` → 导航 about:blank → `PLAYWRIGHT_OK`）。**不要因此重启浏览器或杀 daemon。**
+> ⑥ **坑 380 复发**：抖音/视频号描述里没有「昇腾」→ 断言炸。按规则**补描述**（`gen_publish` 的 `platform.douyin.description` / `platform.channels.description` 各补一句本期事实），重新生成 publish.json 再跑；**放宽断言等于把串期检查关掉**。
+> ⑦ **edge-tts 通路会反转，以当场实测为准**：2026-11-03 23:38 实测**直连可用（11 KB mp3 秒回）、走 `--proxy 127.0.0.1:7897` 反而 ConnectionTimeout**——与 1103 期「必须走代理、直连 403」完全相反。`gen_tts_edge_1104.py` 已改为「先直连、失败且代理可用再回退」。**TTS 脚本一律写双通路探测，不要硬编码单一代理。**
+> ⑧ **坑 326 本期两处**：`Pierlink` 在 1103 是禁词，1104 却是合法开源项目帖 → 从 `forbidden` 移除；`招股书` 在 1103 是禁词，1104 是主线之一（Anthropic S-1 披露）→ 从 `STALE` 和 `BDANG` **双向**移除。**交叉 grep 命中时永远先问「本期是否合法引用」。**
+> ⑨ **audit 门禁的两类假 FAIL**：① 场景 1 的 `可信度：` 写成「官方/媒体多源（详见各场景）」——不在五档枚举内；② 选材表按「事件重要性」而非「总分」排序 → `表格按总分降序` 断言炸。**可信度必须从枚举里挑一个（多来源就写主要那一个，其余在正文说明）；选材表必须严格按总分降序重排后再填。**
+>
 > **🔴 v3.80.0 核心改进（2026-11-03 1103 日报全链实跑：断言层必须与内容层一起派生，坑 396-407）**
 >
 > 本期 403 帖（413 进队列 / 28 批 / err=0）→ 视频 304.917 s / 27.3 MB / 1920×1080，锚点 **0.7248**，8 场景；公众号 `MP_VERIFY_OK`（appmsgid=100001862）+ B站 + 知乎三平台草稿全绿。**最值钱的一条不是任何单个坑，而是一个模式**：`坑 241` 只说「内容层必须重写」，今天发现**断言层也必须重写**——派生脚本里的 `checks` / `forbidden` / `issue_words` / `COLLOQ` / 封面大字断言全是上期词。它们不会让成片串期，却会把**正确的内容判成 FAIL**，逼着人去「修」本来对的东西。今天这个模式在 6 个文件里各踩一次（`_md2typ` / `audit` ×2 / `_setup_remotion` / `bili_upload` / `douyin_e2e`）。
@@ -7107,6 +7121,258 @@ ColumnSetting-ColumnSelector
 - 即便如此它也只出 **768×1152 竖图**，传 `size: 1536x1024` / `aspect_ratio: 16:9` 都不生效 → **当不了 16:9 场景图备胎**，只能兜底竖版封面这类本来就要竖图的场景。
 
 **本期正例**：日报 257 帖；PDF 258,701 B；成片 244.885 s / 20,473,836 B / 7,345 帧；字幕复验（取自渲染后 mp4）median +0.144 s，8 个场景切点 Δ≤1 ms；公众号 `appmsgid=100001849` bodyLen 2,023 / 占位符 0 / 合集「今日羊报 AI」；视频号 draftItems=9 / feedItems=0 / 本期按钮集〔编辑,删除〕；知乎 `/p/2100580824991131409` `ZHIHU_DRAFT_OK`。
+
+### v3.81.0（2026-11-04 1104 日报全链实跑：派生器哨兵自伤 + 锚点扩写叠写，坑 408-409）
+
+1104 期五平台全绿，但**本期两个新坑都出在「自动保护机制」本身**——为防串期而加的哨兵、为控占比而做的扩写，各自制造了一次新故障。这让一个模式更清楚了：**防呆机制本身需要被测试**，否则它会以「保护」的名义制造故障。
+
+#### 坑 408：派生器的「哨兵」会把文件头两行一起吃掉
+
+**现象**：`python3 -I data/_add_concepts_1104.py` 报
+```
+NameError: name 'os' is not defined
+  File "data/_add_concepts_1104.py", line 3, in <module>
+    os.chdir('/Users/youngsdream/Documents/learn-claude-code')
+```
+
+**根因**：`_derive_video_1104.py` 插入哨兵的位置是「文件开头」：
+
+```python
+PY_BLOCK = '''# __REWRITE_FOR_1104__
+_SENT = '# __REWRITE' + '_FOR_1104__'
+assert _SENT not in open(__file__, encoding='utf-8').read(), (
+    '内容层未重写：按 1104 期报告改写本文件的断言表/常量后，删除首行哨兵注释')
+'''
+body = open(p).read()
+open(p, 'w').write(PY_BLOCK + body)          # ← 插在 shebang 之前
+```
+
+于是文件变成：
+```python
+# __REWRITE_FOR_1104__          ← 哨兵块
+_SENT = ...
+assert ...
+#!/usr/bin/env python3         ← 原本的第一行，现在失效
+"""..."""
+import json, os               ← 删哨兵时按「前 3 行」删掉了它
+os.chdir(...)                 ← NameError
+```
+
+删哨兵时代码取的是「删掉开头这段注释」，顺手把 `import` 一起带走了。
+
+**修法（三选一，推荐第 1 个）**：
+
+```python
+# ① 哨兵插在 shebang 之后、docstring 之前
+lines = body.split('\n')
+idx = 1 if lines[0].startswith('#!') else 0
+new = '\n'.join(lines[:idx] + [PY_BLOCK.rstrip()] + lines[idx:])
+
+# ② 用独立哨兵文件，不碰 py 正文
+open(p + '.SENTINEL', 'w').write('__REWRITE_FOR_1104__')
+# 运行时检查同目录有无 .SENTINEL 文件
+
+# ③ 哨兵只写注释，不写可执行 assert
+#    可执行块放进独立的 preflight 脚本统一检查
+```
+
+**删哨兵后的强制验证**（缺一不可）：
+```bash
+python3 -c "import ast;ast.parse(open('$f',encoding='utf-8').read());print('syntax OK')"
+python3 "$f" --help 2>/dev/null || python3 "$f"   # 至少跑到「业务断言」之前不报 NameError
+```
+
+**Why 这条比普通 bug 严重**：哨兵在**所有** 14 个内容层文件里都插了。如果只有 `_add_concepts` 崩，其余文件只是「碰巧 import 在 docstring 之后」侥幸躲过——**下一个文件换一种写法就会崩**。
+
+#### 坑 409：锚点占比压线要回调，扩写必须整段重写并断言唯一性
+
+**现象**：首轮 TTS 完成后按 wav 头算：
+
+```
+scene1 38.54 / scene2 41.34 / scene3 55.27 / scene4 41.30 / scene5 52.43 / scene6 42.45
+scene7 62.10 / scene8 7.65   total=341.08   pre=271.33   ratio=0.7955
+```
+
+**0.7955 超出 `0.75±0.02`，且 > 0.79 —— 按坑 398 判不合格**（TTS 波动会越界）。
+
+**第一步：按公式算目标时长**（坑 327）：
+
+```python
+# 目标 r=0.76（留边距），pre 是锚点前的总时长，s8 固定
+s7_target = pre * (1 - r) / r - s8
+# 271.33 * 0.24 / 0.76 - 7.65 = 85.68 - 7.65 = 78.03 s
+# 当前 62.10 s → 需 +16 s ≈ +70 中文字（中文 TTS atempo=1.4 后约 4.4 字/秒）
+```
+
+**第二步（本期出事的地方）：扩写必须整段重写，不能连续两次 replace。**
+
+第一次的写法：
+```python
+new = extra_before + old + extra_after          # ①
+d['scenes'][6]['text'] = new
+# 第二次想「缩短一点」：
+new2 = extra_before + old.replace(extra_before,'').replace(extra_after,'') + extra_after_short  # ②
+```
+`old` 里已经含 `extra_before`/`extra_after` 了，第二次 `replace` 只清了一部分，结果 **`extra_after` 长版本 + 短版本同时在正文里**，scene7 变 **104.34 s**（ratio 掉到 0.71 附近），还得再重跑一次 TTS。
+
+**正确写法**：把基础文本和扩展文本都定义成常量，拼一次，并做三重断言：
+
+```python
+BASE  = "……（不含任何扩展段的原始口播）……"
+EXTRA = "还有一层常被忽略：……"
+ANCHOR15 = "出口管制是什么？……"          # 库里的 script_15s，逐字
+
+new = BASE + EXTRA
+assert ANCHOR15 in new,        'script_15s 未逐字保留（坑 399）'
+assert new.count(EXTRA) == 1,  '扩展段重复（坑 409）'
+assert new.count('还有一层常被忽略') == 1
+d['scenes'][6]['text'] = new
+```
+
+**第三步：只重跑该场景 TTS**，再复核：
+```python
+pre = sum(d[n] for n in range(1,7)); total = sum(d.values())
+print(f'ratio={pre/total:.4f}')     # 期望 0.75±0.02，且不落在 0.79+
+```
+
+**本期结果**：71.57 s → `ratio = 271.32/350.55 = 0.7740`，一次通过，两次 TTS 总耗时可接受，但**如果第一次就写对，只需 1 次**。
+
+#### 复发坑 401：渲染文件名 ≠ `publish.json.video`
+
+remotion 渲染输出 `video-2026-11-04.mp4`（简名，方便命令行），但 `gen_publish_1104.py` 写的
+`publish.json.video` 是 `【2026-11-04】<标题> | 今日羊报AI.mp4`（平台展示名）。
+
+知乎脚本首行：
+```
+AssertionError: publish.json 指向的视频不存在:
+  .../video/【2026-11-04】一份判决、一份招股书、一份退市通知：AI 的账本被翻开了 | 今日羊报AI.mp4
+```
+
+**修法**：渲染完成、任何上传脚本启动前，加一段改名 + 断言：
+```python
+import json, os, shutil
+pub = json.load(open(f'{D}/publish.json'))
+src = f'{D}/video/video-{pub["date"]}.mp4'
+dst = f'{D}/video/{pub["video"]}'
+if os.path.exists(src) and not os.path.exists(dst):
+    shutil.move(src, dst)
+assert os.path.exists(dst), f'video missing: {dst}'
+print('video OK', os.path.getsize(dst), 'bytes')
+```
+B站/抖音/视频号三个脚本同样读 `pub['video']`，**一处不改，四处全炸**。
+
+#### 复发坑 403（新形态）：不是判据松，是标签页根本不存在
+
+1103 的坑 403 是「判断太宽松，把登录页文案当已登录」；**1104 是反过来的形态：标签页压根没有**。
+
+```
+AssertionError: mp home tab not found (login?)
+```
+
+daemon 里当时只有 `channels.weixin.qq.com/platform/notification/notificationList` 一个标签。
+
+**上传前必须先做标签盘点**：
+```bash
+curl -s http://127.0.0.1:9222/json/list | python3 -c "
+import json,sys
+for t in json.load(sys.stdin):
+    if t.get('type')=='page': print(t.get('url','')[:110])
+"
+```
+
+缺哪个平台就开一个（mp 需要带 `token=`，从 `probe_login` 输出里取）：
+```python
+import urllib.parse, urllib.request, json
+url = f'https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN&token={TOKEN}'
+req = urllib.request.Request(f'http://127.0.0.1:9222/json/new?{urllib.parse.quote(url, safe="")}', method='PUT')
+json.load(urllib.request.urlopen(req, timeout=10))
+```
+
+#### 复发坑 262：`connect_over_cdp` 挂起先用 `revive_frozen_tabs.py`
+
+本期知乎连挂 **2 次**，每次都是 `ws connected` 之后 30 s `TimeoutError`，而 `curl /json/version` 一直返回正常 JSON。
+
+```bash
+python3 skills/ai-news-factory/templates/revive_frozen_tabs.py
+# daemon OK: Chrome/156.0.8078.48
+# pages=3 alive=2 dead=1
+#   DEAD: https://channels.weixin.qq.com/platform/notification/notificationList
+#   revived: ok  <该页>
+# revived 1/1
+# PLAYWRIGHT_OK contexts=1
+```
+
+跑完立刻重试上传脚本，一次通过。**顺序：HTTP 面探活 → revive → 重试；三步都不行才考虑其他方案。不要重启浏览器、不要杀 daemon。**
+
+#### 复发坑 380：issue word 缺失该补描述，不该删断言
+
+抖音与视频号脚本各有一组「本期事件词必须在场」断言。本期报：
+```
+AssertionError: missing issue word: 昇腾
+```
+
+**正确处置**：在 `gen_publish_1104.py` 的 `platform.douyin.description` 与
+`platform.channels.description` 各补一句本期事实（「产业链人士称 DeepSeek V5 计划改用华为昇腾训练」），
+重新跑 `gen_publish` 生成 publish.json，再跑上传。
+
+**错误处置**：把 `昇腾` 从断言列表里删掉——那等于**把串期检查关掉**，下期抄错内容也不会有任何提示。
+
+#### 环境结论修正：edge-tts 的通路会反转
+
+1103 期的结论是「必须 `--proxy http://127.0.0.1:7897`，直连 CN 出口 403」（坑 250）。
+**1104 期 2026-11-03 23:38 实测完全相反**：
+
+| 方式 | 结果 |
+|---|---|
+| 直连 | **成功**，11 KB mp3 秒回 |
+| `--proxy http://127.0.0.1:7897` | `aiohttp.client_exceptions.ConnectionTimeoutError`（`wss://speech.platform.bing.com/...`）|
+
+**根因同坑 250：取决于出口 IP**，而出口 IP 会随网络环境变化。**修法：脚本写双通路探测，不要硬编码。**
+
+```python
+import socket
+def _proxy_up():
+    s = socket.socket(); s.settimeout(2)
+    try: s.connect(('127.0.0.1', 7897)); return True
+    except Exception: return False
+    finally: s.close()
+
+HAS_PROXY = _proxy_up()
+attempts = [[]] + ([['--proxy', 'http://127.0.0.1:7897']] if HAS_PROXY else [])
+for extra in attempts:
+    r = subprocess.run(['edge-tts', '--text', text, '--voice', VOICE,
+                        '--write-media', mp3, *extra], capture_output=True, text=True)
+    if r.returncode == 0 and os.path.getsize(mp3) > 2000:
+        print(f'edge-tts ok ({"proxy" if extra else "direct"})'); break
+```
+
+#### 坑 326 本期两处：禁词表要按「本期是否合法引用」逐词判断
+
+| 词 | 1103 状态 | 1104 事实 | 处置 |
+|---|---|---|---|
+| `Pierlink` | forbidden | 本期是合法开源项目帖（VPS + 多机 Agent 终端） | 从 `forbidden` 移除 |
+| `招股书` | forbidden / STALE / BDANG | 本期主线之一：Anthropic S-1 披露 | 从 `STALE` 与 `BDANG` **双向**移除 |
+
+机制：`_md2typ` 里有 `conflicts = [f for f in forbidden if f in md]`，命中就报
+`禁词在 2026-11-04 报告中合法出现，必须从 forbidden 移除`。**看到这个报错时，先判断是「本期合法引用」还是「真残留」——前者改词表，后者改报告，不要为了让它过而放宽。**
+
+`BDANG`（B 档：融资/IPO/裁员/市值）同理。本期标题用了「招股书」，但内容是**官方披露的财务数据**而非融资传闻，属于合法使用；audit 里保留 `IPO` 等词，只把 `招股书` 移出。
+
+#### audit 门禁：两类必踩的假 FAIL
+
+**① 可信度值必须落在五档枚举内。** 本期场景 1 写成
+`可信度：官方/媒体多源（详见各场景）` → `bad: ['官方/媒体多源（详见各场景）']`。
+枚举只有：`官方确认 / 媒体报道 / 社区实测 / 源码迹象 / 未确认传闻`（另含少量派生档如 `个人经历`/`第三方评测`/`概念定义`）。
+**多来源时挑最主要的那一个**，其余在正文里说明来源构成。
+
+**② 选材表必须严格按总分降序。** 本期按「事件重要性」排（25/23/21/23/21/23/17/17），断言要求降序（25/23/23/23/21/21/17/17）。
+**填表前先按总分排序，再按排序结果填**；「阈值 ≥18 的前 6 名」自然就成立了。
+
+#### 本期正例（值得复用）
+
+1. **五平台一次跑完不重试**：公众号（新建草稿 appmsgid=100001874，`#title` 空 + 身份断言）→ 知乎（revive 后 2796 字 / 7 图 / 1 视频 / 专栏双证）→ B站（6 tag 全落 chip，分区人工智能）→ 抖音（假阴性）→ 视频号（草稿箱 (9) 首条）。
+2. **抖音假阴性第二次出现，判据稳定**：`vids=1` + `final_resume_banner=true` + `descLen=246` + 5 tags 全在，只有 final 回读封面槽为空。直接记 `done_with_caveat`，**不重复上传**。
+3. **看门狗 DONE 判定生效**：`touch data/logs/1104-DONE` 后，下一次 tick 即输出 `verdict=DONE`，loop 自行退出（`===== watchdog loop 1104 end ... terminal marker =====`）。
 
 ### v3.80.0（2026-11-03 1103 日报全链实跑：断言层与内容层必须一起派生，坑 396-407）
 

@@ -1,12 +1,14 @@
 # 派生自检清单（每期开工第一件事，机械可跑）
 
-> 来源：坑 241（内容层必须重写）+ 坑 395（helper 从 templates/ 拷）+ **坑 396-407（v3.80.0，断言层必须一起重写）**。
+> 来源：坑 241（内容层必须重写）+ 坑 395（helper 从 templates/ 拷）+ 坑 396-407（v3.80.0，断言层必须一起重写）
+> + **坑 408-409（v3.81.0，哨兵会自伤 + 锚点扩写会叠写）**。
 > 配套文件：`templates/watchdog.md`（定时任务与看门狗的三层架构 + 沙箱验判定分支）。
 > 核心判据：**派生不是「把日期替换掉」，是「让本期所有判据指向本期内容」。**
 > 内容层漏改 → 成片讲上期事件（**会被口径检查抓到**）。
 > 断言层漏改 → 本期正确内容被判 FAIL（**不会被告警抓到，只会逼你去修本来对的东西**）。
+> **防呆机制本身也要测** → 哨兵插错位、扩写写重了，都会以「保护」的名义制造故障（坑 408/409）。
 
-按顺序跑完下面 6 段，任一段失败就不许进下一阶段。
+按顺序跑完下面 7 段，任一段失败就不许进下一阶段。
 
 ---
 
@@ -99,6 +101,58 @@ EOF
 
 ---
 
+## 2b. **哨兵插入位置（v3.81.0 新增，坑 408）**
+
+派生器给内容层文件插 `__REWRITE_FOR_<id>__` 哨兵时，**插入位置错一位就会吃掉文件头**。
+
+```python
+# ✅ 正确：插在 shebang 之后、docstring 之前
+lines = body.split('\n')
+idx = 1 if lines[0].startswith('#!') else 0
+new = '\n'.join(lines[:idx] + [SENTINEL_BLOCK.rstrip()] + lines[idx:])
+
+# ❌ 错误：PY_BLOCK + body —— 哨兵在 shebang 之前，删哨兵时连带删掉 import
+```
+
+**更稳的做法：用独立 `.SENTINEL` 文件，不碰 py 正文。**
+
+**每删完一个哨兵，立刻两连验证（缺一不可）**：
+
+```bash
+F=news-pipeline/<DATE>/scripts/audit_<id>.py
+python3 -c "import ast;ast.parse(open('$F',encoding='utf-8').read());print('syntax OK')"
+python3 "$F" 2>&1 | head -5     # 至少跑到业务断言前不报 NameError
+```
+
+本期实测：`_add_concepts_1104.py` 因哨兵插在 shebang 前，删哨兵时把 `import json, os` 一起删了 →
+`NameError: name 'os' is not defined`。**14 个文件里只有它崩，其余是侥幸（import 恰好在 docstring 之后）。**
+
+---
+
+## 2c. **锚点扩写：整段重写 + 三重断言（v3.81.0 新增，坑 409）**
+
+锚点占比超线需要扩写锚点场景时：
+
+```python
+BASE     = "……（不含任何扩展段的原始口播）……"
+EXTRA    = "还有一层常被忽略：……"      # 新增内容
+ANCHOR15 = "……"                        # 库里 script_15s，逐字照抄
+
+new = BASE + EXTRA                      # ✅ 拼一次
+assert ANCHOR15 in new,       'script_15s 未逐字保留（坑 399）'
+assert new.count(EXTRA) == 1, '扩展段重复（坑 409）'
+```
+
+**❌ 禁止**：对同一字符串连续两次 `str.replace`（先加 before 再加 after）。
+第二次的锚点是第一次的产物，极易把扩写段叠两遍——本期 scene7 因此从 78 s 变 **104 s**，白跑一次 TTS。
+
+**目标时长公式**（坑 327/398）：`s7_target = pre*(1-r)/r - s8`，`r` 取 0.75~0.76 留边距。
+中文 TTS（atempo=1.4）约 **4.4 字/秒**，据此换算要加多少字。
+
+**改完只重跑该场景 TTS**，然后复核 `ratio ∈ [0.70, 0.80]` 且 **不落在 0.79+**。
+
+---
+
 ## 3. 禁词表 × 当日报告 交叉 grep（坑 326，每期必查）
 
 **上期禁词表照抄 = 误伤本期合法引用。** 本期真实案例：`workbuddy` / `codebuddy` / `反代封号` / `二三十倍` 在 1102 是禁词，但 1103 的报告**合法引用**它们（新政策禁的正是这类玩法）。
@@ -163,29 +217,46 @@ scene7_target = pre * (1 - 0.76) / 0.76 - scene8
 
 ---
 
-## 6. 上传前置检查（坑 401/403/404）
+## 6. 上传前置检查（坑 401/403/404/408 → v3.81.0 补「标签页盘点」）
 
 ```bash
 D=news-pipeline/<DATE>
 
-# ① 视频文件名必须等于 publish.json 的 video 字段
+# ① 视频文件名必须等于 publish.json 的 video 字段（坑 401，每期必犯）
 python3 - <<'EOF'
-import json, os
+import json, os, shutil
 D = 'news-pipeline/<DATE>'
 pub = json.load(open(f'{D}/publish.json'))
-p = f"{D}/video/{pub['video']}"
-assert os.path.exists(p), f'video missing: {p}'
-print('video OK', os.path.getsize(p), 'bytes')
+src = f"{D}/video/video-{pub['date']}.mp4"      # remotion 输出的简名
+dst = f"{D}/video/{pub['video']}"               # 平台展示名
+if os.path.exists(src) and not os.path.exists(dst):
+    shutil.move(src, dst); print('renamed ->', dst)
+assert os.path.exists(dst), f'video missing: {dst}'
+print('video OK', os.path.getsize(dst), 'bytes')
 EOF
 
-# ② 平台登录态用结构性判据，不用文本短语
+# ② ★ 标签页盘点（v3.81.0 新增，坑 403 新形态）
+curl -s http://127.0.0.1:9222/json/list | python3 -c "
+import json,sys
+for t in json.load(sys.stdin):
+    if t.get('type')=='page': print(t.get('url','')[:110])
+"
+# 缺哪个平台就开一个（mp 要带 token，从 probe_login 取）：
+#   PUT http://127.0.0.1:9222/json/new?<urlencoded url>
+
+# ③ 平台登录态用结构性判据，不用文本短语
 #    公众号  = cgi-bin/home 且有 token=
 #    视频号  = URL 不含 login.html
 #    知乎    = /write 或 /p/<id>/edit 结尾
 #    B站     = member.bilibili.com + 页面含「投稿」
 
-# ③ CDP 分层探活（坑 404）
+# ④ CDP 分层探活（坑 404 / 262）
 curl -s --max-time 8 http://127.0.0.1:9222/json/version   # 有 JSON = daemon 活着
+
+# ⑤ ★ ws 挂起 → revive（v3.81.0 新增；顺序固定，别跳过）
+#    connect_over_cdp 在 ws connected 后超时 → 跑 revive_frozen_tabs.py → 重试
+python3 skills/ai-news-factory/templates/revive_frozen_tabs.py
+# 期望末行 PLAYWRIGHT_OK；出现 DEAD: 是正常的，说明找到并解冻了冻结页
 ```
 
 ---
@@ -202,7 +273,24 @@ touch data/logs/<issue>-DONE
 
 ---
 
-## 附：本期（1103）实际踩点与耗时
+## 附：本期（1104）实际踩点与耗时
+
+| # | 坑 | 何时暴露 | 若不提前查会怎样 |
+|---|---|---|---|
+| 408 | 哨兵插在 shebang 前 | 跑 `_add_concepts` | **删哨兵时连 import 一起删 → NameError** |
+| 409 | 锚点扩写两次 replace | 复核 ratio | **扩写段叠两遍，scene7 从 78s 变 104s，白跑一次 TTS** |
+| 401 | 视频文件名 | zhihu 首行 | 四个平台全部启动失败（本期复发） |
+| 403 | 标签页不存在 | mp 首行 | `mp home tab not found`，须 CDP 开标签（本期新形态） |
+| 262 | ws 挂起 | zhihu 连接 | 连挂 2 次各 30s；跑一次 revive 即好（本期复发） |
+| 380 | issue word 缺失 | douyin/channels 首行 | 补描述，**不是**删断言（本期复发） |
+| 326 | 禁词误伤 | md2typ 编译 | `Pierlink`/`招股书` 本期合法，须移出禁词表 |
+| — | 可信度枚举 | audit §4 | 写「官方/媒体多源」→ 不在五档内 |
+| — | 选材表降序 | audit §10 | 按重要性排而非总分排 → 断言炸 |
+| — | edge-tts 通路 | TTS | 直连可用、代理超时（**与 1103 相反**） |
+
+---
+
+## 附：上一期（1103）实际踩点与耗时
 
 | # | 坑 | 何时暴露 | 若不提前查会怎样 |
 |---|---|---|---|
