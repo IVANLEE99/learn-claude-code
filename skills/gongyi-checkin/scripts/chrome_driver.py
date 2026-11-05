@@ -422,7 +422,7 @@ CUMULATIVE_HINTS = [
 ]
 DONE_PATTERNS = [
     r"今日已签到", r"已签到", r"Checked in", r"checked in",
-    r"明天\s*00:00", r"明日再来", r"今日已领取", r"已连续签到", r"今日已打卡",
+    r"明天\s*00:00", r"明日再来", r"今日已领取", r"今日已打卡",
 ]
 PENDING_MARKERS = [
     r"每日签到", r"Daily Check-?in", r"签到领取", r"每天8点刷新",
@@ -578,6 +578,11 @@ def classify(page):
             if m:
                 rew, rew_raw = _money(m.group(1)), m.group(0)
                 break
+    # Special archetype: 流光绘境 / chatgpt2api 类: "剩余额度 44 签到 19 已签到"
+    if not rew:
+        m = re.search(r"签到\s*(\d+)\s*已签到", body)
+        if m:
+            rew, rew_raw = "+" + m.group(1), m.group(0)
     # Guard: a cumulative figure ("累计获得: N") is NOT today's reward.
     if rew and any(h in (rew_raw or "") for h in CUMULATIVE_HINTS):
         rew, rew_raw = None, None

@@ -182,7 +182,7 @@ def open_station(url, tab=1, retries=3):
             if (href.startswith("http")
                     and "chrome-error" not in href
                     and (want_host in href.lower() or want_host.split(".")[0] in href.lower())
-                    and body_len > 60):
+                    and (body_len >= 20 or len(_title) > 0)):
                 committed = True
                 break
             time.sleep(1.5)

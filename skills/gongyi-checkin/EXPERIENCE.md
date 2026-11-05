@@ -55,11 +55,14 @@
 - 成功标志：`今日已签到` + `本次获得 $X` + `已入账`。
 - 书签名带「[禁止测活]」的站点**不要发探活请求**（用户标注，见 Fengwind 的同名书签）。
 
-### 有人机验证的站（不要尝试自动过）
+### 验证码站点处置经验（2026-11-05 实测）
 - **PM-Plan**（`https://plan.pmcat.top/`）：点 `今日签到` 弹「签到人机验证 — 拖动滑块拼合缺口」。
+  前端收集 `track: [{x, y, t}]` 高频轨迹数组送审，模拟拖动会被报 `vr.reason === 'bot_behavior'` 拦截。
+  **处置策略**：脚本开标签页置顶并唤起弹窗，**需人工在浏览器中拖动滑块 1 秒完成**。
 - **简直了**（`https://jianzhile.vip/console/personal`）：点 `Check in now` 弹
-  「Security verification / Refresh captcha」图形验证码。
-- 这两类**标记为 `🔒 需人工验证`**，脚本不重试、不绕过。用户自己点一下即可。
+  「Security verification / Refresh captcha」5位彩色英数字图形验证码。
+  **处置策略**：提取 `<img src="data:image/png;base64,...">` 进行 OCR 识别，通过 React Synthetic Event
+  （`HTMLInputElement.prototype.value` setter）填入输入框并点击 Confirm，**可全自动通过签到**。
 
 ### dicksuck / 多数 new-api 站：重复点会被拒
 - 页面文案 `You can only check in once per day` = **今天已经签过了**，不是失败。
@@ -70,6 +73,9 @@
   `今日已签到 · 明天 00:00 再来`、月历显示每日金额。
 - 余额标签在**下拉浮层**里（`pointer-events-none absolute right-0 top-full`），
   但 innerText 仍包含，DOM 抓取可拿到。
+- **2026-11-05 避坑**：`已连续签到 N 天` 是连签统计，不是完成标记！未签到时显示「今日奖励 待领取」
+  和按钮「立即签到」；若把「已连续签到」放入 `DONE_PATTERNS` 会导致未签到时误报已签到。
+  真正的完成标记是 `今日已签到 · 明天 00:00 再来`。
 
 ### 简直了 / 魔方 / Ark API 等 Semi-UI 系 — `*.vip/console/personal`
 - 2026-11-04 卡片文案 `Daily Check-in` + `Checked in today, total check-ins NN day`，
@@ -92,6 +98,11 @@
 
 ### [api生图]流光绘境 — https://images.aihappy.indevs.in/#/profile
 - 2026-11-04 `ERR_CONNECTION_CLOSED` 打不开 → 暂时失联。
+- **2026-11-05 实测通过（LinuxDO OAuth + 自动签到）**：
+  未登录时会重定向到 `#/login?redirect=/profile`（登录页字符数较短，`open_station` 门禁已适配）。
+  页面有「使用 LinuxDO 登录」按钮，点击并完成 `connect.linux.do` 授权后自动跳转回个人设置。
+  已登录页有「签到」按钮（若已签到显示「已签到」），奖励展示在相邻 `span`（如 `签到 19` 代表 +19 额度），
+  余额展示为「可用额度 $X」。已签到直接判 `done`。
 
 ### 子非鱼 status / CHY 状态页
 - 2026-11-04 uptime-kuma 状态页，不签到，已在 `SKIP_URL_FRAGMENTS` 排除。
