@@ -1,7 +1,7 @@
 ---
 name: post-to-video
-description: 将论坛帖子/长文自动转化为短视频——按 3:4 竖版与 4:3 横版生成配图，再由 content.json 经 edge-tts 生成配音与字幕，最终合成带字幕视频。触发词: "帖子转视频", "post to video", "长文转视频", "帖子做视频", "图文转视频", "复盘视频", "帖子成片", linux.do 帖子视频
-version: 1.0.7
+description: 将论坛帖子/长文自动转化为短视频——按 3:4 竖版与 4:3 横版生成配图，再由 content.json 经 edge-tts 生成配音与字幕，最终合成带字幕视频，并可一键上传 B站/抖音/视频号/知乎/公众号草稿（含合集/分组）。触发词: "帖子转视频", "post to video", "长文转视频", "帖子做视频", "图文转视频", "复盘视频", "帖子成片", linux.do 帖子视频, "存草稿", "分组选"
+version: 1.1.0
 ---
 
 # post-to-video — 帖子/长文 → 配图 + TTS + 字幕 → 短视频
@@ -50,7 +50,7 @@ version: 1.0.7
         ↓
 [3] 确认（可选）  用户说「直接出片/开干」则跳过口头确认，**不能跳过 2b 落盘，也不能跳过 2c**
         ↓
-[4] 场景生图  gen_images.sh → 场景图 + 封面无字底图（.scratch）→ overlay_cover_text.py 两张正片
+[4] 场景生图  gen_images.sh 或 gen_images_api.py → 场景图 + 封面无字底图（.scratch）→ overlay_cover_text.py 两张正片
         ↓
 [5] TTS  gen_tts_edge.py → voiceover/sceneN.wav（24kHz PCM16 单声道）
         ↓
@@ -58,9 +58,11 @@ version: 1.0.7
         ↓
 [7] 合成  build_video.py → video/post-video-{3x4|4x3}.mp4（烧录字幕）
         ↓
-[8] 校验交付  时长对齐 + 首帧/中段抽帧 Read 视觉校验
+[8] 校验交付  ffprobe 完工门禁 + 时长对齐 + 首帧/中段抽帧 Read 视觉校验
         ↓
-[9] 发布文案  publish.json（标题 + 内容脉络 + 四平台）
+[9] 发布文案  publish.json（标题 + 内容脉络 + 五平台）
+        ↓
+[10] 草稿同步  五平台 upload_*.py → 全部「存草稿」，合集/分组统一
 ```
 
 产出根目录：
@@ -133,6 +135,12 @@ linux.do 抽取脚本（evaluate）：
 5. 场景数建议 4–8 个；第 1 场景 = Hook（口播即 `hook` 字段）。
 6. **来源 / 称呼（合规硬规则）**：`source_url` 可留空；口播、字幕、画面、封面、简介 **禁止出现帖子来源**（linux.do / L站 / 链接）。称呼默认 **「道友+名字」**，禁止「佬友」裸用（不要套用 ai-news-factory 的「佬友→大家」）；**作者本人帖用第一人称**（见上条）。
 7. **用户名去下划线（坑 223）**：口播里的用户名去掉 `_`，用空格（`道友chen dragon`）。edge-tts 会把 `_` 读成「下划线」。`publish.json` 和图内文字保留原名。改了口播必须重跑对应场景 TTS。
+8. **逐字模式（2026-11-05，用户说「直接用这个当脚本，不要删减」时）**：**禁止改写、压缩、摘要、重排**原始文本。做法是：
+   - 按原文的分段/小节切场景，`voiceover` **逐字照抄**（只做两件允许的清洗：用户名清洗为「道友+名字」、`_` 去掉）；
+   - **不许**为了「说人话」的默认风格去重写句子，也不许为了控制时长删句——时长不够就让场景数变多，不要删内容；
+   - 场景数可以远超默认的 4–8（今天 15 个场景 / 108s 属正常）；
+   - 合规仍要过：来源字样、平台名、链接必须不出现；原文里没有这些才允许逐字不动。
+   用户没说逐字时，才用默认的归纳压缩规则。
 
 ### Step 2b — 合规对照（不可跳过落盘）
 
@@ -204,6 +212,33 @@ posters/post-to-img-vertical-poster.png|1152x1536|prompts/post-to-img-vertical.t
 | `covers/horizontal-4-3.png` | 4:3 | Pillow 叠字产出 `1536x1152` | — | B站/通用封面 |
 
 每个场景出 **两个比例各一张**（用户只要单一比例时减半）。prompt 由 Claude 按 post-to-img 风格预设拼装（默认 `kawaii-journal`；技术帖可 `clean-tech`），每场景 prompt 落盘 `prompts/sceneN.txt`。
+
+#### 端点优先级与网关约束（2026-11-05 实测，必须遵守）
+
+用户会指定「生图优先用 25 张额度那个」。优先级与各网关的硬约束：
+
+| 优先级 | 端点 | 硬约束 |
+|--------|------|--------|
+| 1 | `GEN_IMG_API_URL_003` = `https://chatgpt.rainflow.foo/studio/v1`（25 张/日） | ① **必须走代理** `-x http://127.0.0.1:7897`（白天直连 TLS 被 reset，坑 377）；② **必须 `response_format: "b64_json"`**；③ **禁止传 `output_format`**（直接 400）；④ **不能剥 `/v1`**，路径 = base(`/studio/v1`) + `/images/generations`，否则 403「仅可调用专用图片 API」；⑤ 只认 `1024x1024 / 1024x1536 / auto`，**不认 1152x1536** |
+| 2 | `GEN_IMG_API_URL` = `https://ai.prism.uno` | 额度耗尽（429/401）后自动降级 |
+| 3 | 其余 `_000/_001/_002` | 兜底 |
+
+**rainflow 出图的比例真相**：请求 `1152x1536` 返回的是 **1024x1536（2:3）**。所以竖版不能直接当 3:4 用，**必须本地补白**：等比 LANCZOS 到 1152×1536 后，用奶油纸底色 `(247, 241, 227)` 左右居中补白（3:4 目标减去 2:3 内容 = 每侧 64px）。横版 3:2 则居中裁到 1536×1152。**禁止非等比拉伸**。
+
+推荐直接用本 skill 自带脚本（已内置上述全部约束 + 优先级 + 比例门 + 断点续跑）：
+
+```bash
+python3 ~/.claude/skills/post-to-video/scripts/gen_images_api.py \
+  ~/Documents/learn-claude-code/generated-videos/post-to-video/{slug} \
+  manifest-scenes.txt [--only 1,2,3]
+
+# manifest 每行: <相对路径>|<期望比例>|<prompt 相对路径>
+# images/scene1-3x4.png|0.75|prompts/scene1-3x4.txt
+# images/scene1-4x3.png|1.3333|prompts/scene1-4x3.txt
+# covers/.scratch/vertical-notext.png|0.75|prompts/cover-v.txt
+```
+
+脚本行为：已存在且 >20KB **且比例合格**才跳过（比例不合格会删掉重出）；每张出完立刻 PIL 实测比例，不合格自动补白/裁边后复测；并发 3 路（避免 429）；日志不打印任何 Key。`gen_images.sh`（走 `gen-img.sh`）仍是默认路径，但当用户点名 rainflow 额度时**必须**用 `gen_images_api.py`——`gen-img.sh` 不认 `/studio/v1` 这套路径。
 
 用封装脚本批量生成（**自带续跑**：已存在且 >5KB 的文件跳过，只补缺失——坑：整批超时后禁止无条件重跑）。`gen_images.sh` 按当前 `GEN_IMG_MODEL` 选 quality（grok → `medium/low`，禁止硬编码 `high`），并做 size fallback；非正片封面路径自动改写进 `covers/.scratch/`。
 
@@ -285,6 +320,20 @@ python3 ~/.claude/skills/post-to-video/scripts/build_video.py \
 
 ### Step 8 — 校验与交付（必须执行）
 
+0. **完工门禁（2026-11-05「生成的视频打不开」事故）**：只要 `build_video.py` / `ffmpeg` 是**后台启动**的，就必须 `wait()` 到进程真正退出，再跑 `ffprobe`；`ffprobe` 退出码非 0 或读不到 `format.duration`，一律视为**未完成**。
+   症状是用户双击提示「文件已损坏 / 无法打开」——MP4 的 `moov` atom 还没写完（`+faststart` 会把索引移到文件头，属于最后一步）。文件有体积不代表能播。
+   ```bash
+   ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,width,height \
+     -of json video/post-video-3x4.mp4
+   ```
+   ```python
+   import json, subprocess
+   r = subprocess.run(['ffprobe','-v','error','-show_entries','format=duration,size',
+                       '-of','json', vid], capture_output=True, text=True)
+   assert r.returncode == 0, f'视频损坏或 moov 未闭合: {r.stderr[:200]}'
+   assert float(json.loads(r.stdout)['format']['duration']) > 5.0, '时长异常'
+   ```
+   **铁律：`ffprobe` 没成功前，禁止向用户汇报「视频已生成」或给出视频路径。**
 1. **时长对齐**：`ffprobe` 视频时长 ≈ `durations.json` 求和（音频总时长），差 >0.5s 说明分段时长与音频不同源，回 Step 5 重修（缺一步全链漂移）。不要用 captions 末条 `endMs` 当基准——它来自 whisper 实测发音结束时刻，天然早于场景尾部 pad 静音。
 2. **抽帧视觉校验**：至少 6 个时间点抽帧 `Read`，必须覆盖**最长几条字幕**所在时刻，不只抽首帧和片尾。抽点要落在字幕的 `startMs`–`endMs` 区间内——按场景中点抽会踩到两行字幕之间的间隙，抽到空白帧（20261008：35.0s 落在第 4 场两行字幕之间，误判「该场无字幕」）。字幕被画幅右边缘切掉即回 Step 6 重切（坑 224：Pillow 预检报 995px 仍被裁，数字不能代替看帧）。
    **专名行可超 20 字，以抽帧为准**（20261008，坑 226）：用户名很长时（`道友Y1hsiaochunnn挺着肚腩躺着说：` = 23 字），为保住专名整行超 `hard_max`。不要为此改口播删名字，也不要按字符下标硬切。**抽该行所在时刻确认没被裁即可放行**；真被裁了，才回 Step 6 在专名后的标点处断开重出。
@@ -298,36 +347,85 @@ python3 ~/.claude/skills/post-to-video/scripts/build_video.py \
 
 ### Step 9 — 发布文案 `publish.json`
 
-对照 `ai-news-factory` 四平台结构，但 **不要套用日报「今日羊报AI + 日期」报头**（那是新闻流水线规则）。帖子成片用内容标题；抖音 ≤30 字、视频号 ≤16 字且无 `.` `~`。必须包含 **内容脉络** `outline`。
+对照 `ai-news-factory` 五平台结构，但 **不要套用日报「今日羊报AI + 日期」报头**（那是新闻流水线规则）。帖子成片用内容标题；抖音 ≤30 字、视频号 ≤16 字且无 `.` `~`。必须包含 **内容脉络** `outline`。
 
 ```json
 {
-  "title": "《靠老人带娃，就是认命吗？》",
+  "title": "SI搞砸了一切：三天，从一纸任命到五个人 On Leave",
   "date": "YYYY-MM-DD",
   "slug": "YYYYMMDD_topicid",
-  "cover_text": "靠老人带娃\n就是认命吗？",
-  "outline": [
-    "深夜吐苦水",
-    "纠结（不敢请保姆 / 老人带娃旧模式）",
-    "评论区一边倒（有人带就不错了）",
-    "最扎心质问（道友laoyou：你就是她带大的）",
-    "务实方案（育儿嫂 + 沟通）",
-    "谁带娃谁说了算",
-    "两条路",
-    "结尾「每一代前进一点点就很好了」+ 评论区 CTA"
-  ],
+  "cover_text": "封面大字第一行\n封面大字第二行",
+  "outline": ["深夜吐苦水", "纠结（不敢请保姆 / 老人带娃旧模式）", "…"],
   "description": "2–3 句概括，无论坛来源，称呼用道友+名字",
   "tags": ["育儿", "带娃"],
+  "video": "video/post-video-3x4.mp4",
+  "cover": { "vertical": "covers/vertical-3-4.png", "horizontal": "covers/horizontal-4-3.png" },
   "platform": {
-    "bilibili": { "title": "…", "partition": "生活", "tags": [], "description": "…" },
-    "douyin":   { "title": "…", "tags": [], "description": "…" },
-    "channels": { "title": "…", "tags": [], "description": "…" },
-    "wechat":   { "title": "…", "article": "", "images": "covers/" }
+    "bilibili": { "title": "…", "partition": "生活", "season": "虢礫緙嘞",
+                  "tags": [], "description": "…" },
+    "douyin":   { "title": "…", "collection": "虢礫緙嘞", "tags": [], "description": "…" },
+    "channels": { "title": "…（≤16 字）", "album": "虢礫緙嘞", "tags": [], "description": "…" },
+    "wechat":   { "title": "…", "group": "「虢礫緙嘞」", "article": "wechat-article-YYYYMMDD.md",
+                  "images": "images/scene*-3x4.png", "cover": "covers/vertical-3-4.png" },
+    "zhihu":    { "title": "…", "column": "虢礫緙嘞", "topics": ["职场", "人工智能"],
+                  "article": "zhihu-article-YYYYMMDD.md", "cover": "covers/horizontal-4-3.png" }
   }
 }
 ```
 
 B站分区按内容选（生活向用「生活」，勿盲填「人工智能」；读书复盘用「知识」（20261017_3021522：《贫穷的本质》书评，分区=知识）；日报 AI 资讯流才用人工智能）；标签 ≤10。简介遵守 `合规检查.md`。
+
+**合集/分组字段命名不统一是刻意的**：B站叫 `season`、抖音 `collection`、视频号 `album`、公众号 `group`、知乎 `column`。上传脚本各读各的键，但**值必须是同一个合集名**（今天实测「虢礫緙嘞」五平台全部落到位）。只给一个值时，五个键都填同一个。
+
+### Step 10 — 五平台草稿同步（2026-11-05 新增）
+
+**唯一原则：只存草稿，脚本里禁止出现「发表 / 发布」按钮的任何点击路径。** 用户没明确说「发出」时，五个平台一律停在草稿态。
+
+播放顺序：先做**风险最低、最容易假绿**的平台，把确定性问题前置。
+
+| # | 平台 | 脚本（都在 `scripts/`，统一 `--dir <slug>`） | 关键控件与硬约束 |
+|---|------|------|------------------|
+| 1 | 公众号 | `upload_mp.py` | 见下方「公众号三坑」，本 skill 已内置 |
+| 2 | 知乎 | `upload_zhihu.py` | DraftEditor 注入 HTML → 视频卡片 → `__IMG__` 占位符逐张替换（断言 `naturalWidth > 50`）→「发布设置」点 `.RadioButtonSet-label`「发布到专栏」→ combobox 选专栏（**默认值是上次用过的**）→ 话题 chips |
+| 3 | B站 | `upload_bilibili.py` | 视频 input → 标题真实键入（坑 206）→ 4:3 封面 → 分区扁平列表（坑 205）→ 合集/season → `span.submit-draft` |
+| 4 | 抖音 | `upload_douyin.py` | 标题 ≤30 → 双封面（4:3 截帧 + 3:4 竖封面滑块拉到 0 缩放）→ 合集 → **「暂存离开」后必须同标签回读「继续编辑」横幅再暂存一次**（防假阴性 / 防毁稿） |
+| 5 | 视频号 | `upload_channels.py` | wujie shadow DOM 双 body → 短标题 ≤16 真实键入（Vue setter 会吞尾字）→ AI 标注 `.mark-tag-select` 选 `Contains AI-generated content` → 合集 `.post-album-display` → `.post-album-wrap .option-item`（先 `scrollIntoView`）→ 存草稿 |
+
+```bash
+D=~/Documents/learn-claude-code/generated-videos/post-to-video/{slug}
+for s in upload_mp upload_zhihu upload_bilibili upload_douyin upload_channels; do
+  python3 ~/.claude/skills/post-to-video/scripts/$s.py --dir "$D" || echo "❌ $s 失败，别继续下一个"
+done
+```
+
+这五个脚本是 `20261105_si` 一次跑通五平台的**原始脚本**，只把硬编码的 `ROOT` 换成了 `--dir`。派生新一期时**优先直接跑**，只在平台改版时才改选择器——不要从零重写。
+
+**共性纪律：**
+
+- **上传前先做标签盘点**（坑 403 复发形态）：`curl -s http://127.0.0.1:9222/json/list` 看各平台标签在不在；缺哪个按需新开，不要假设 daemon 里有。
+  **零标签形态（2026-11-05 15:5x 实测）**：Chrome 从 `156.0.8078.48` 自动升到 `.80` 后，daemon 存活、`/json/version` 正常，但 `pages=0`，Playwright `connect_over_cdp` 直接抛 `Protocol error (Browser.setDownloadBehavior): Browser context management is not supported`（不是坑 404 那种挂起，`revive_frozen_tabs.py` 也救不了，因为它只复活已存在的页）。**处置：用 `PUT http://127.0.0.1:9222/json/new?<url>` 逐平台重开标签**（公众号带 `token=`），再重跑上传脚本；不要因为「daemon 活着」就断定登录态还在。
+- **登录态判据禁用宽松文本**（坑 403）：不要用 `'发表' in body` 这类命中率极高的字符串，改查该平台**特有控件**（如公众号「新的创作」菜单项）。
+- **每次上传前把 `publish.json` 的视频路径当真**（坑 401）：脚本读 `pub['video']`，不要自己拼文件名。
+- **未回写 = 未修复**（坑 355）：任何平台改完都必须回读一次实际状态，再写进汇报。
+
+#### 公众号三坑（2026-11-05 真实事故，`upload_mp.py` 已全部规避）
+
+> 当天第一版脚本日志打印「16 张全部 done / placeholders remaining: 0」，但草稿里一张图都没有、正文仍是 16 个 `PLACEHOLDER_IMG_` 纯文本。**这就是假绿的样板**。
+
+| 坑 | 症状 | 根因 | 正确做法 |
+|----|------|------|----------|
+| **A. Escape 吞图** | 日志 OK，草稿无图，占位符原样 | `set_input_files` 后习惯性补一句 `press('Escape')` 想关弹窗 → ProseMirror 把 Escape 当成「取消插入」，图片 block 直接丢弃 | **替换图片全程禁止按 Escape**。每张必须轮询等 `innerText.includes(key)` 变 false，超时就报错，不能盲进下一张 |
+| **B. 同标签 goto 丢草稿** | 保存后跳列表，草稿退回十几分钟前 | 「保存为草稿」是异步 AJAX，`ed.goto(list_card)` 立刻卸载页面 → 请求被 abort | 保存后等页面出现「已保存 / 手动保存」；**验证必须 `ctx.new_page()` 开新页**，禁止在编辑页 goto |
+| **C. 合集假选中** | 回读仍「未添加」 | 合集弹窗是自绘下拉，只 `fill()` 输入框不触发选中 | 点击 `.js_article_tags_label` → `input[placeholder="请选择合集"]` 输入 → **必须点 `li.select-opt-li`** → 点弹窗 primary「确定」→ 回读 `.js_article_tags_content` |
+
+补充：`#title` 用 DOM value setter + `input`/`change` 事件（PM 不送焦点，`.click()` 会 timeout）；草稿箱卡片上的「编辑」按钮**必须 `card.hover()` 后**才可见（直接 `.click()` 报 element is not visible）。
+
+用法：
+
+```bash
+python3 ~/.claude/skills/post-to-video/scripts/upload_mp.py --dir <slug_dir>
+# 退出码 0 = 草稿已保存且回读标题命中
+```
 
 ## 目录约定
 
@@ -337,6 +435,12 @@ B站分区按内容选（生活向用「生活」，勿盲填「人工智能」�
   合规检查.md                   # 禁止词汇 / 脚本审核 / 平台合规 / 清单（强制对照）
   references/experience.md      # ai-news-factory 经验总结（至 v3.38.0）+ 2924762 坑
   scripts/gen_images.sh         # manifest 批量生图 + quality/size fallback + .scratch
+  scripts/gen_images_api.py     # 直连生图 API：rainflow 优先 + 代理 + b64_json + 比例门（v1.1.0）
+  scripts/upload_mp.py          # 公众号草稿上传：ProseMirror 图片/封面/合集（v1.1.0）
+  scripts/upload_zhihu.py       # 知乎草稿：正文+视频卡片+配图+专栏+话题（v1.1.0）
+  scripts/upload_bilibili.py    # B站草稿：视频+封面+分区+合集（v1.1.0）
+  scripts/upload_douyin.py      # 抖音草稿：双封面+合集+暂存双保险（v1.1.0）
+  scripts/upload_channels.py    # 视频号草稿：wujie+AI标注+合集（v1.1.0）
   scripts/overlay_cover_text.py # 无字底图叠 cover_text（Pillow / STHeiti）
   scripts/gen_tts_edge.py       # edge-tts 串行 TTS + atempo + 24k WAV
   scripts/gen_captions.py       # 语义切行 + whisper 词级对齐字幕
@@ -370,9 +474,13 @@ B站分区按内容选（生活向用「生活」，勿盲填「人工智能」�
 - [ ] 字幕 dry-run 人工扫过禁切反例；无 <1s 闪行
 - [ ] 抽帧可见黑半透明圆角字幕底（对齐 Subtitles.tsx），不是裸白字
 - [ ] 视频时长 vs durations.json 音频总时长差 ≤0.5s
+- [ ] **`ffprobe` 完工门禁通过**（退出码 0 + 能读出 duration；后台渲染必须先 `wait()`）——没过不许说「视频已生成」
 - [ ] 首帧 + 场景切点抽帧已 Read 视觉校验
-- [ ] 生图走 gen-img，日志无 API Key
-- [ ] `publish.json` 含标题、内容脉络、四平台；抖音 ≤30 / 视频号 ≤16
+- [ ] 生图走 gen-img / gen_images_api.py，日志无 API Key
+- [ ] `publish.json` 含标题、内容脉络、五平台；抖音 ≤30 / 视频号 ≤16
+- [ ] **公众号：全程没按过 Escape**；占位符清零且回读 `img` 数 == 场景数+1；保存后等到「已保存」才离开；验证在新标签页做
+- [ ] **五平台合集/分组全部到位**（同一合集名写进 season/collection/album/group/column）
+- [ ] **所有平台停在草稿态**，没有任何脚本点到「发表/发布」
 
 ## 快速命令示例
 
@@ -389,6 +497,7 @@ B站分区按内容选（生活向用「生活」，勿盲填「人工智能」�
 
 ## 版本
 
+- **v1.1.0**（2026-11-05）：按 20261105_si 成片（107.999s / 1080×1440 / 五平台草稿）补四块——① **端点优先级与网关约束**：rainflow `/studio/v1`（25 张额度）必须走 `127.0.0.1:7897` 代理、`response_format: b64_json`、禁 `output_format`、不能剥 `/v1`；它只认 `1024x1536`，返回 2:3 须本地奶油色补白到 3:4；新增 `scripts/gen_images_api.py` 内置全部约束与比例门；② **`ffprobe` 完工门禁**：后台渲染未退出 / `moov` 未闭合时汇报「视频已生成」会让用户看到「打不开」，必须等进程 `wait()` 且 ffprobe 退出码 0 才交付；③ **新增 Step 10 五平台草稿同步**，`publish.json` 补 `season/collection/album/group/column` 五键与 `video`/`cover` 字段；④ **公众号三坑**（Escape 吞图 / 同标签 goto 丢草稿 / 合集假选中）沉淀为 `scripts/upload_mp.py`，含假绿样板复盘。
 - **v1.0.7**（2026-10-19）：按 20261017_3021522 成片补四条——① 帖子配图是截图时必须 OCR 提文字进 `source.md`（`Read` 报 Unsupported Image 时走 tesseract / 自带 `scripts/ocr_vision.swift`），关键数字必须进 `hook` 与 `scenes`；② 作者本人帖不套「道友+名字」、改第一人称自述（来源品牌仍不露，合规检查.md 同步例外行）；③ 单期只出一版时 `cover_text` 须比发布标题更短、`covers/` 根目录只留一张正片；④ 读书复盘 B 站分区用「知识」（AI 资讯流才用人工智能）。
 - **v1.0.6**（2026-10-09）：按 20261008_2995229 成片补三条——① 帖子信息图**只能用 gpt-image-2**，grok 系会丢光中文出成无字插画，禁止切 grok 凑数；② 比例门补充：比例对但像素缩水 → LANCZOS 等比缩放，比例不对（gpt-image-2 固定出 2:3）→ 只裁边或边缘 3px 补白、绝不拉伸（`fit_poster.py`）；③ 抽帧必须落在字幕 `startMs`–`endMs` 内（按场景中点会抽到字幕间隙的空白帧），专名整行可超 20 字、以抽帧没被裁为准（坑 226）。
 - **v1.0.5**（2026-09-23）：按 2931081 成片补三条——口播用户名去掉 `_`（坑 223，否则读出「下划线」）；`merge_short_dwell` 合并上限从 24 收到 20 字，抽帧必须覆盖最长字幕（坑 224，26 字行被画幅右缘裁）；`gen_tts_edge.py` 增加 `--only`，全量重跑会归档全部现有 wav（坑 225）。

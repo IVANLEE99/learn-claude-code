@@ -1,13 +1,20 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.82.0
+version: 3.83.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.82.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.83.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+> **🔴 v3.83.0 核心改进（2026-11-05 公众号 ProseMirror 图片上传与生命周期防御 + 视频就绪流完整性门禁，坑 410-412）**
+>
+> 沉淀微信公众号 ProseMirror 节点事务机制、视频产物完整性校验、以及多平台生僻字符合集/专栏（如「虢礫緙嘞」）自动化适配体系（坑 410-412）：
+> ① **公众号富文本禁止按 Escape + 占位符单调递减断言 + 禁同标签 goto（坑 410）**：ProseMirror 会将 Escape 捕获为取消当前活跃事务，导致已上传图片节点被丢弃、占位符未被替换（1105 实测 16 个占位符全残留）；单图替换后必须强断言 `after == before - 1`（单调严格递减）；保存草稿触发异步 fetch/XHR，同标签直接 `goto` 会无条件 abort 请求导致存草稿失败；合集真入口为 `.allow_click_opr.js_article_tags_label` → `input[placeholder="请选择合集"]` → 等 ≥2.5s → `li.select-opt-li` → 确认。
+> ② **视频就绪必须用 ffprobe 校验 moov atom 与时长（坑 411）**：remotion/ffmpeg 意外退出或流截断会导致 MP4 缺失 `moov` atom 或时长为 0，播放器与平台上传报「生成的视频打不开」；仅查 `os.path.exists` 与 `filesize > 0` 会造成严重假绿；必须用 `ffprobe` 深度校验 exitcode==0、无 moov 缺失报错、且视频/音频流时长匹配。
+> ③ **多平台生僻字符合集/专栏（如「虢礫緙嘞」）联动与软门禁（坑 412）**：各平台（公众号/视频号/抖音/知乎）合集名在 `publish.json` 独立声明，避免跨平台混淆；DOM 匹配避免未经转义的 RegExp，强制全链 UTF-8；合集未找到时作为软门禁（写 review-checklist，不阻断草稿保存）。
+>
 > **🔴 v3.82.0 核心改进（2026-11-05 1105 日报实跑：三条平台字段补齐 — 公众号标题 / 视频号话题标签 / 知乎话题）**
 >
 > 本期 447 帖（458 进队列 / 31 批 / err=0）→ 视频 237.61 s / 25.4 MB / 1920×1080 / 7128 帧，锚点 **0.7319**（`stealth_model` 隐匿模型，第 7 景）；公众号 `MP_VERIFY_OK`（100001886）+ 知乎 `ZHIHU_DRAFT_OK` + B站草稿 + 抖音（假阴性）+ 视频号草稿(9) 全成。用户明确追加三条要求，已落成硬规则：
@@ -26,6 +33,9 @@ version: 3.82.0
 > ⑥ **视频号 ready 判据（坑 325 复发）**：`pct in (None,'100') or not uploading` 在 `pct='25'` 且 `uploading=False` 时直接放行 → 25% 就宣布「表单就绪」。**真判据只能是上传产物本身**：`shadowRoot.querySelectorAll('video').length >= 1` 且 `max(duration) > 200`（按成片时长 ±3s）且不在上传中。
 > ⑦ **视频号短标题别用 setter 一次性赋值**：Vue 受控 input 会把「今日羊报AI 11月5日」落成「今日羊报AI 11月5」（吞尾字）。修法 = 原生 setter 清空 + `input` 事件 → 再 `keyboard.type(..., delay=40)` 真实键入 → 回读校验。
 > ⑧ **封面对话框「still open」是假信号**：`edit-cover-dialog-container` 关闭后仍留在 DOM，`getBoundingClientRect()` 是 0×0。判「已关闭」看 rect，不看容器是否存在（与坑 302/303 同族）。
+> ⑨ **公众号富文本禁止按 Escape + 占位符单调递减断言 + 禁同标签 goto（坑 410）**：ProseMirror 会将 Escape 捕获为取消当前活跃事务，导致已上传图片节点被丢弃、占位符未被替换（1105 实测 16 个占位符全残留）；单图替换后必须强断言 `after == before - 1`（单调严格递减）；保存草稿触发异步 fetch/XHR，同标签直接 `goto` 会无条件 abort 请求导致存草稿失败；合集真入口为 `.allow_click_opr.js_article_tags_label` → `input[placeholder="请选择合集"]` → 等 ≥2.5s → `li.select-opt-li` → 确认。
+> ⑩ **视频就绪必须用 ffprobe 校验 moov atom 与时长（坑 411）**：remotion/ffmpeg 意外退出或流截断会导致 MP4 缺失 `moov` atom 或时长为 0，播放器与平台上传报「生成的视频打不开」；仅查 `os.path.exists` 与 `filesize > 0` 会造成严重假绿；必须用 `ffprobe` 深度校验 exitcode==0、无 moov 缺失报错、且视频/音频流时长匹配。
+> ⑪ **多平台生僻字符合集/专栏（如「虢礫緙嘞」）联动与软门禁（坑 412）**：各平台（公众号/视频号/抖音/知乎）合集名在 `publish.json` 独立声明，避免跨平台混淆；DOM 匹配避免未经转义的 RegExp，强制全链 UTF-8；合集未找到时作为软门禁（写 review-checklist，不阻断草稿保存）。
 
 > **🔴 v3.81.0 核心改进（2026-11-04 1104 日报全链实跑：派生器哨兵自伤 + 锚点扩写叠写，坑 408-409，另 4 个旧坑复发）**
 >
@@ -2647,7 +2657,7 @@ page.locator('span.submit-draft').click({force: true})
 
 1. **登录判据 = 页面出现「新的创作」或英文 UI「New creation」（坑 195 / 0917 补）**。登录页 innerText 是「微信扫一扫，选择公众平台账号登录」——用「扫码/请重新登录」做关键词会漏判（0916 因此空转两轮）。0917 账号后台是英文 UI，首页可见 `New creation` 而不是中文「新的创作」，只搜中文会误判未登录。等待循环：`while not ('新的创作' in t or 'New creation' in t)`，10s 轮询、上限 10 分钟。菜单项 class 仍是 `.new-creation__menu-item`（语言无关）。
 2. **「新的创作→文章」后必须按 URL 找编辑器新标签页**（`cgi-bin/appmsg`），找不到时对同一页重试点击（≤3 次）；禁止取 `pages[-1]`（daemon 的 about:blank 空页会顶到最后 → `ClipboardItem undefined` / `author input not found` 假错）。
-3. **正文占位符插图路径（v3.30 每图即存的完整可复制实现，0916 全量验证 6/6）**：粘贴 HTML 时图片位置写 `<p>PLACEHOLDER_IMG_N</p>`（**封面图占位排最后**）→ 每图：TreeWalker 找占位符文本节点 → `range` 精确选中 → 工具栏「图片→本地上传」→ `setInputFiles` → Escape 关挡层 → **立刻保存草稿** → 断言占位符数递减、`pmLen` 只因占位符消失而下降（每图 ≈17 字）。全部传完占位符必须为 0。
+3. **正文占位符插图路径（v3.30 每图即存，v3.82.0 坑 410 防御修正）**：粘贴 HTML 时图片位置写 `<p>PLACEHOLDER_IMG_N</p>`（**封面图占位排最后**）→ 每图：TreeWalker 找占位符文本节点 → `range` 精确选中 → 工具栏「图片→本地上传」→ `setInputFiles` → （🔴 **严禁按 Escape**，见坑 410：ProseMirror 会将 Escape 解释为放弃插入/撤销事务，导致占位符未被替换！必须等待图片节点落地，关闭弹窗仅点具名关闭按钮） → **立刻保存草稿** → **单调严格递减断言** `assert after == before - 1`（每图 ≈17 字，严禁批量或静默 skip）。全部传完断言占位符数为 0。
 4. **封面「从正文选择」直接选最后一张缩略图（坑 186 补充）**：封面占位符在正文最末，弹窗缩略图按正文顺序排列 → `items[items.length-1].click()`；后续「下一步 → 编辑封面 → 确认 → 轮询 `.js_cover_preview_new`」与 v3.31.1 流程一致（0916 复验：2 轮轮询内 `display:block + mmbiz`）。
 5. **保存时 Content Structure Check 弹窗**：每步 `保存为草稿` 后扫「继续插入/继续保存」可见按钮点击放行（坑 192 的脚本化等价实现）。
 6. **原创声明跳过不变**（坑 191 / 0915 同款）：不进原创弹窗，直接保存草稿，upload-status.md 备注。
@@ -2671,7 +2681,7 @@ if ('新的创作' not in home) and ('New creation' not in home):
 2. **正文图片用「本地上传」**：正文配图一律用工具栏「图片」→「本地上传」→ `setInputFiles(sceneN.png)`，不要用纯 innerHTML 注入（注入不落素材库，封面无法「从正文选择」）
 3. **封面选图路径**：先用 `horizontal-4-3.png` 插入正文 → 再「从正文选择」设封面（v3.8.0 铁律：裁剪弹窗标题「编辑封面」、确认键是 enabled「确认」非灰「确定」、禁止弹窗内 Escape、轮询 `.js_cover_preview_new{display:block; bg 含 mmbiz}`）
 4. **合集选择**：v3.66.0 起走 12.10 的可复现流程（真入口 `.allow_click_opr.js_article_tags_label`），**并把回读判据写成硬断言**——`.`js_article_tags_content` 必须等于合集名，`未添加` 即失败。旧版「try-catch 跳过不阻塞保存」是本期静默失败的成因之一：合集没挂上但流水线照跑、照存、照报成功（坑 310/312）
-5. **最后保存草稿**：所有项目填完后点「保存为草稿」，以 URL `appmsgid=` 为准；弹窗阻挡时 Escape 关闭上传中挡层再保存
+5. **最后保存草稿**：所有项目填完后点「保存为草稿」，以 URL `appmsgid=` 为准；（🔴 严禁在当前编辑器标签页内调用 `goto`，见坑 410；弹窗阻挡只点具名关闭按钮，严禁按 Escape）
 6. **验收**：`appmsgid=` 出现在 URL / 保存成功回执为准，勿只看「已保存」文案（常不出现）
 
 **🔴 重要经验：公众号编辑器使用 ProseMirror + 自定义 Vue 组件，自动化难度较高。封面选择、合集选择等需要特殊处理。**
@@ -7019,6 +7029,118 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.83.0（2026-11-05 微信公众号 ProseMirror 事务中断防御 + 视频完整性门禁与合集容错，坑 410-412）
+
+针对 1105 期与 post-to-video 流水线中暴露出的富文本与视频渲染假绿问题，深入沉淀了微信公众号 ProseMirror 节点事务机制、视频产物完整性校验、以及多平台生僻字符合集/专栏（如「虢礫緙嘞」）自动化适配体系（坑 410-412）。
+
+#### 坑 410：公众号 ProseMirror 图片上传与草稿生命周期陷阱（Escape 取消插入 / 占位符单调递减断言 / 同标签 goto 扼杀异步存草稿 / 合集四步真控件）
+
+**事故复盘**：1105 期公众号上传后核验发现：草稿箱内正文虽然生成，但 16 个图片占位符（`PLACEHOLDER_IMG_1` ~ `15` 及封面占位符）完全未被真实图片节点替换，草稿箱内保留了字面 `PLACEHOLDER_IMG_n` 的纯文本状态，且合集未生效。
+
+**根因剖析与四重防御体系**：
+
+1. **Escape 键直接中断 ProseMirror 节点插入事务**：
+   - **根因**：公众号编辑器基于 ProseMirror 构建。自动化脚本在调用 `inp.set_input_files(img)` 注入本地图片后，旧脚本为了关闭遮罩层习惯性调用 `page.keyboard.press('Escape')`。然而，ProseMirror 的 keymap 插件会将全局 `Escape` 拦截为「取消当前未提交的事务 / 撤销当前输入选区 / 丢弃正在插入的图片卡片」，导致图片在上传或转码过程中被直接 abort，DOM 选区未提交，占位符未被替换！
+   - **铁律**：**严禁在 ProseMirror 图片上传或富文本操作过程中调用 `Escape`！** 上传图片必须等待微信 CDN 图片节点（`img.js_img_placeholder[src*="mmbiz"]`）在 DOM 中真实落地。如需关闭特定弹窗，必须定位具名关闭按钮（如 `.weui-desktop-dialog__close-btn`），绝不可滥用全局 `Escape`。
+
+2. **占位符单调递减断言（禁止批量/静默跳过）**：
+   - **根因**：旧逻辑在逐图替换时若单图失败或 `not-found` 就静默 `skip`，直到全部循环结束后才检查剩余占位符，不仅无法定位具体是哪张图片挂起，还可能因文本被清空导致 `remaining == 0` 假绿（坑 383）。
+   - **铁律**：**每替换一张图片必须严格断言占位符数量精确减 1（单调递减断言）**：
+     ```python
+     for key, img in IMAGES.items():
+         before_count = placeholder_count(ed)
+         replace_placeholder(ed, key, img)
+         after_count = placeholder_count(ed)
+         assert after_count == before_count - 1, (
+             f"占位符 {key} 替换未生效：before={before_count}, after={after_count}"
+         )
+         log(f"{key} -> {os.path.basename(img)} ok, remaining: {after_count}")
+     assert placeholder_count(ed) == 0, "所有占位符必须全部清空"
+     ```
+
+3. **同标签页 `goto` 扼杀异步存草稿**：
+   - **根因**：公众号「保存为草稿」按钮触发的是后台异步 fetch/XHR（`appmsg/async_save`）。如果在点击保存后，脚本在当前编辑器标签页内直接调用 `page.goto(...)` 尝试跳转草稿箱或后台首页，浏览器会无条件 abort 正在进行的网络连接（`net::ERR_ABORTED`），内存中的 ProseMirror 脏状态尚未落库即被销毁，导致草稿退回历史版本或变成空稿。
+   - **铁律**：**严禁在当前编辑器标签页调用 `goto`！** 保存草稿后必须等待保存状态稳定（显示「手动保存 / 已保存 / 上次保存于...」并等待足够 debounce）；验证草稿箱必须在已有的 `cgi-bin/home` 标签页或新开独立标签页中导航，原编辑器标签页必须保持存活直至全部验收完成。
+
+4. **合集（专辑）四步真控件标准流程**：
+   - **根因**：合集是自定义 Vue 组件，盲目点「合集」文本标签不会打开弹窗（坑 310/312），直接输入也会因未等选项渲染而落空。
+   - **标准流程（缺一不可）**：
+     ① 点击真入口：`.allow_click_opr.js_article_tags_label`（或合集操作区域）；
+     ② 聚焦弹窗内的输入框：`input[placeholder="请选择合集"]`，填入目标合集名（`inp.fill(COLLECTION)`）；
+     ③ 等待选项渲染：必须等待 ≥2.5s（受接口搜索防抖影响，坑 266）；
+     ④ 选中匹配项并确认：在 `.select-opts-con` 下定位 `li.select-opt-li`，匹配目标文本后点击，然后点击确认按钮 `button.weui-desktop-btn_primary`（文案严格为「确认」）；
+     ⑤ 回读硬断言：读取 `.js_article_tags_content`，断言合集名称已被应用。
+
+**同一天这套坑在 post-to-video 流水线又踩了一次（2026-11-05 15:00，`20261105_si`，同样 16 个占位符原样留在草稿里）**——说明这些规则**必须写进每个会碰公众号的 skill**，不能只在日报 skill 里。已同步落进 `post-to-video/scripts/upload_mp.py`（v1.1.0）：它把「禁 Escape + 逐图单调递减断言 + 保存后不在同标签 goto + 合集点 `li.select-opt-li`」写死在脚本里，可直接复用；`post-to-video/SKILL.md` Step 10 也把这三坑列成表。**派生新平台脚本时优先拷这个脚本，不要从零重写。**
+
+补一条 1105 下午新观察：草稿箱卡片上的「编辑」图标**必须 `card.hover()` 之后才可见**，直接 `locator.click()` 会 `element is not visible` 超时；命中后是 `expect_popup()` 开新标签，URL 含 `appmsg_edit&action=edit&appmsgid=<id>`。另外 `#title` 回读要用 `document.querySelector('#title').value`，不要用 `innerText`（input 没有 innerText，恒返回空串会误判「标题没写进去」）。
+
+#### 坑 411：视频产物就绪判据缺陷：生成的视频打不开（`moov` atom 缺失与 `ffprobe` 流完整性校验）
+
+**现象**：视频渲染阶段进程返回 0 或文件存在，但在后续各平台上传时提示「格式不正确 / 无法解析 / 时长为0」，或用户在本地双击时播放器提示「生成的视频打不开」。
+
+**根因剖析**：
+1. **`moov` atom 缺失或损坏**：MP4 容器的元数据（时间戳、流索引、track 采样表）存储在 `moov` atom。Remotion 渲染或 ffmpeg 转码时，若进程遭遇 OOM kill、超时终止、磁盘写满或异常退出，文件往往只写入了裸码流 `mdat` 而缺失 `moov` atom。损坏的文件依然具备几十兆体积，旧脚本仅靠 `os.path.exists()` 和 `os.path.getsize() > 0` 会造成严重**假绿（False Green）**。
+2. **时长为 0 或音视频轨脱节**：渲染若异常中断，容器时长可能为 0 或 NaN，导致平台审核秒拒。
+
+**修法：基于 `ffprobe` 的深度流与结构完整性校验**：
+在声明视频渲染就绪、以及任何上传脚本调用前，必须执行结构性探活，拒绝任何裸文件大小判定：
+```python
+import subprocess, json, os
+
+def assert_video_playable(video_path: str, min_duration: float = 30.0):
+    assert os.path.exists(video_path), f"视频文件不存在: {video_path}"
+    assert os.path.getsize(video_path) > 1024 * 1024, f"视频文件过小: {video_path}"
+
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration,size,format_name",
+        "-show_entries", "stream=codec_type,width,height,duration,nb_read_frames",
+        "-of", "json", video_path
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    assert r.returncode == 0, f"ffprobe 校验失败（moov atom 损坏或缺失）: {r.stderr.strip()}"
+    
+    meta = json.loads(r.stdout)
+    dur = float(meta.get("format", {}).get("duration", 0))
+    assert dur >= min_duration, f"视频时长非法: {dur}s < {min_duration}s"
+    
+    streams = meta.get("streams", [])
+    has_video = any(s.get("codec_type") == "video" and s.get("width") == 1920 and s.get("height") == 1080 for s in streams)
+    has_audio = any(s.get("codec_type") == "audio" for s in streams)
+    assert has_video, "未找到符合 1920x1080 分辨率的有效视频流"
+    assert has_audio, "未找到有效音频流"
+    
+    print(f"视频完整性校验通过: {video_path} (时长: {dur:.2f}s, 大小: {os.path.getsize(video_path)} 字节)")
+```
+
+#### 坑 412：跨平台生僻/特殊字符合集与专栏（如「虢礫緙嘞」）联动与容错体系
+
+**现象与痛点**：
+当发布使用特定品牌合集名（典型如粤语生僻字「虢礫緙嘞」）或带有特殊字符、符号的专栏时，常在跨平台自动化中遭遇连锁反应：
+1. **DOM 文本正则转义与字符编码灾难**：在 `page.evaluate()` 中直接使用 `new RegExp(collection)` 会因括号、斜杠或非 ASCII 生僻汉字抛错；若跨进程未显式指定 UTF-8，生僻字可能被误转为 unicode escape 乱码（如 `\u...`），导致页面选项匹配恒空。
+2. **多平台合集名称映射不一致**：
+   - 微信公众号：合集「虢礫緙嘞」或「今日羊报 AI」；
+   - 微信视频号：合集/专辑「虢礫緙嘞」；
+   - 抖音：合集「虢礫緙嘞」；
+   - 知乎：专栏收录「今日羊报 AI」（注意：知乎专栏名含半角空格、大写 I，而视频号为无空格小写 l）。
+   若在 `publish.json` 中使用单一字段，会引发多平台脚本相互覆盖与串期。
+3. **平台控件选择逻辑与视口遮挡差异**：
+   - 视频号：合集下拉是 `.post-album-wrap .option-item`，必须滚动到视口并坐标点击（坑 293），文本匹配必须用严格相等 `el.innerText.trim() === target`；
+   - 抖音：合集弹窗必须采用最小面积法排除外层下拉容器（坑 297），生僻字输入后需等待接口模糊搜索；
+   - 知乎：必须先选中「发布到专栏」（坑 387），再从 combobox 展开的 `.Select-option` 中匹配专栏名称；
+   - 微信公众号：需通过 `.allow_click_opr.js_article_tags_label` 打开弹窗，输入后等 ≥2.5s 在 `li.select-opt-li` 中选中（坑 410）。
+4. **容错机制（软门禁 Soft Gate）**：
+   - 合集/专栏属于组织元数据维度。若账号后台尚未创建「虢礫緙嘞」专栏/合集，或者网络波动未加载出该选项，**绝对不能因此 `assert` 中断整条上传流水线**（与坑 351 标签缺失同族）！
+   - 规则：合集匹配失败时，记录告警日志并在 review-checklist 中标明 `collection_missing: 虢礫緙嘞 (未在后台找到，需手动创建或关联)`，脚本继续执行草稿保存，确保草稿主体资产（正文、视频、图片、封面）完整留存。
+
+### v3.82.0（2026-11-05 1105 日报实跑：三条平台字段补齐 — 公众号标题 / 视频号话题标签 / 知乎话题）
+
+本期 447 帖（458 抓 / 31 批 / err=0）→ 视频 237.61 s / 25.4 MB / 1920×1080 / 7128 帧，锚点 **0.7319**（`stealth_model` 隐匿模型，第 7 景）；公众号 `MP_VERIFY_OK`（100001886）+ 知乎 `ZHIHU_DRAFT_OK` + B站草稿 + 抖音（假阴性）+ 视频号草稿(9) 全成。用户明确追加三条平台字段要求：
+1. **公众号必须填写标题（不可跳过）**：`mp_*_run.py` 的 `title` 步不是可选项，`#title` 为空会让草稿在后台显示「无标题」，且 verify 的 `title_ok` 恒假；判据 = `#title.value == publish.json.title` 逐字相等；只有新建草稿才允许为空。
+2. **视频号 description 必须与抖音同格式带话题标签**：`platform.channels.description` 末尾必须像 `platform.douyin.description` 一样带同一组 hashtag 行；由 `gen_publish` 生成时写入，不要在上传脚本里临时拼。
+3. **知乎要输出并选择话题**：`publish.json` 补齐 `platform.zhihu.{title, topics, column, article, images}`，`topics` 为目标话题集合（2-4 个）；上传脚本新增 `topics` 步：输入话题关键词，按「y 在视口内 + 文本完全等于话题名」过滤候选并坐标点击。话题缺失不阻断存草稿。
 
 ### v3.76.0（2026-10-31→11-01 月报 + 1101 日报连续实跑：跨流水线抢标签把整篇稿子写错，坑 366-372）
 

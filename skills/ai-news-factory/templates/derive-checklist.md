@@ -279,9 +279,9 @@ scene7_target = pre * (1 - 0.76) / 0.76 - scene8
 ```bash
 D=news-pipeline/<DATE>
 
-# ① 视频文件名必须等于 publish.json 的 video 字段（坑 401，每期必犯）
+# ① 视频文件名必须等于 publish.json 的 video 字段（坑 401）+ ffprobe 流完整性深度校验（坑 411）
 python3 - <<'EOF'
-import json, os, shutil
+import json, os, shutil, subprocess
 D = 'news-pipeline/<DATE>'
 pub = json.load(open(f'{D}/publish.json'))
 src = f"{D}/video/video-{pub['date']}.mp4"      # remotion 输出的简名
@@ -289,7 +289,24 @@ dst = f"{D}/video/{pub['video']}"               # 平台展示名
 if os.path.exists(src) and not os.path.exists(dst):
     shutil.move(src, dst); print('renamed ->', dst)
 assert os.path.exists(dst), f'video missing: {dst}'
-print('video OK', os.path.getsize(dst), 'bytes')
+assert os.path.getsize(dst) > 1024 * 1024, f'video too small: {dst}'
+
+# ffprobe 深度校验 moov atom 与时长（坑 411：防生成的视频打不开）
+cmd = [
+    'ffprobe', '-v', 'error',
+    '-show_entries', 'format=duration,size',
+    '-show_entries', 'stream=codec_type,width,height,duration',
+    '-of', 'json', dst
+]
+r = subprocess.run(cmd, capture_output=True, text=True)
+assert r.returncode == 0, f'ffprobe failed (moov atom missing/corrupt): {r.stderr.strip()}'
+meta = json.loads(r.stdout)
+dur = float(meta.get('format', {}).get('duration', 0))
+assert dur >= 30.0, f'video duration too short: {dur}s'
+streams = meta.get('streams', [])
+assert any(s.get('codec_type') == 'video' and s.get('width') == 1920 and s.get('height') == 1080 for s in streams), 'video stream invalid'
+assert any(s.get('codec_type') == 'audio' for s in streams), 'audio stream invalid'
+print('video verified OK', os.path.getsize(dst), 'bytes', f'duration={dur:.2f}s')
 EOF
 
 # ② ★ 标签页盘点（v3.81.0 新增，坑 403 新形态）
@@ -340,7 +357,7 @@ touch data/logs/<issue>-DONE
 | 字幕 | 108 行 | mp4 复核中位 +0.235 s、8 个场景块 Δ≤1 ms；1 个离群是 ASR 把中文数字写成别字导致锚定偏移，非真错位 |
 | 上传 | 5 平台 | 公众号 100001886 / 知乎 2101475383770198107 / B站草稿 / 抖音假阴性 / 视频号草稿(9) |
 
-**本期踩到并已回写模板的 8 条**（详见 SKILL.md v3.82.0 段）：
+**本期踩到并已回写模板的 11 条**（详见 SKILL.md v3.82.0 段）：
 1. 上传 daemon 未在跑 → `/json/list` 返回非 JSON，`json.load` 直接崩。**开工第一件事是 `curl /json/version` 探活**，别误判成登录失效。
 2. `wechat-sections-*.json` 缺 `must_have` / `must_not_have` 键 → `KeyError`。派生断言层要**逐键**对当日产物核对，不能只看语法。
 3. issue word 写成「65 美元」而正文是「六十五美元」→ 断言炸。**数字口径以正文实际写法为准**（中文正文里数字常写中文）。
@@ -349,6 +366,9 @@ touch data/logs/<issue>-DONE
 6. **坑405/349 第三次复发**：抖音 `DY_E2E_FAILED` 仍是跳转后取空的假阴性，`readback` 阶段数据完好 → `done_with_caveat`，**不重传**。
 7. **坑325 复发**：视频号 ready 判据在 `pct=25` 就放行 → 改为只认 `video` 元素数 + 时长 >200 s。
 8. 视频号短标题 Vue setter 一次性赋值吞尾字 → 清空后用 `keyboard.type(delay=40)` 真实键入。
+9. **坑410（公众号 ProseMirror 节点事务与存草稿）**：严禁按 Escape 取消事务（导致 16 图未替换）；每张图必做单调严格递减断言（`after == before - 1`）；同标签禁 `goto` 避免 abort 异步存草稿；合集四步真控件点击（`.allow_click_opr.js_article_tags_label`）。
+10. **坑411（视频完整性探活门禁）**：拒绝纯文件大小假绿，必须用 `ffprobe` 验证 `moov` atom 存在且 duration > 0，杜绝「生成的视频打不开」。
+11. **坑412（跨平台生僻字符合集/专栏联动）**：多端合集（如「虢礫緙嘞」）在 `publish.json` 独立声明，DOM 匹配严禁裸写 RegExp，未建合集走软门禁留痕不阻断存草稿。
 
 **耗时对比**：本期抓取 37 分钟（1104 是 32 分钟），视频链因断言层返工多花了约 40 分钟——**返工全部发生在断言层，不在内容层**，与坑 241 的模式一致。
 
