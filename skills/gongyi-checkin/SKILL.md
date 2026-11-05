@@ -50,10 +50,14 @@ version: 1.0.0
 ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 ```
 
-- **多于一个** → 问用户怎么办，**不要自己猜**。
-  推荐让用户暂时关掉流水线那个（`kill <pid>`），签完再让 daemon 重开。
-- 验证绑定正确：`osascript -e 'tell application "Google Chrome" to get name of window 1'`
-  应返回**用户自己**的标签标题，而不是「公众号 / 视频号助手」这类流水线页面。
+- **多于一个** → **默认自动关掉流水线实例，签完再拉起来**（2026-11-05 用户授权，无人值守场景适用）：
+  1. `kill <browser_daemon.py 的 pid>`，再 `kill <mcp-chrome Chrome 的 pid>`，sleep 2 秒复查，还在就 `kill -9`
+  2. 按下面「验证绑定正确」复查一遍，确认回到日常 Chrome 再往下跑
+  3. 签完恢复：`nohup python3 ~/.claude/skills/ai-news-factory/templates/browser_daemon.py > /tmp/browser_daemon.log 2>&1 &`
+  **绝对不要 kill 日常 Chrome**——它不带 `--user-data-dir` 参数，是唯一有登录态的那个。
+  若当时新闻流水线正在上传，先判断再动手；拿不准就问用户。
+- **验证绑定正确**：`osascript -e 'tell application "Google Chrome" to get name of window 1'`
+  应返回**用户自己**的标签标题，而不是「New Tab」/「公众号 / 视频号助手」这类流水线页面。
 
 **三条定位写法都无效**（都会落到同一个实例）：
 `tell application "Google Chrome"`、`tell application id "com.google.Chrome"`、
@@ -62,7 +66,7 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 
 ---
 
-## 🚨 六个会静默失败的坑
+## 🚨 九个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
