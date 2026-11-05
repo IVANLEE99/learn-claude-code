@@ -39,11 +39,31 @@
 ### 薄荷公益站 — https://up.x666.me/
 - 2026-11-04 转盘签到站：`签到` 按钮 class `spin-button`，已签到时文案 `今日已签到` 且 disabled。
   接口家族是 `/api/checkin/status` + `/api/checkin/calendar`（**不是** `/api/user/checkin`）。
+- **2026-11-05 真控件是「开始转动」（转盘）不是「签到」**：顶部 `<A>签到</A>` 只是切换视图，
+  点它永远无效。要点 `BUTTON` 文案 `开始转动`；点击后变 `转动中...`(disabled)，
+  **必须 reload 才能读到结果**（动画不结束按钮一直卡住）—— reload 后看
+  `余额` 是否增长 + `已连签 N 天` 是否 +1 + 按钮是否变 `今日已签到`。
 
 ### Fengwind API 福利站 — https://api-welfalre.fengwind.com/
 - 2026-11-04 自研站，顶部有 `签到` 导航项（`router-link-ex`）+ 页面内 tab 按钮 `签到`。
   文案 `今日已签到`。接口 `/api/checkin/status`。
+- **2026-11-05 签到前必须先选「额度有效期」radio**：`input[name="checkin-validity"]`
+  取值 `d1/d2/d3/d5/d7/permanent`（1天100% / 2天80% / ... / 永久10%）。
+  选 `d1` 收益最高。**不选 radio 直接点签到无效**。
+- 真正的签到按钮是页面底部那个 **50×36 的小 `BUTTON 签到`**（不是顶部导航的 `<A>签到</A>`，
+  也不是 tab 栏那个 302×29 的）。按面积取最小的 `BUTTON` 才命中。
+- 成功标志：`今日已签到` + `本次获得 $X` + `已入账`。
 - 书签名带「[禁止测活]」的站点**不要发探活请求**（用户标注，见 Fengwind 的同名书签）。
+
+### 有人机验证的站（不要尝试自动过）
+- **PM-Plan**（`https://plan.pmcat.top/`）：点 `今日签到` 弹「签到人机验证 — 拖动滑块拼合缺口」。
+- **简直了**（`https://jianzhile.vip/console/personal`）：点 `Check in now` 弹
+  「Security verification / Refresh captcha」图形验证码。
+- 这两类**标记为 `🔒 需人工验证`**，脚本不重试、不绕过。用户自己点一下即可。
+
+### dicksuck / 多数 new-api 站：重复点会被拒
+- 页面文案 `You can only check in once per day` = **今天已经签过了**，不是失败。
+- 判据要包含这句：见到它直接判 `done`，不要再点、不要报 pending。
 
 ### 每日签到 - lOXO — https://loxo.cc/check-in
 - 2026-11-04 独立签到页。字段齐全：`今日奖励 $X`、`可用余额 $X`、

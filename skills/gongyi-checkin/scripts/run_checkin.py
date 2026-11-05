@@ -348,6 +348,7 @@ STATE_LABEL = {
     "pending": "🟡 待签到(未点击)",
     "logged_out": "🔴 需登录",
     "unreachable": "⚫ 暂时失联",
+    "blocked_captcha": "🔒 需人工验证",
     "unknown": "⚠️ 状态未知",
 }
 
@@ -362,7 +363,8 @@ def render_report(results, meta):
     lines.append("")
 
     ok = [r for r in results if r["state"] in ("done", "auto")]
-    bad = [r for r in results if r["state"] in ("logged_out", "unreachable", "unknown")]
+    bad = [r for r in results
+           if r["state"] in ("logged_out", "unreachable", "unknown", "blocked_captcha")]
     pending = [r for r in results if r["state"] == "pending"]
 
     lines.append("## 总览")
@@ -375,6 +377,8 @@ def render_report(results, meta):
                  % len([r for r in results if r["state"] == "logged_out"]))
     lines.append("| ⚫ 暂时失联(重试3次) | %d |"
                  % len([r for r in results if r["state"] == "unreachable"]))
+    lines.append("| 🔒 需人工验证 | %d |"
+                 % len([r for r in results if r["state"] == "blocked_captcha"]))
     lines.append("| ⚠️ 状态未知 | %d |" % len([r for r in results if r["state"] == "unknown"]))
     lines.append("")
 

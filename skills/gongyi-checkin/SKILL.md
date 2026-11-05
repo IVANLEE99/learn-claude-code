@@ -33,6 +33,33 @@ version: 1.0.0
 
 **不要**每轮重开浏览器：用户日常 Chrome 里的登录态才是关键，重开就丢。
 
+### 🚨 致命：同时存在两个 Chrome 实例时，AppleScript 会绑错
+
+`tell application "Google Chrome"` 按 **bundleID `com.google.Chrome`** 解析。
+若有第二个 Chrome 进程（例如 `ai-news-factory` 的 `browser_daemon.py` 用
+`--user-data-dir=.../mcp-chrome-* --remote-debugging-port=9222` 起的那个），
+两个都注册成 `com.google.Chrome`，**AppleScript 会绑到后启动的那个**。
+
+后果极其隐蔽：脚本照常跑、报告照常出，但打的是**没有登录态的实例**
+（实测 mcp-chrome 只有 1/27 站有 cookie，日常 Chrome 26/28），
+于是大面积「暂时失联」、余额读到旧值或空值。
+
+**开工前必须先做单实例检查**：
+
+```bash
+ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
+```
+
+- **多于一个** → 问用户怎么办，**不要自己猜**。
+  推荐让用户暂时关掉流水线那个（`kill <pid>`），签完再让 daemon 重开。
+- 验证绑定正确：`osascript -e 'tell application "Google Chrome" to get name of window 1'`
+  应返回**用户自己**的标签标题，而不是「公众号 / 视频号助手」这类流水线页面。
+
+**三条定位写法都无效**（都会落到同一个实例）：
+`tell application "Google Chrome"`、`tell application id "com.google.Chrome"`、
+`tell application "/Applications/Google Chrome.app"`。
+`System Events` 查 bundle id 反而能列出真实 pid —— 可用它做诊断，但不能用来发 JS。
+
 ---
 
 ## 🚨 六个会静默失败的坑
