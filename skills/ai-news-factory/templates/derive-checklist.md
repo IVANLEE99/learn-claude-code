@@ -193,6 +193,63 @@ for s in main_subjects:
 
 ---
 
+## 4b. **新增字段 vs 逐字段 diff 门（v3.82.0 新增）**
+
+`gen_publish` 里有 `extra_keys` 断言：`publish.json` 出现上期没有的字段就中止。这是**好东西**（挡住「派生脚本凭空造字段」），但**新增字段是正当需求时不要删断言**。
+
+1105 实测：补 `platform.zhihu.*` 时 `AssertionError: extra fields vs prev: ['platform.zhihu.title', ...]`。
+
+**正解**：
+
+```python
+ALLOWED_NEW_PREFIXES = ('platform.zhihu.',)          # 显式声明本期有意新增
+unexpected = [k for k in extra_keys if not k.startswith(ALLOWED_NEW_PREFIXES)]
+assert not unexpected, f'unexpected extra fields vs prev: {unexpected}'
+if extra_keys:
+    print(f'new fields (allowed): {extra_keys}')     # 留痕，便于下一期知道这是什么时候加的
+```
+
+**同时**：`same` / `changed` 的比较要加 `k in pf` 保护，否则新增键会在 `str(pf[k])` 处 `KeyError`：
+
+```python
+same    = [k for k in cf if k in pf and str(cf[k]) == str(pf[k])]
+changed = [k for k in cf if (k not in pf) or str(cf[k]) != str(pf[k])]
+```
+
+**纪律**：删断言 = 把整道门的价值一起删掉；加白名单 + 打印留痕 = 保留价值并且下一期可追溯。
+
+---
+
+## 4c. **平台字段完整性清单（v3.82.0，每期逐项核对）**
+
+这三项在过去几期反复漏，1105 由用户点名：
+
+| 项 | 位置 | 判据 | 漏了会怎样 |
+|---|---|---|---|
+| **公众号标题** | `mp_*_run.py` 的 `title` 步 | `#title.value == publish.json.title` 逐字相等 | 后台草稿显示「无标题」，`title_ok` 恒假 |
+| **视频号 hashtag 行** | `platform.channels.description` 末尾 | 与 `platform.douyin.description` 同样以 `#今日羊报AI #AI日报 …` 结尾 | 两个平台描述形态不一致（用户直接点名要统一） |
+| **知乎 topics** | `platform.zhihu.topics`（**整段都不能缺**） | 2–4 个，且 `zhihu_upload.py topics` 步回读 chips 后 `missing == []` | 话题只能靠平台按正文自动带 1–2 个，等于没管 |
+
+自检片段：
+
+```python
+pub = json.load(open(f'{D}/publish.json'))
+ch, dy = pub['platform']['channels'], pub['platform']['douyin']
+
+# ② 视频号必须像抖音一样带 hashtag 行
+ch_tags = [t for t in ch['description'].split('\n') if t.strip().startswith('#')]
+dy_tags = [t for t in dy['description'].split('\n') if t.strip().startswith('#')]
+assert ch_tags, 'channels description 缺 hashtag 行（v3.82.0）'
+assert ch_tags == dy_tags, f'channels/douyin hashtag 不一致: {ch_tags} vs {dy_tags}'
+
+# ③ 知乎 topics 必须在场
+zh = pub['platform'].get('zhihu') or {}
+assert zh.get('topics'), 'platform.zhihu.topics 缺失（v3.82.0）'
+assert 2 <= len(zh['topics']) <= 4, f'话题数应 2-4: {zh["topics"]}'
+```
+
+---
+
 ## 5. 锚点三重校验（坑 397/398/399）
 
 ```python
@@ -270,6 +327,30 @@ touch data/logs/<issue>-DONE
 # ③ 概念库回填（本期锚点用了就必须记，坑 355「未回写=未修复」）
 #    usage-log.json 追加一条 + concepts.json 的 use_count/last_used 更新
 ```
+
+---
+
+## 附：本期（1105）实际踩点与耗时
+
+| 阶段 | 实际 | 备注 |
+|---|---|---|
+| 抓取 | 458 抓 / 447 入库 / 31 批 / err=0 | 22:35:19 → 23:12:17（37 分钟） |
+| 报告 / press / PDF | 31.2 KB / 11.8 KB / 471,350 B | 30 required / 31 forbidden；坑326 实测把「未确认传闻」从 forbidden 移除（本期是合法可信度标签） |
+| 视频 | 237.61 s / 25.4 MB / 1920×1080 / 7128 帧 | 锚点 0.7319（`stealth_model`，第 7 景）；audit 38 门禁 0 failed |
+| 字幕 | 108 行 | mp4 复核中位 +0.235 s、8 个场景块 Δ≤1 ms；1 个离群是 ASR 把中文数字写成别字导致锚定偏移，非真错位 |
+| 上传 | 5 平台 | 公众号 100001886 / 知乎 2101475383770198107 / B站草稿 / 抖音假阴性 / 视频号草稿(9) |
+
+**本期踩到并已回写模板的 8 条**（详见 SKILL.md v3.82.0 段）：
+1. 上传 daemon 未在跑 → `/json/list` 返回非 JSON，`json.load` 直接崩。**开工第一件事是 `curl /json/version` 探活**，别误判成登录失效。
+2. `wechat-sections-*.json` 缺 `must_have` / `must_not_have` 键 → `KeyError`。派生断言层要**逐键**对当日产物核对，不能只看语法。
+3. issue word 写成「65 美元」而正文是「六十五美元」→ 断言炸。**数字口径以正文实际写法为准**（中文正文里数字常写中文）。
+4. `stale_1104` 把 `KYC` 当禁词，但本期「没弹 KYC」是合法内容 → 禁词表要按「本期是否合法引用」逐词判断（坑 326 第三次命中）。
+5. **坑403 复发**：mp home 标签不存在 → `PUT /json/new?<home+token>` 开一个即恢复。
+6. **坑405/349 第三次复发**：抖音 `DY_E2E_FAILED` 仍是跳转后取空的假阴性，`readback` 阶段数据完好 → `done_with_caveat`，**不重传**。
+7. **坑325 复发**：视频号 ready 判据在 `pct=25` 就放行 → 改为只认 `video` 元素数 + 时长 >200 s。
+8. 视频号短标题 Vue setter 一次性赋值吞尾字 → 清空后用 `keyboard.type(delay=40)` 真实键入。
+
+**耗时对比**：本期抓取 37 分钟（1104 是 32 分钟），视频链因断言层返工多花了约 40 分钟——**返工全部发生在断言层，不在内容层**，与坑 241 的模式一致。
 
 ---
 

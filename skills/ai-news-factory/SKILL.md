@@ -1,12 +1,31 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.81.0
+version: 3.82.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.81.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.82.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.82.0 核心改进（2026-11-05 1105 日报实跑：三条平台字段补齐 — 公众号标题 / 视频号话题标签 / 知乎话题）**
+>
+> 本期 447 帖（458 进队列 / 31 批 / err=0）→ 视频 237.61 s / 25.4 MB / 1920×1080 / 7128 帧，锚点 **0.7319**（`stealth_model` 隐匿模型，第 7 景）；公众号 `MP_VERIFY_OK`（100001886）+ 知乎 `ZHIHU_DRAFT_OK` + B站草稿 + 抖音（假阴性）+ 视频号草稿(9) 全成。用户明确追加三条要求，已落成硬规则：
+>
+> ① **公众号必须填写标题（不可跳过）**。`mp_*_run.py` 的 `title` 步不是可选项：`#title` 为空会让草稿在后台显示「无标题」，且 **verify 的 `title_ok` 恒假**。判据 = `#title.value` 与 `publish.json.title` 逐字相等；**只有新建草稿才允许为空**（空 = 刚建的），有标题的旧稿一律关掉重开（坑 379/383 同族）。
+> ② **视频号 description 必须与抖音同格式带话题标签**。抖音侧一直是「描述正文 + \n + `#今日羊报AI #AI日报 …`」，视频号过去只有正文、没有标签行，两个平台在后台的展示形态不一致。**规则：`platform.channels.description` 末尾必须像 `platform.douyin.description` 一样带同一组 hashtag 行**；由 `gen_publish` 生成时写入，**不要在上传脚本里临时拼**（否则 `publish.json` 不再是单一事实源）。
+> ③ **知乎要输出并选择话题**。往期 `publish.json` **整个 `platform.zhihu` 段都缺失**，话题靠平台按正文自动带 1-2 个，等于没管。v3.82.0 起：
+>    · `publish.json` 必须有 `platform.zhihu.{title, topics, column, article, images}`，`topics` = **目标话题集合**（2-4 个，对应正文主线）；
+>    · 上传脚本新增 `topics` 步：读 `topics` → 回读现有 chips → 缺的用「添加话题 → 搜索 → 点候选」补齐 → 回读断言；
+>    · **控件实测（2026-11-05）**：chip class = `.css-1d3pntc`；入口 = `button` 文案精确「添加话题」（class `css-1gtqxw0`）；点开后 `input[placeholder="搜索话题..."]`；候选项是 BUTTON，**选完即生效、无确认按钮**；
+>    · **坑（本期实测）**：搜索关键词会同时命中**正文段落**（`y` 为负、不在视口内）→ 候选必须按「**y 在视口内** + 文本完全等于话题名」双重过滤，再走落点自证点击；
+>    · **话题缺失不阻断存草稿**（与坑 351 标签同族），但必须打印 `missing` 列表并写进 review-checklist；
+>    · **先决条件：编辑器必须按 `platform.zhihu.article_id` 直开**。只按域名找现成标签会捡到 `www.zhihu.com/`（首页）或空 `/write` 新稿——在空页上回读会得到「三个话题全缺」的假结论，而真稿 chip 齐全。`publish.json` 要存 `article_id`（首次上传后回填），`get_editor_page` 在无合格标签时按 id `goto /p/<id>/edit`，并对现成标签跑 `_editor_ok()`（标题含本期标题或正文 >200 字）。
+> ④ **新增字段要过「逐字段 diff」这道门**：`gen_publish` 的 `extra_keys` 断言会把 `platform.zhihu.*` 判成「派生漏改」而中止。**正确处置是显式声明 `ALLOWED_NEW_PREFIXES = ('platform.zhihu.',)`**，不是删掉断言（那会把整道门的价值一起删掉）。同时 `same/changed` 比较要加 `k in pf` 保护，否则新增键会 `KeyError`。
+> ⑤ **上传 daemon 开工前必探活**：`curl -s -m 8 http://127.0.0.1:9222/json/version` 返回非 JSON 就是 daemon 没起；`nohup python3 templates/browser_daemon.py &` 起裸 Chrome（Chrome 156 实测）。**别把「端口不通」误判成「登录失效」**。
+> ⑥ **视频号 ready 判据（坑 325 复发）**：`pct in (None,'100') or not uploading` 在 `pct='25'` 且 `uploading=False` 时直接放行 → 25% 就宣布「表单就绪」。**真判据只能是上传产物本身**：`shadowRoot.querySelectorAll('video').length >= 1` 且 `max(duration) > 200`（按成片时长 ±3s）且不在上传中。
+> ⑦ **视频号短标题别用 setter 一次性赋值**：Vue 受控 input 会把「今日羊报AI 11月5日」落成「今日羊报AI 11月5」（吞尾字）。修法 = 原生 setter 清空 + `input` 事件 → 再 `keyboard.type(..., delay=40)` 真实键入 → 回读校验。
+> ⑧ **封面对话框「still open」是假信号**：`edit-cover-dialog-container` 关闭后仍留在 DOM，`getBoundingClientRect()` 是 0×0。判「已关闭」看 rect，不看容器是否存在（与坑 302/303 同族）。
 
 > **🔴 v3.81.0 核心改进（2026-11-04 1104 日报全链实跑：派生器哨兵自伤 + 锚点扩写叠写，坑 408-409，另 4 个旧坑复发）**
 >
@@ -183,9 +202,9 @@ version: 3.81.0
 |------|-----------|------------------------|
 | B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） | URL 跳到 `upload-manager/article?group=draft`，且草稿箱标题匹配。**🔴 v3.75.0 补（坑 351）：标签缺失只记录、不阻断——把 `assert not missing` 改成 log + 写进 checklist；分区/标题/封面/简介/合集/声明才允许 assert 停链。SKILL 早就这么写，但派生模板没同步，1031 因此白扔一次 29MB 上传后的全部后续步骤** |
 | 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿）。**若恢复后发现视频丢失（坑 323），在该草稿页内按 `accept` 含 `video` 挑 `input[type=file]`（本期实测索引 1，索引 0 是封面图的 image/*）重新 `set_input_files` 上传，再暂存** | **① 按钮消失 且「继续编辑」横幅出现；② 恢复后 `videos >= 1`（v3.68.0 坑 323：双信号不是充分条件——横幅在、字段全，视频仍可能没落库）；③ 标题回读一致**。**🔴 v3.75.0 补（坑 349）：判定必须在「恢复后的回读页」完成并当场留存，禁止在任何跳转之后复判——第二次「暂存离开」后页面会跳回发布页，此时 `cover slots []`/`vids=0` 会把已建成的草稿读成失败（1031 实测 `DY_E2E_FAILED` 为假阴性）** |
-| 视频号 | 点击「保存草稿」按钮——**点击前必须 `document.elementFromPoint` 自证落点是它**（v3.67.0 坑 317：它与「手机预览」「发表」水平相邻、间距仅 16px、无二次确认，1028 期因 stale 坐标误点「发表」，内容直接公开） | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4）。**另：视频标注不在草稿里保存（坑 318），验收时不要拿它当落库判据**。**🔴 v3.75.0 补硬判据（坑 348）：只看「条目出现在哪个列表」不够——必须查卡片的操作按钮集。草稿卡 `post-draft-item` 只有 `编辑/删除`；已发表卡 `post-feed-item` 才有 `复制视频ID/视频ID/可见权限/评论管理/分享`。两侧时间戳选择器不同（草稿 `.post-time .time-label` vs 发表 `.center-info .time-label`），选错就得到空集，会被误读成「没有草稿」** |
+| 视频号 | 点击「保存草稿」按钮；**描述末尾必须像抖音一样带 `#今日羊报AI #AI日报 …` hashtag 行（v3.82.0）**——**点击前必须 `document.elementFromPoint` 自证落点是它**（v3.67.0 坑 317：它与「手机预览」「发表」水平相邻、间距仅 16px、无二次确认，1028 期因 stale 坐标误点「发表」，内容直接公开） | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4）。**另：视频标注不在草稿里保存（坑 318），验收时不要拿它当落库判据**。**🔴 v3.75.0 补硬判据（坑 348）：只看「条目出现在哪个列表」不够——必须查卡片的操作按钮集。草稿卡 `post-draft-item` 只有 `编辑/删除`；已发表卡 `post-feed-item` 才有 `复制视频ID/视频ID/可见权限/评论管理/分享`。两侧时间戳选择器不同（草稿 `.post-time .time-label` vs 发表 `.center-info .time-label`），选错就得到空集，会被误读成「没有草稿」** |
 | 公众号 | 点击「保存为草稿」按钮 | URL 出现 `appmsgid=`，且 `bodyLen` / 占位符数 / 封面 `hasQpic` / **合集 `.js_article_tags_content`** 回读一致（v3.66.0 坑 310：合集**不能**用 `body.innerText` 子串判，正文页脚恒含合集名） |
-| 知乎 | **无「保存草稿」按钮——知乎文章是自动保存**（v3.71.0 坑 335 实测）。填完标题/正文等 ≥3s 出现底部「刚刚 · 草稿」即可；**「发布」永不进脚本**（规范禁止自动化发布，AI 声明不能豁免） | 编辑页 URL 变为 `zhuanlan.zhihu.com/p/<id>/edit`；创作者中心「草稿箱(N)」列表出现本期标题；编辑器内 标题 value / 正文 innerText 长度 / 封面 / **创作声明（含 AI 辅助创作 作者对内容负责）** / 专栏「今日羊报 AI」五项同时回读（详见 `templates/platform-zhihu.md` §3.10） |
+| 知乎 | **无「保存草稿」按钮——知乎文章是自动保存**（v3.71.0 坑 335 实测）。填完标题/正文等 ≥3s 出现底部「刚刚 · 草稿」即可；**「发布」永不进脚本**（规范禁止自动化发布，AI 声明不能豁免） | 编辑页 URL 变为 `zhuanlan.zhihu.com/p/<id>/edit`；创作者中心「草稿箱(N)」列表出现本期标题；编辑器内 标题 value / 正文 innerText 长度 / 封面 / **创作声明（含 AI 辅助创作 作者对内容负责）** / 专栏「今日羊报 AI」 / **话题 chips（`.css-1d3pntc`，v3.82.0）** 六项同时回读（详见 `templates/platform-zhihu.md` §3.10） |
 
 ### 🔴 浏览器与 Profile 全局铁律（v3.7.0 / 2026-07-18 实测）
 
@@ -2101,7 +2120,7 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
     "channels": {
       "title": "今日羊报AI M月D日",
       "tags": ["AI日报", "..."],
-      "description": "视频号简介，含 hashtag"
+      "description": "视频号简介正文\n#今日羊报AI #AI日报 ...   ← 🔴 v3.82.0：必须与 douyin.description 一样以 hashtag 行结尾"
     },
     "wechat": {
       "title": "【YYYY-MM-DD】{核心标题}… | 今日羊报AI",
@@ -2109,10 +2128,11 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
       "images": "wechat-images/"
     },
     "zhihu": {
-      "title": "【M月D日】{信息型判断句}",
+      "title": "一个能被验证的回答，比一百次跑分都更接近真相",
+      "topics": ["人工智能", "腾讯混元", "FlashProve"],
       "column": "今日羊报 AI",
       "note": "知乎专栏名与抖音/视频号**合集名不同**：知乎是「今日羊报 AI」（含半角空格、末位大写 I），抖音/视频号是「今日羊报Al」（无空格、末位小写 l）。2026-10-30 分别按页面码点实测，别互相套用",
-      "tags": ["AI", "人工智能", "..."],
+      "topics_note": "🔴 v3.82.0：topics = 要在编辑器里落地的**话题集合**（2-4 个，对应正文主线），由 zhihu_upload 的 topics 步逐个补齐并回读 chips 断言。平台会按正文自动带 1-2 个，缺的才补；**缺失不阻断存草稿**但要记录 missing",
       "article": "zhihu-article-YYYY-MM-DD.md",
       "images": "zhihu-images/"
     }
@@ -3450,7 +3470,7 @@ browser_run_code_unsafe("""async (page) => {
 
 | 组件 | 类型 | 操作方式 | 可靠性 |
 |------|------|----------|--------|
-| 标题 | **隐藏 `#title` TEXTAREA + 可见 `.ProseMirror` 代理** | 正文注入后 `.ProseMirror`.first() click → Ctrl/Meta+A → keyboard.type；回读 `#title.value`（禁 textContent 直写） | ✅ 高 |
+| 标题 | **隐藏 `#title` TEXTAREA + 可见 `.ProseMirror` 代理** | 正文注入后 `.ProseMirror`.first() click → Ctrl/Meta+A → keyboard.type；回读 `#title.value`（禁 textContent 直写）。**🔴 v3.82.0：`title` 步是硬要求、不可跳过**——`#title` 为空会让草稿在后台显示「无标题」，且 verify 的 `title_ok` 恒假；判据 = `#title.value == publish.json.title` 逐字相等；**只有新建草稿才允许为空**，有标题的旧稿一律关掉重开（坑 379/383 同族） | ✅ 高 |
 | 作者 | 标准 input（≤8 字） | 原生 setter + dispatch `input`；固定 `羊报AI周刊`/`今日羊报AI`/`羊报AI月报`，勿填署名 | ✅ 高 |
 | 正文 | **ProseMirror** | 🔴 v3.30.0 修正：真实剪贴板 + Meta+A/Meta+V 粘贴（insertHTML/合成 paste 都会回刷清空） | ✅ 高 |
 | 视频号 | 弹窗选择 | 工具栏「视频号」→ 选账号 → 选视频 → 插入 | ✅ 高 |
@@ -5713,7 +5733,9 @@ browser_handle_dialog(accept=true)
 
 **入口**：`https://www.zhihu.com/creator/manage/creation/article` → 点击「立即创作」。**🔴 v3.75.0：该按钮可能整个不存在**（1031 实测 `hasCreate: False` 而账号登录正常、侧栏「草稿箱」在）→ 直接 `ctx.new_page(); page.goto('https://zhuanlan.zhihu.com/write')` 即可，编辑器直出（标题 + 正文都在）。**登录判据改为「侧栏有『草稿箱(N)』/『创作主页』且无扫码登录」，「立即创作」缺席只当 UI 变体，不得判未登录停机**（坑 353 同族的假阴性）。
 
-**八步（顺序不可跳）**：① 立即创作 → ② 标题 → ③ 正文（先文本后插图，图必须传到平台） → ④ **正文前插成片视频** → ⑤ 添加封面 → ⑥ 创作声明「包含 AI 辅助创作，作者对内容负责」 → ⑦ 专栏收录「今日羊报 AI」 → ⑧ 保存草稿（等自动保存）。
+**九步（顺序不可跳）**：① 立即创作 → ② 标题 → ③ 正文（先文本后插图，图必须传到平台） → ④ **正文前插成片视频** → ⑤ 添加封面 → ⑥ 创作声明「包含 AI 辅助创作，作者对内容负责」 → ⑦ 专栏收录「今日羊报 AI」 → ⑧ **话题（v3.82.0 新增，见下）** → ⑨ 保存草稿（等自动保存）。
+
+**⑧ 话题步（v3.82.0，2026-11-05 实测控件）**：目标话题写在 `publish.json` 的 `platform.zhihu.topics`。执行顺序 = 回读现有 chips（`.css-1d3pntc`）→ 缺的用 `button`「添加话题」（`css-1gtqxw0`）打开 `input[placeholder="搜索话题..."]` → 键入关键词 → **候选必须按「y 在视口内 + 文本完全等于话题名」过滤**（搜索结果会命中正文段落，`y` 为负）→ 落点自证后坐标点击 → 回读 chips。**选完即生效、无确认按钮**；`missing` 非空不阻断存草稿，但要打印并写入 review-checklist。
 
 **五条只属于本平台的铁律**：
 

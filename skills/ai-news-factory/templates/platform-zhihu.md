@@ -259,6 +259,7 @@ page.goto('https://zhuanlan.zhihu.com/write', wait_until='domcontentloaded')
 | 创作声明 | `div.css-be2u3` 中 `label` 文本 == `创作声明` → 其 `button[role=combobox]` |
 | 创作声明选项 | `.Select-option`，目标文本 `包含 AI 辅助创作 作者对内容负责` |
 | 专栏收录 | `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 **`checked` 属性**；真实专栏名 `「今日羊报 AI」`（中间是半角空格 U+20，末位是大写 I） |
+| **话题 chips** | **`.css-1d3pntc`**（v3.82.0 / 2026-11-05 实测）：chip 的 `textContent` 即话题名；「添加话题」入口是 `button` 文案精确为该四字（class `css-1gtqxw0`），点开出现 `input[placeholder="搜索话题..."]`，候选项为 BUTTON，**选完即生效无确认按钮** |
 | 保存状态 | 底部 `刚刚 · 草稿` / `N 分钟前 · 草稿`（**自动保存，无「保存草稿」按钮**） |
 | 危险按钮 | `发布`（`Button--pri`）、`预览`（安全但无用） |
 
@@ -281,6 +282,81 @@ page.goto('https://zhuanlan.zhihu.com/write', wait_until='domcontentloaded')
 > W43 实测块映射：`scene3` 落在应在 `scene2` 的位置、`scene4`/`scene5` 各错一格、`scene2` 被挤到文末成第 11 张——而「占位符归零 / IMG 块数 = 10」全部是绿的。
 > **根因**：占位符被吃掉 ≠ 图落到了那个位置。Draft.js 里图片落在**当前光标处**，光标位置取决于上次操作后的选区。先连续失败 3 次再成功时，前 3 个空块会被后来的图顶上去。
 > **必做校验**：把正文每张图下载算 MD5 ↔ 本地 `zhihu-images/scene*.jpg` 建反查表，逐块比对位次。**位次错就全部删除重插**，不要「只补缺的那张」。
+
+> **🔴 v3.82.0 先决条件：编辑器必须按「已知文章 id」直开，不能只找现成标签。**
+> 1105 实测踩到：`get_editor_page` 只按域名匹配时，会先捡到 `www.zhihu.com/`（首页，`bodyLen=1`），
+> 修成「要求 `/edit` 或 `/write`」后，又因为本期 `/edit` 标签已被关掉而新开了一个**空 `/write` 新稿**
+> —— 在那个空页上回读，`chips=[]`、`hasAdd=False`，脚本因此报「三个话题全缺」，
+> 而真稿上三个 chip 都在。**判据没错，对象错了**（坑 366/371 同族）。
+> **正解**：`publish.json` 的 `platform.zhihu.article_id` 存本期文章 id（首次上传后回填），
+> `get_editor_page` 在找不到合格标签时**按 id 直开** `zhuanlan.zhihu.com/p/<id>/edit`；
+> 匹配现成标签时也要跑一道 `_editor_ok()`（标题含本期标题前 8 字，或正文 >200 字），
+> **只匹配域名一定会抓到首页**。
+
+### 3.3b 选话题（v3.82.0 新增；放在专栏之后、存草稿之前）
+
+目标话题来源：`publish.json` 的 `platform.zhihu.topics`（2–4 个，对应正文主线）。
+
+```python
+TOPIC_CHIP_SEL = '.css-1d3pntc'
+got = lambda: page.evaluate(
+    "() => [...document.querySelectorAll('%s')].map(e => (e.textContent||'').trim())" % TOPIC_CHIP_SEL)
+
+have = got()                                   # 平台会按正文自动带 1-2 个
+for want in TOPICS:
+    if want in have:                           # 已有就不重复加
+        continue
+    # ① 打开「添加话题」搜索框（button 文案精确匹配，必须滚进视口再取 rect）
+    btn = page.evaluate("""() => {
+      const bs=[...document.querySelectorAll('button')]
+        .filter(b => (b.innerText||'').trim()==='添加话题' && b.offsetParent);
+      if(!bs.length) return null;
+      bs[0].scrollIntoView({block:'center'});
+      const r=bs[0].getBoundingClientRect();
+      return {x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2)};
+    }""")
+    page.wait_for_timeout(600)
+    page.mouse.click(btn['x'], btn['y'])
+    page.wait_for_timeout(1800)
+    # ② 搜索
+    inp = page.locator('input[placeholder="搜索话题..."]').first
+    inp.wait_for(state='visible', timeout=8000)
+    inp.click(); inp.fill('')
+    page.keyboard.type(want, delay=55)
+    page.wait_for_timeout(2800)
+    # ③ 候选：必须「y 在视口内」+「文本完全等于」——搜索会命中正文段落（y 为负）
+    cand = page.evaluate("""(want) => {
+      const vh = window.innerHeight, out = [];
+      for (const el of document.querySelectorAll('button,div,span,a,li')) {
+        if (el.children.length > 1) continue;
+        if ((el.textContent||'').trim() !== want) continue;
+        const r = el.getBoundingClientRect();
+        if (r.top < 0 || r.bottom > vh || r.width < 10) continue;
+        out.push({x: Math.round(r.x+r.width/2), y: Math.round(r.y+r.height/2)});
+      }
+      return out.length ? out[out.length-1] : null;
+    }""", want)
+    # ④ 落点自证（坑 317 同族）
+    ok = page.evaluate("""([x,y,want]) => {
+      let el = document.elementFromPoint(x,y), hops = 0;
+      while (el && hops < 4) { if ((el.textContent||'').trim() === want) return true; el = el.parentElement; hops++; }
+      return false;
+    }""", [cand['x'], cand['y'], want])
+    if not ok:
+        continue
+    page.mouse.click(cand['x'], cand['y'])
+    page.wait_for_timeout(2200)
+    have = got()
+
+missing = [t for t in TOPICS if t not in got()]
+print('ZHIHU_TOPICS:', {'chips': got(), 'missing': missing})
+```
+
+**判据与纪律**：
+- 回读只认 `.css-1d3pntc` 的 `textContent`（不要 grep 页面文本——正文里到处是同一个词）。
+- **`missing` 非空不阻断存草稿**（与坑 351 的标签同族），但必须打印并写进 `review-checklist.md`。
+- 搜索结果**会命中正文段落**（`y` 为负、不在视口内）。只按文本匹配会点到正文或点空，所以候选必须做视口过滤。这是本期实测踩到的坑。
+- 平台已自动带上的话题**不要重复添加**，否则可能出现同名 chip 重复。
 
 ### 3.4 填标题
 
