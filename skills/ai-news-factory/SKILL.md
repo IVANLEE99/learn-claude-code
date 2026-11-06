@@ -1,12 +1,23 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.83.0
+version: 3.84.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.83.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.84.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.84.0 核心改进（2026-11-06 1106 日报实跑：公众号作者字段 / 正文下限按本期推导 / 公众号与视频号入口恢复 / 状态写盘防覆盖）**
+>
+> 本期 403 帖（411 进队列 / 28 批 + 1 轮 retry，共 29 个批次文件 / err=1）→ 视频 208.79 s / 26.2 MB / 1920×1080，锚点 `open_weights` **0.7422**；五平台草稿：公众号 `MP_VERIFY_OK`（appmsgid=100001918）+ 知乎 `ZHIHU_DRAFT_OK` + B站 + 视频号（扫码重登后补跑成功）+ 抖音 `done_with_caveat`（假阴性，未重传）。用户 1106 明确要求公众号**同时填写标题和作者**，已落成硬规则：
+>
+> ① **公众号必须同时填写「标题」和「作者」（用户 1106 明确要求）**：`mp_*_run.py` 除 `title` 步外必须有 `author` 步——选择器 `input[placeholder="请输入作者"]`，用原生 `value` setter + `dispatchEvent(new Event('input', {bubbles: true}))` 写入，值 = **当期作者**，按模式映射表取值（日报「今日羊报AI」/ 周报「羊报AI周刊」/ 月报「羊报AI月报」，**≤8 字，超 8 字保存会被拦**）；`verify` 必须回读 `author.value` 并断言 `author == 当期作者`（`author_ok`），**缺作者不许宣告 `MP_VERIFY_OK`**。**1106 实测：派生的 `mp_1106_run.py` 只有 `title` 步、没有 `author` 步；用户 1106 看到已发表文章后明确要求「标题和作者都要填」。**
+> ② **`mp` verify 的正文长度下限必须按本期文案预算推导，禁止沿用上期硬编码**：1106 的 `ln > 1800` 是 1105 的口径，本期正文回读 **1702** → 正确内容被判 `MP_VERIFY_FAILED`。修法 = `floor = int(0.9 * (Σ(标题+段落字符数) + TAIL 字符数))`，**body / save / verify 三处统一用 `floor`**（1106 的 `body` 步仍残留 `ln > 1800`，本期 1842 侥幸通过，更短的期会先死在 body 步）；并在代码注释写明「坑 241 的另一面：写死上期数字会把自己判死」。
+> ③ **上传 daemon 重建后的公众号入口**：① `curl -s -m 8 http://127.0.0.1:9222/json/version` 探活；② daemon 不在跑就 `nohup python3 templates/browser_daemon.py &`；③ 用 CDP `PUT /json/new?https://mp.weixin.qq.com/` 拿带 `token=` 的 home 标签；④ **直开 `cgi-bin/appmsg?...appmsgid=<id>&action=edit` 会返回「系统错误(320003)」**，正确入口是从首页「近期草稿」点卡片进入编辑器；已发表文章改从「近期发表」核验（1106：07:49 已发表，草稿箱里已无该稿）。
+> ④ **视频号登录失效的恢复路径（1106 实测）**：cookie 里 `channels.weixin.qq.com` 的 `sessionid` / `wxuin` 都在、但 `/platform` 302 到 `login.html` = **服务端判未登录**。`login.html` 内嵌 iframe 的二维码可能渲染失败（显示「加载失败，点击重试」），但把 iframe 的 `open.weixin.qq.com/connect/qrconnect?...` **完整 URL 单独开一个标签页**，二维码正常显示。二维码几分钟过期：等待扫码期间每约 **9 分钟 reload 该标签页一次**；扫码成功后 `/platform` 不再是 `/login` 即登录成功。**不要把 iframe 加载失败当网络问题、不要反复点「点击重试」。本节取代 v3.23.0/v3.26.0 的「重试 1 次仍 login.html → 直接判 login_required / 转手动」止损协议**——1106 证明该形态是服务端会话过期、扫码可恢复，不应过早判失败。
+> ⑤ **视频号草稿列表的日期是零填充**：`platform/post/draftListManager` 渲染「2026年11月06日」，`includes('11月6日')` 恒 `false`。判据改为 `rf'11月0?{day}日'`（`day` 取自当期日号，1106 即 `11月0?6日`），或直接取首条 `.post-draft-item` 的 `innerText` 断言含本期描述片段 + 日期 + 短标题。
+> ⑥ **写状态与写文档必须用不同变量名（1106 事故）**：一段 Python 同时改 `review-checklist` 与写 `.pipeline-state` json 时复用了同一个变量 `p`，`json.dump` 把状态 JSON 覆盖进 checklist 路径。规则：**写盘后必须 `head -1` 回读**；状态文件用独立变量名（如 `state_path`）。
 
 > **🔴 v3.83.0 核心改进（2026-11-05 公众号 ProseMirror 图片上传与生命周期防御 + 视频就绪流完整性门禁，坑 410-412）**
 >
@@ -213,7 +224,7 @@ version: 3.83.0
 | B站 | 点击 `span.submit-draft`（文案「存草稿」，**不是** `button`；0917 坑 200） | URL 跳到 `upload-manager/article?group=draft`，且草稿箱标题匹配。**🔴 v3.75.0 补（坑 351）：标签缺失只记录、不阻断——把 `assert not missing` 改成 log + 写进 checklist；分区/标题/封面/简介/合集/声明才允许 assert 停链。SKILL 早就这么写，但派生模板没同步，1031 因此白扔一次 29MB 上传后的全部后续步骤** |
 | 抖音 | 点击「暂存离开」；**必须**双信号验收 + 同标签恢复回读后再暂存一次（v3.61.0 坑 295：新开标签点「继续编辑」会毁稿）。**若恢复后发现视频丢失（坑 323），在该草稿页内按 `accept` 含 `video` 挑 `input[type=file]`（本期实测索引 1，索引 0 是封面图的 image/*）重新 `set_input_files` 上传，再暂存** | **① 按钮消失 且「继续编辑」横幅出现；② 恢复后 `videos >= 1`（v3.68.0 坑 323：双信号不是充分条件——横幅在、字段全，视频仍可能没落库）；③ 标题回读一致**。**🔴 v3.75.0 补（坑 349）：判定必须在「恢复后的回读页」完成并当场留存，禁止在任何跳转之后复判——第二次「暂存离开」后页面会跳回发布页，此时 `cover slots []`/`vids=0` 会把已建成的草稿读成失败（1031 实测 `DY_E2E_FAILED` 为假阴性）** |
 | 视频号 | 点击「保存草稿」按钮；**描述末尾必须像抖音一样带 `#今日羊报AI #AI日报 …` hashtag 行（v3.82.0）**——**点击前必须 `document.elementFromPoint` 自证落点是它**（v3.67.0 坑 317：它与「手机预览」「发表」水平相邻、间距仅 16px、无二次确认，1028 期因 stale 坐标误点「发表」，内容直接公开） | **`post/draftListManager` 草稿计数 +1 且目标短标题出现**（v3.65.0 坑 308：点击成功≠落库，本期实测点击后计数仍是 4）。**另：视频标注不在草稿里保存（坑 318），验收时不要拿它当落库判据**。**🔴 v3.75.0 补硬判据（坑 348）：只看「条目出现在哪个列表」不够——必须查卡片的操作按钮集。草稿卡 `post-draft-item` 只有 `编辑/删除`；已发表卡 `post-feed-item` 才有 `复制视频ID/视频ID/可见权限/评论管理/分享`。两侧时间戳选择器不同（草稿 `.post-time .time-label` vs 发表 `.center-info .time-label`），选错就得到空集，会被误读成「没有草稿」** |
-| 公众号 | 点击「保存为草稿」按钮 | URL 出现 `appmsgid=`，且 `bodyLen` / 占位符数 / 封面 `hasQpic` / **合集 `.js_article_tags_content`** 回读一致（v3.66.0 坑 310：合集**不能**用 `body.innerText` 子串判，正文页脚恒含合集名） |
+| 公众号 | 点击「保存为草稿」按钮 | URL 出现 `appmsgid=`，且 `bodyLen` / 占位符数 / 封面 `hasQpic` / **合集 `.js_article_tags_content`** 回读一致（v3.66.0 坑 310：合集**不能**用 `body.innerText` 子串判，正文页脚恒含合集名）；**v3.84.0：必须同时回读作者 `input[placeholder="请输入作者"]` 的 `value` == 当期作者（日报「今日羊报AI」/ 周报「羊报AI周刊」/ 月报「羊报AI月报」，`author_ok`，≤8 字）——只验标题不验作者不算通过** |
 | 知乎 | **无「保存草稿」按钮——知乎文章是自动保存**（v3.71.0 坑 335 实测）。填完标题/正文等 ≥3s 出现底部「刚刚 · 草稿」即可；**「发布」永不进脚本**（规范禁止自动化发布，AI 声明不能豁免） | 编辑页 URL 变为 `zhuanlan.zhihu.com/p/<id>/edit`；创作者中心「草稿箱(N)」列表出现本期标题；编辑器内 标题 value / 正文 innerText 长度 / 封面 / **创作声明（含 AI 辅助创作 作者对内容负责）** / 专栏「今日羊报 AI」 / **话题 chips（`.css-1d3pntc`，v3.82.0）** 六项同时回读（详见 `templates/platform-zhihu.md` §3.10） |
 
 ### 🔴 浏览器与 Profile 全局铁律（v3.7.0 / 2026-07-18 实测）
@@ -7029,6 +7040,16 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.84.0（2026-11-06 1106 日报：公众号作者必填 + 断言下限按本期推导 + 公众号/视频号入口恢复）
+
+1106 期五平台全成（公众号 MP_VERIFY_OK / 知乎 ZHIHU_DRAFT_OK / B站 / 抖音 done_with_caveat / 视频号扫码重登后补跑），沉淀六条：
+① 公众号必须同时填写标题与作者（作者按模式映射取值，≤8 字，verify 回读 `author_ok`，缺作者不算通过）。
+② `mp` 的正文长度下限必须由本期文案预算推导（`floor = int(0.9 * 预算)`），`body`/`save`/`verify` 三处共用，禁止沿用上期 `ln > 1800`。
+③ 上传 daemon 重建后，公众号编辑器入口从首页「近期草稿」卡片进（直开 `appmsgid` 编辑 URL 会报「系统错误(320003)」）；已发表文章从「近期发表」核验。
+④ 视频号服务端会话过期（cookie 在但 302 到 `login.html`）时：把 `open.weixin.qq.com/connect/qrconnect?...` 单独开标签页扫码，每约 9 分钟 reload 刷新二维码；本节取代 v3.23.0/v3.26.0 的「重试 1 次即判 login_required」止损协议。
+⑤ 视频号草稿列表日期为零填充（`11月06日`），判据用 `rf'11月0?{day}日'`。
+⑥ 写状态文件与改 Markdown 清单不得复用同一变量名，写盘后 `head -1` 回读（1106 清单被状态 JSON 覆盖事故）。
 
 ### v3.83.0（2026-11-05 微信公众号 ProseMirror 事务中断防御 + 视频完整性门禁与合集容错，坑 410-412）
 

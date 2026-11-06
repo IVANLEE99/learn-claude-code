@@ -153,6 +153,78 @@ assert new.count(EXTRA) == 1, '扩展段重复（坑 409）'
 
 ---
 
+## 2d. 平台脚本必备步骤（v3.84.0 新增，1106 实测）
+
+平台上传脚本目前只能从上一期派生（见第 0 段例外），所以每个「必备步骤」都要在派生后 grep 断言，不能等跑起来才发现缺。
+
+**① 公众号 `mp_*_run.py` 必须同时有 `title` 步与 `author` 步（用户 1106 明确要求）。** 1106 只派生了 `title`，草稿作者栏为空。作者选择器是 `input[placeholder="请输入作者"]`，值 = 当期作者（按模式映射：日报「今日羊报AI」/ 周报「羊报AI周刊」/ 月报「羊报AI月报」，**≤8 字**），必须用原生 setter + `input` 事件；`verify` 回读并输出 `author_ok`，缺作者不许打印 `MP_VERIFY_OK`：
+
+```python
+inp = ed.locator('input[placeholder="请输入作者"]').first
+inp.wait_for(timeout=10000)
+inp.click()
+inp.evaluate('''(el) => {
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  set.call(el, AUTHOR);   // AUTHOR = 当期作者（日报/周报/月报各自的名字）
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}''')
+# verify 回读
+author = ed.evaluate('''() => { const el = document.querySelector('input[placeholder="请输入作者"]'); return el ? el.value : null; }''')
+author_ok = (author == AUTHOR)
+```
+
+派生后两连 grep（任一为空 = 派生器漏了，别进上传）：
+
+```bash
+S=news-pipeline/<DATE>/scripts/mp_*_run.py
+grep -q '请输入作者' "$S" || echo AUTHOR_STEP_MISSING
+grep -q 'author_ok'   "$S" || echo AUTHOR_VERIFY_MISSING
+```
+
+**② `mp` 的正文长度下限必须由本期文案预算推导（0.9 倍），禁止上期硬编码。** 1106 的 `assert ln > 1800` 是 1105 的口径，本期正文回读 **1702** → 正确内容被判 `MP_VERIFY_FAILED`。`body` / `save` / `verify` 三处共用同一个 `floor`：
+
+```python
+expect = sum(len(h) + sum(len(x) for x in ps) for h, ps in SECTIONS) + sum(len(x) for x in TAIL)
+floor = int(expect * 0.9)          # 本期纯文本预算的 90%
+assert ln > floor, f'body paste failed bodyLen={ln} floor={floor}'
+```
+
+派生后断言「长度比较式里没有 1800」（`wait_for_timeout(1800)` 与注释里的历史说明不算，只拦比较）：
+
+```bash
+grep -nE '(>|=)\s*1800' news-pipeline/<DATE>/scripts/mp_*_run.py && echo HARDCODED_1800 || echo FLOOR_OK
+```
+
+**③ `channels_upload` 的草稿验收日期用 `rf'11月0?{day}日'`（`day` 取自当期日号），禁止 `includes('11月6日')` 这类写死日号。** 视频号草稿列表页的日期是**零填充**（`11月06日`），`includes('11月6日')` 在本期会漏判成「草稿不存在」。正则同时兼容两种写法：
+
+```python
+DATE_RE = re.compile(rf'11月0?{day}日')      # day 取自当期（如 6）；列表页零填充，标题回读不零填充
+...
+v = page.evaluate('''(pat) => {
+  const re = new RegExp(pat);
+  const w = document.querySelector('wujie-app');
+  const t = (w && w.shadowRoot && w.shadowRoot.body ? w.shadowRoot.body.innerText : document.body.innerText) || '';
+  return { hasTitle: re.test(t), sample: t.replace(/\\s+/g, ' ').slice(0, 400) };
+}''', DATE_RE.pattern)
+assert v['hasTitle'], f"draft not found: {v['sample'][:200]!r}"
+```
+
+**④ 写盘安全：状态 JSON 与 Markdown 清单不得复用同一变量名。** 1106 期 01:24 一次状态写入把 `.pipeline-state-2026-11-06.json` 写进了 `review-checklist.md` 路径（同一变量 `p` 先后指向两个文件），清单被 JSON 覆盖；渲染已在 01:17 完成所以门禁未受影响，但清单只能按实跑结果重建。派生器与临时 Python 片段统一用两个变量名，写完立即 `head -1` 回读：
+
+```python
+state_path     = '.pipeline-state-<DATE>.json'
+checklist_path = 'news-pipeline/<DATE>/review-checklist.md'   # 不复用变量
+json.dump(state, open(state_path, 'w'), ensure_ascii=False, indent=2)
+open(checklist_path, 'w').write(md)
+```
+
+```bash
+head -1 .pipeline-state-<DATE>.json                 # 必须以 '{' 开头
+head -1 news-pipeline/<DATE>/review-checklist.md    # 必须以 '# ' 开头
+```
+
+---
+
 ## 3. 禁词表 × 当日报告 交叉 grep（坑 326，每期必查）
 
 **上期禁词表照抄 = 误伤本期合法引用。** 本期真实案例：`workbuddy` / `codebuddy` / `反代封号` / `二三十倍` 在 1102 是禁词，但 1103 的报告**合法引用**它们（新政策禁的正是这类玩法）。

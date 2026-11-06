@@ -583,7 +583,7 @@ vertical-3-4.png
 
 定时任务
 今天10:35pm执行
-  执行 linuxdo 全量日报流水线（日期按明天：2026-10-31）。
+  执行 linuxdo 全量日报流水线（日期按明天：2026-11-07）。
   要求与「过滤后全部抓取完」一致：
   1) 用 linuxdo-daily：双源列表 → 合并去重/公益站过滤 → 32h 窗口 → 全量逐帖抓取正文（每批立即保存 batch_browser_N.json）→ 二次过滤 → 写 data/daily/YYYY-MM-DD.json、data/reports/YYYY-MM-DD.md、press、PDF。
   2) 然后用 ai-news-factory 生成当日日报视频：事件按推荐自动选定，不用再向我确认；权限给足直接跑；上传各平台一律存草稿。
@@ -751,3 +751,42 @@ Q版国风IP角色插画，半身特写，可爱拟人小羊，大头小身。�
 
 
 小红书?
+
+
+to do
+1、视频号违规 分享
+3、优化文稿的skill
+✅视频号description 和抖音视频号description一样带上标签
+✅2、知乎 输出对应话题 和 选择话题
+✅4、微信公众号记得填写标题
+
+
+关于文章被处理的通知
+你好，
+
+接相关投诉，以下文章被判断为违反《互联网用户公众账号信息服务管理规定》，已删除。
+
+文章标题：【2026-10-31】一个 8KB 文件替掉 207 个工具、DeepSeek 前端藏着 Cyber、OpenAI 额度翻倍 | 今日羊报AI
+处理时间：2026年11月03日
+处理依据：互联网用户公众账号信息服务管理规定
+
+请遵守相关法律法规，让我们共创健康绿色的内容生态。
+
+在/Users/youngsdream/Documents/learn-claude-code/skills目录下新建公益站签到skill 然后同步到系统skill
+自动签到
+浏览器打开chrome://bookmarks/?id=6233
+打开每一个网址
+如果没登录,则选择linux do 登录
+点击签到(如果已经签到则跳过)
+最终报告所有已经签到成功的和签到失败的
+记录下签到经验,下次用
+归档输出显示签到的金额(如果有) 和余额(如果有)
+
+
+
+
+
+可以了解下cloudflyer 有python依赖，uv add或者pip install完可以直接本地起服务；
+
+后续可以把目标网址的cf验证转发到本地服务获取cf_clearance;然后可以用 curl_cffi 的 impersonate="chrome{ver}" 复刻对应 Chrome 版本的 TLS/HTTP2 指纹，把 UA、Sec-Ch-Ua、平台头、cf_clearance cookie 全部配齐
+

@@ -1,13 +1,20 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.2.0
+version: 16.3.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.3.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **🔴 v16.3 核心改进（2026-11-06 1106 日报实跑：无超时 `page.evaluate` 挂死 + 看门狗盲区 + kill 顺序）**
+>
+> 1106 期 batch13 最后一帖（第 15 帖，tid=`3126308`）把整条抓取链挂死约 60 分钟；三个新增判据与处置如下：
+> ① **`page.evaluate()` 必须包 `Promise.race(30s)`（根因）**：`page.goto` 有 25s timeout，`page.evaluate` 没有任何超时，renderer 不回调就永久挂起。1106 实测 node 32942 `STAT=SN`、`%CPU 0.0`、栈停在 `uv__io_poll`/`kevent`，renderer 60603 CPU time 仅 `0:00.20`，Chrome History 最后导航停在 `23:02:43`（已 60 分钟未动）。修法：`crawlOne()` 内每个 `page.evaluate` 都写成 `await Promise.race([page.evaluate(fn), new Promise((_, rej) => setTimeout(() => rej(new Error('evaluate_timeout_30s')), 30000))])`，捕获后记 `{id: tid, error: 'evaluate_timeout'}` 并继续下一帖，禁止让单帖异常冒泡终止整批。
+> ② **看门狗新增 crawl stalled 判据（必须先于 pid 存活判断）**：1106 期 watchdog 因 launch wrapper pid 活着一直判 `RUNNING`，实际抓取已死 60 分钟。新增三条全真即 `emit ALERT "crawl stalled: no crawl.log/nav for >30min (node pid alive)"`：node 存活（`alive "$CRAWL_PIDFILE"` 或 `pgrep -f _crawl_<issue>.mjs`）**且** `crawl.log` mtime > 30min（`[ -n "$(find "$CRAWL_LOG" -mmin +30)" ]`）**且** Chrome History 最新导航 > 30min。History 原库被 Chrome 锁住，必须先复制再查：`cp "$HOME/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5/Default/History" /tmp/hist_<issue>.db && sqlite3 /tmp/hist_<issue>.db "select datetime(max(last_visit_time)/1000000-11644473600,'unixepoch','localtime') from urls;"`（**抓取用的是 `ms-playwright-mcp` 这个 profile，不是日常 Chrome 的 `Application Support/Google/Chrome`**）。该分支必须放在现有「正在执行 → 跳过」段之前，否则永远被 pid 判据短路；处置见 `templates/watchdog.md`。
+> ③ **kill 顺序：先 node 后 Chrome 树；kill 后先归档假批次再续跑**：反过来先杀 Chrome，node 会在浏览器断开后抢写「`complete: true` 但 15/15 全 error」的批次（1106 写出 batch14/15 全 error）。正确顺序：`kill -TERM <node_pid>`（10s 不退再 `kill -KILL`，1106 node 32942 忽略 TERM）→ 确认 node 已死 → `kill -TERM <chrome_pid>` 杀进程树。随后立刻把该时间窗内新写的 `data/batch_browser_*.json` 移到 `data/archive/<date>-prev-<ts>/`，再 `bash data/_resume_<issue>.sh`；`isComplete()` 会跳过 batch0-12，从 batch13 重抓。1106 实测重抓 batch13 得 `n=15 valid=15 err=0`，链自动恢复。
+>
 > **v16.2 核心改进（2026-10-20 日报实测）**：**Discourse 帖子页内嵌 i18n 字典含官方警告原文，裸 includes 判据对正常页逐页误报（新坑）**——1020 期 `bodyText.includes('系统检测到该账号存在异常使用行为')` 连误报 3 次（23:04 + 次晨 2 次），`_resume` 的 sticky 标记检查直接拒绝续跑；用户指出"打开后页面有内容、没有被封"才暴露误判。根因：Discourse 前端把 en/zh/zh-hant 三语警告文案以内嵌 JSON 字典形式下发（含 `SUBMIT_FEEDBACK`/`EDIT_INPUT` 键），**每个正常帖子页都含该字符串**。修法：判据函数 `isOfficialWarning()` 必须排除字典行——命中关键词时再检查同行是否含 `/"zh-hant"\s*:/`、`/"en"\s*:"/`、`SUBMIT_FEEDBACK`、`EDIT_INPUT`，有则判正常；改判据前先用诊断脚本回读页面三要素（标题/正文长度/cooked 数）确认页面真实可用，`node --check` 过后再续跑。1020 实测：406 帖队列 → 28 批 err=0 → daily 395 帖。**附带**：看门狗三态（pid 活/log 近 5min/heartbeat ≤25min）任一真则跳过，中断续跑先 `bash data/_resume_*.sh` 补齐抓取链再碰下游。
 > **v16.1 核心改进（2026-10-16 日报实测）**：**派生日期有三种 sed 漏网形态（坑 241 日期三形态跨 skill）**——1016 期 `s/1015/1016/g` + `s/2026-10-15/2026-10-16/g` 只能命中①连字符日期（`2026-10-16`）、②裸期号（`1016`）、③下划线标识（`__wx1016`），**漏掉 `datetime(2026, 10, 15, 0, 5)` 这种逗号分隔的 Python 日期常量**：`_build_queue_1016.py` 的 `BASE = datetime(2026, 10, 15, 0, 5, tzinfo=CST)` 没被替换，32h 窗口会整体偏一天（`_build_queue` 自带的 `assert (BASE-CUTOFF)==32h` 救不了，因为 BASE 和 CUTOFF 一起偏）。修法：派生后 `grep -n "2026, 10,"` 逐行核对 BASE 行 + 运行期 `print(BASE.isoformat())` 断言；亮点对照窗口（`2026-10-1{3,4,5}.md`）、cutoff 字符串（`2026-10-14 16:05`）同样逐项核对。1016 实测：516 帖队列 → 35 批 err=0 → daily 509 帖。**附带**：`data/source_a/b.json` + `crawl_queue.json` 属上一期残留时必须一并归档，否则 `_resume` 脚本会拿旧队列跳过重建（1016 冷启动归档 37 残留批次 + source/queue 另存 `-src` 目录）。
 > **v16.0 核心改进（2026-09-18～09-20 三期全量日报实测）**：把 v15.9 的 Node 直连 Playwright 从临时兜底升级为**可复用全量抓取协议**：脚本必须按当期日期复制/参数化（禁止只改文件名却保留 0917 注释与固定 cutoff）；32h 窗口基准默认固定为当期 **00:05 CST**，禁止用脚本实际启动时间 `datetime.now()` 漂移；最近 3 日标题去重必须做**规范化比较**，不只精确字符串；每批结果写临时文件后原子替换，避免中断留下半截 JSON；冷启动归档目录已存在时不得 `shutil.rmtree` 覆盖，须生成唯一目录。0918：422→400；0919：414（413 valid/1 error）→400；0920：326→316。安全分类器不可用时只读命令仍可过，非只读任务暂停并改用 Write/Edit 落盘，恢复后从磁盘 batch 续跑。

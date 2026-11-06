@@ -338,6 +338,7 @@ chmod +x $T/data/_launch_<issue>.sh
 | 8 | `<issue>-DONE` 存在 | `DONE` |
 | 9 | 无 marker，但 state=done 且 stages 全 done | `DONE` |
 | 10 | state=scheduled 且有 pending stage | 不是 `DONE` |
+| 11 | crawl pid 活、`crawl.log` 31 分钟无新行、Chrome History 最后导航 31 分钟前 | `ALERT`（crawl stalled） |
 
 **验完记得清理沙箱进程**：`pkill -f "$T/data/_launch_<issue>.sh"`。
 
@@ -373,3 +374,47 @@ fi
 ```
 
 **人工解封**：确认没有抓取进程在跑后，`rm` 掉 `~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5/SingletonLock`（**先 `ps aux | grep mcp-chrome-10b76e5` 确认无进程持有**）。注意这是**抓取 profile**，不是上传 daemon 的 `ms-playwright/mcp-chrome-10b76e5`——两者差一个 `-mcp`，别搞错。
+
+---
+
+## 9. crawl stalled 检测（v3.84.0 新增，1106 实测）
+
+**现象：wrapper pid 存活 → 看门狗恒报 `RUNNING`，实际 node 已卡死在 `page.evaluate`。** 1106 期 00:05 介入时：`crawl.log` 最后一行是 `batch 12/27 已保存...`（已 60 分钟无新行），Chrome History 最后导航 `2026-11-05 23:02:43`（60 分钟前），node 32942 `STAT=SN`、`%CPU 0.0`、阻塞在 `kevent`，renderer 60603 CPU time 仅 `0:00.20`（evaluate 从未返回）。既有两条判据都抓不到：§3 的 `find "$CRAWL_LOG" -mmin -5` 只证明「文件最近没写」，而 `alive "$CRAWL_PIDFILE"` 恒真 → 直接跳 `RUNNING`。**必须把「crawl.log 陈旧 + Chrome 无新导航」交叉成第三条判据。**
+
+**单次判定新增分支（插在 §3「正在执行 → 跳过」的 `alive "$LAUNCH_PIDFILE"` 之前；三真才判，缺一不可）**：
+
+```bash
+# 3b. ★ crawl stalled：crawl pid 活着，但 30 分钟没有新行 + Chrome 没有新导航
+if alive "$CRAWL_PIDFILE" _resume_<issue>.sh; then
+  CHROME_HIST="$HOME/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5/Default/History"
+  HIST_TS=""
+  if [ -f "$CHROME_HIST" ]; then
+    cp "$CHROME_HIST" /tmp/h_<issue>.db 2>/dev/null      # 原库被 Chrome 锁住，必须复制
+    HIST_TS=$(sqlite3 /tmp/h_<issue>.db \
+      "select datetime(max(last_visit_time)/1000000-11644473600,'unixepoch','localtime') from urls" 2>/dev/null)
+  fi
+  if [ -n "$(find "$CRAWL_LOG" -mmin +30 2>/dev/null)" ] && [ -n "$HIST_TS" ]; then
+    hist_epoch=$(date -j -f '%Y-%m-%d %H:%M:%S' "$HIST_TS" '+%s' 2>/dev/null || echo 0)
+    if [ "$hist_epoch" -gt 0 ] && [ "$hist_epoch" -lt "$(( $(date '+%s') - 1800 ))" ]; then
+      emit ALERT "crawl stalled: crawl.log 30min+ 无新行，Chrome last nav=${HIST_TS}，node pid=$(cat "$CRAWL_PIDFILE") 疑似 page.evaluate 卡死"
+      exit 0
+    fi
+  fi
+fi
+```
+
+**Chrome History 查询法**（SQLite 的修饰符必须带引号，裸写 `unixepoch` 会报 `no such column: unixepoch`）：
+
+```bash
+cp ~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5/Default/History /tmp/h.db
+sqlite3 /tmp/h.db "select datetime(max(last_visit_time)/1000000-11644473600,'unixepoch','localtime') from urls"
+```
+
+**处置顺序（1106 实测一次恢复，别跳步）**：
+
+1. 先归档该窗口内 node 抢写的全 error batch——1106 在浏览器被 kill 后，node 迅速写出 `batch14/15` 两条 15/15 err 的假批；若不归档，`_resume` 的 `isComplete()` 会把它们当成「已完成」跳过（归档到 `data/archive/`）。
+2. `kill -TERM <node_pid>`；1106 实测 TERM 被忽略，必须补 `kill -KILL`。
+3. kill 抓取 Chrome 进程树：`pkill -f 'ms-playwright-mcp/mcp-chrome-10b76e5'`（**带 `-mcp` 的那个 profile**；上传 daemon 是 `ms-playwright/mcp-chrome-10b76e5`，别误杀）。
+4. 让 `_resume_<issue>.sh` 从当前批重抓：1106 的 batch13 在 kill 前已落盘 `n=15 valid=14 err=1`，`_resume` 按 `isComplete` 跳过 0-12、重抓 batch13，新 node 26500 + 新 Chrome（12 进程）恢复。
+
+**沙箱用例（§6 表第 11 行）**：把 `crawl.log` 的 mtime 改成 31 分钟前、`CRAWL_PIDFILE` 指向一个 `sleep 300` 伪进程、Chrome History 用一份 31 分钟前的副本 → 期望唯一输出 `ALERT "crawl stalled..."`。门限是 `-mmin +30`，31 分钟才命中；30 分钟内仍应走 `RUNNING`。
