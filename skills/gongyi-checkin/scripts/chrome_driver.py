@@ -316,7 +316,13 @@ PROBE_JS = r"""
           if((e.children[j].textContent||'').trim()===labelText) dup=true;
         }
         if(dup) continue;
-        // climb looking for a sibling that holds a number
+        // Climb looking for a sibling that IS the amount.
+        //
+        // The sibling must be VALUE-SHAPED (整段就是一个金额), not merely
+        // "contains a digit". 2026-11-06 lOXO: the label 今日奖励 sits next to
+        // 待领取, and a digit-hungry scan climbed to a sibling carrying
+        // "已连续签到 7 天" and bound 7 as today's reward.
+        var VALUE_RE = /^[$¥€￥]?\s*\d[\d,\.]*\s*(?:元|额度|点|次|USD|credits?)?$/i;
         var p=e.parentElement, hops=0;
         while(p && hops<3){
           for(var k=0;k<p.children.length;k++){
@@ -324,9 +330,10 @@ PROBE_JS = r"""
             if(sib===e) continue;
             var st=(sib.textContent||'').trim();
             if(!st || st.length>30) continue;
-            if(!/[0-9]/.test(st)) continue;
+            if(/待领取|未领取|暂无|未签到/.test(st)) continue;
             if(isLabel(st)) continue;
-            var m=st.match(/[$¥€￥]?\s*\d+(?:[,\.]\d+)?/);
+            if(!VALUE_RE.test(st)) continue;
+            var m=st.match(/(?:-)?\s*[$¥€￥]?\s*\d+(?:[,\.]\d+)?/);
             if(m) return {value:m[0].trim(), raw:(labelText+' '+m[0].trim()).trim()};
           }
           p=p.parentElement; hops++;
@@ -380,10 +387,24 @@ CLICK_JS = r"""
     return true;
   });
   if(!cand.length) return 'NO_PENDING_BUTTON';
-  // prefer the tightest (smallest area) match -> the real button, not a wrapper
+  // Rank: action wording first, then smallest area.
+  //
+  // 2026-11-06 lOXO: the sidebar has an <A> "每日签到" nav link (231×40) and the
+  // real action is a <BUTTON> "立即签到" (384×48). "Smallest area wins" picked
+  // the nav link, which only re-opened the page we were already on — the state
+  // stayed pending and the run reported a false miss.
+  function score(e){
+    var t=(e.textContent||'').trim();
+    var action=/立即|现在|领取|去签到|开始|Check in now|Check-in now/i.test(t)?0:1;
+    var navish=(e.tagName==='A' && /sidebar|nav|menu|tab/i.test((e.className||'').toString()))?1:0;
+    var r=e.getBoundingClientRect();
+    return [navish, action, r.width*r.height];
+  }
   cand.sort(function(a,b){
-    var ra=a.getBoundingClientRect(), rb=b.getBoundingClientRect();
-    return (ra.width*ra.height)-(rb.width*rb.height);
+    var sa=score(a), sb=score(b);
+    if(sa[0]!==sb[0]) return sa[0]-sb[0];
+    if(sa[1]!==sb[1]) return sa[1]-sb[1];
+    return sa[2]-sb[2];
   });
   var e=cand[0];
   var tx=(e.textContent||'').trim();
@@ -436,10 +457,12 @@ def _clean(txt):
 def _money(val):
     if not val:
         return None
-    m = re.search(r"([$¥€￥])?\s*(\d+(?:[.,]\d+)?)", val)
+    # 负余额是合法状态（2026-11-06 月城 当前余额 -$13.92），符号要紧贴货币符号
+    m = re.search(r"(-)?\s*([$¥€￥])?\s*(\d+(?:[.,]\d+)?)", val)
     if not m:
         return None
-    return "%s%s" % (m.group(1) or "", m.group(2).replace(",", ""))
+    sign = m.group(1) or ""
+    return "%s%s%s" % (sign, m.group(2) or "", m.group(3).replace(",", ""))
 
 
 def _find_money_after(body, labels):
@@ -447,7 +470,7 @@ def _find_money_after(body, labels):
     '可用余额' wins over '余额' and '总余额' over '余额'."""
     for label in labels:
         for m in re.finditer(
-            re.escape(label) + r"\s*[:：]?\s*([$¥€￥]?\s*\d+(?:[.,]\d+)?)", body
+            re.escape(label) + r"\s*[:：]?\s*((?:-)?\s*[$¥€￥]?\s*\d+(?:[.,]\d+)?)", body
         ):
             val = _money(m.group(1))
             if val:
@@ -498,22 +521,37 @@ def _find_balance(body):
     for label in ("可用余额", "当前余额", "Current balance", "Current Balance",
                   "Available balance", "BALANCE", "账户余额"):
         m = re.search(
-            re.escape(label) + r"\s*[:：]?\s*([$¥€￥]?\s*\d+(?:[.,]\d+)?)", body)
+            re.escape(label) + r"\s*[:：]?\s*((?:-)?\s*[$¥€￥]?\s*\d+(?:[.,]\d+)?)", body)
         if m:
             return _money(m.group(1)), m.group(0)
     # 2) 总余额 / 总额度
     for label in ("总余额", "总额度"):
         m = re.search(
-            re.escape(label) + r"\s*[:：]?\s*([$¥€￥]?\s*\d+(?:[.,]\d+)?)", body)
+            re.escape(label) + r"\s*[:：]?\s*((?:-)?\s*[$¥€￥]?\s*\d+(?:[.,]\d+)?)", body)
         if m:
             return _money(m.group(1)), m.group(0)
     # 3) plain "余额" — but NOT when it is part of a longer phrase
-    m = re.search(r"(?<!总)(?<!可用)(?<!当前)余额\s*[:：]?\s*([$¥€￥]?\s*\d+(?:[.,]\d+)?)",
+    m = re.search(r"(?<!总)(?<!可用)(?<!当前)余额\s*[:：]?\s*((?:-)?\s*[$¥€￥]?\s*\d+(?:[.,]\d+)?)",
                   body)
     if m:
         return _money(m.group(1)), m.group(0)
     # 4) "Balance" as a standalone word (not part of "Balance and top-up")
-    m = re.search(r"\bBalance\b(?!\s+and\b)\s*[:：]?\s*([$¥€￥]?\s*\d+(?:[.,]\d+)?)",
+    m = re.search(r"\bBalance\b(?!\s+and\b)\s*[:：]?\s*((?:-)?\s*[$¥€￥]?\s*\d+(?:[.,]\d+)?)",
+                  body)
+    if m:
+        return _money(m.group(1)), m.group(0)
+    return None, None
+
+
+def _find_gift_quota(body):
+    """Gift/free quota — where check-in rewards actually land on some stations.
+
+    2026-11-06 三水: header shows `付费 $0 免费 $16.12`. The paid balance really
+    is $0; the sign-in reward ($3.03) tops up the FREE quota. Reporting "$0" is
+    technically true but useless — so when the paid balance is zero, fall back
+    to the gift quota.
+    """
+    m = re.search(r"(?:免费|赠送|赠金|赠送额度|Gift|Free)\s*[:：]?\s*((?:-)?\s*[$¥€￥]?\s*\d+(?:[.,]\d+)?)",
                   body)
     if m:
         return _money(m.group(1)), m.group(0)
@@ -555,6 +593,12 @@ def classify(page):
     bal, bal_raw = _balance_from_labeled(labeled)
     if not bal:
         bal, bal_raw = _find_balance(body)
+    # Paid balance is $0 but the station runs on gift quota (三水) → report the
+    # free quota instead of a useless "$0".
+    if not bal or re.fullmatch(r"[$¥€￥]?\s*0(?:\.0+)?", bal or ""):
+        gift, gift_raw = _find_gift_quota(body)
+        if gift:
+            bal, bal_raw = gift, gift_raw
     rew, rew_raw = _reward_from_labeled(labeled)
     if not rew:
         rew, rew_raw = _find_money_after(body, REWARD_LABELS)
@@ -596,7 +640,22 @@ def classify(page):
     # ---- done-ness ----
     ck_text = " ".join(_clean(h.get("txt", "")) for h in hits)
 
-    if any(re.search(p, body, re.I) for p in DONE_PATTERNS):
+    # 同页同时存在「可点的动作按钮」和「Checked in / 已签到」字样时，按钮才是真相。
+    # 2026-11-06 咕咕嘎嘎 / HappyCoding：卡片上常驻一句 "Checked in"（未签时也在 DOM 里），
+    # 旧逻辑整页扫到它就判 done → action=already_done，**实际当天没签**（用户发现漏签）。
+    # 只有当页面出现「硬完成语」（今日已签到 / 明天 00:00 再来 / You can only check in once per day）
+    # 才允许压过可点按钮。
+    _action_btn = [
+        h for h in hits
+        if h.get("vis", True) and not h.get("disabled")
+        and re.search(r"立即签到|立即领取|立即打卡|去签到|签到领取|Check in now|Check-in now",
+                      _clean(h.get("txt", "")), re.I)
+    ]
+    _hard_done = re.search(
+        r"今日已签到|今日已领取|今日已打卡|明天\s*00:00|明日再来|You can only check in once per day",
+        body, re.I)
+
+    if any(re.search(p, body, re.I) for p in DONE_PATTERNS) and not (_action_btn and not _hard_done):
         out["state"] = "done"
         m = re.search(r"(今日已签到[^ ]{0,18}|已签到[^ ]{0,14}|Checked in[^ ]{0,22})", body, re.I)
         out["evidence"] += "状态←" + (m.group(0)[:34] if m else "已签到")
