@@ -395,7 +395,7 @@ CLICK_JS = r"""
   // stayed pending and the run reported a false miss.
   function score(e){
     var t=(e.textContent||'').trim();
-    var action=/立即|现在|领取|去签到|开始|Check in now|Check-in now/i.test(t)?0:1;
+    var action=/立即|现在|领取|去签到|签到领|开始|Check in now|Check-in now/i.test(t)?0:1;
     var navish=(e.tagName==='A' && /sidebar|nav|menu|tab/i.test((e.className||'').toString()))?1:0;
     var r=e.getBoundingClientRect();
     return [navish, action, r.width*r.height];
@@ -444,6 +444,9 @@ CUMULATIVE_HINTS = [
 DONE_PATTERNS = [
     r"今日已签到", r"已签到", r"Checked in", r"checked in",
     r"明天\s*00:00", r"明日再来", r"今日已领取", r"今日已打卡",
+    # 服务端拒绝重复签到 = 今天已经签过了（2026-11-07 Aether API 实测：
+    # 点完按钮文案不变、仍显示 Check in now，只有这句 toast 能证明已签）
+    r"You can only check in once per day", r"Do not repeat check-in",
 ]
 PENDING_MARKERS = [
     r"每日签到", r"Daily Check-?in", r"签到领取", r"每天8点刷新",
@@ -648,11 +651,12 @@ def classify(page):
     _action_btn = [
         h for h in hits
         if h.get("vis", True) and not h.get("disabled")
-        and re.search(r"立即签到|立即领取|立即打卡|去签到|签到领取|Check in now|Check-in now",
+        and re.search(r"立即签到|立即领取|立即打卡|去签到|签到领取|签到领|Check in now|Check-in now",
                       _clean(h.get("txt", "")), re.I)
     ]
     _hard_done = re.search(
-        r"今日已签到|今日已领取|今日已打卡|明天\s*00:00|明日再来|You can only check in once per day",
+        r"今日已签到|今日已领取|今日已打卡|明天\s*00:00|明日再来"
+        r"|You can only check in once per day|Do not repeat check-in|已领取，明天再来",
         body, re.I)
 
     if any(re.search(p, body, re.I) for p in DONE_PATTERNS) and not (_action_btn and not _hard_done):

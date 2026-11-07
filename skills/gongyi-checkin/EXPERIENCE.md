@@ -96,6 +96,30 @@
 ### dicksuck / 多数 new-api 站：重复点会被拒
 - 页面文案 `You can only check in once per day` = **今天已经签过了**，不是失败。
 - 判据要包含这句：见到它直接判 `done`，不要再点、不要报 pending。
+- **2026-11-07 已把这两句并入 `DONE_PATTERNS`**（之前只写在文档里、代码没实现）：
+  `You can only check in once per day` / `Do not repeat check-in`。
+  起因：Aether API 点完签到后**按钮文案不变、仍显示 `Check in now`**，
+  只有服务端 toast 能证明已签 → 旧逻辑把它判成 pending，每轮都白点一次。
+
+### Aether API — https://api.abnt.it/profile
+- 2026-11-07 点 `Check in now` 成功后**按钮不翻转**（仍是 `Check in now`，不 disabled、文案不变），
+  页面也不出现 `Checked in`，唯一证据是 toast `You can only check in once per day`。
+- 所以「按钮优先」规则要配合硬完成语白名单；没有硬完成语的站只能靠服务端拒绝文案判 done。
+
+### 链趣 — https://qulink.cyou/points/check-in
+- 2026-11-07 新增。积分制（不是额度）：按钮 `签到领 10 积分`（673×44，很宽），
+  另有 `刷新签到状态` 和顶部 `<A>每日签到`（78×44）。
+- 成功标志：`今日 09:00:00 已领取，明天再来。` + `今日已签到`。
+- 重置窗口 **北京时间 00:00**。动作按钮文案是 `签到领 N 积分`（不是「立即签到」），
+  需在动作词表里补 `签到领`。
+- ⚠️ **签到状态是异步拉的，必须等**：页面先渲染「请先确认签到状态 / 正在读取签到状态」，
+  约 8–10 秒后才变成「今日已签到」。用 6 秒的 settle 会读到加载中态，
+  被误判成 `pending`（然后就白点一次 `每日签到` 导航链接）。
+  实测：6s → pending 假阳性；15s → done 正确。**该站 settle 至少 12 秒。**
+
+### 皮皮智绘 — https://img.pipiwangcom.com/
+- 2026-11-07 新增书签。按钮 `签到 +100~200`，余额在 `当前余额`。
+  点完余额 370 → 490（本日 +120）。
 
 ### 每日签到 - lOXO — https://loxo.cc/check-in
 - 2026-11-04 独立签到页。字段齐全：`今日奖励 $X`、`可用余额 $X`、

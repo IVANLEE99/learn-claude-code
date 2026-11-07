@@ -50,6 +50,23 @@ LOAD_SECONDS = 8
 SETTLE_SECONDS = 3
 LOGIN_SETTLE_SECONDS = 6
 
+# Stations whose check-in state is fetched asynchronously AFTER the page body is
+# already substantial. settle() returns as soon as the body is big enough, so
+# these are still showing "正在读取签到状态" when we probe → false `pending`.
+# 2026-11-06 链趣: 6s → pending (wrong, then clicks the wrong nav link);
+# 15s → done. Give these extra wall-clock after open_station.
+EXTRA_SETTLE_HOSTS = {
+    "qulink.cyou": 9,   # 链趣 — 「正在读取签到状态」
+}
+
+
+def extra_settle_for(url):
+    host = (urlparse(url).hostname or "").lower()
+    for key, secs in EXTRA_SETTLE_HOSTS.items():
+        if key in host:
+            return secs
+    return 0
+
 
 def log(msg):
     print(msg, flush=True)
@@ -262,6 +279,13 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
             result["state"] = "unreachable"
             result["evidence"] = "重试 3 次仍无法打开（站点暂时失联）"
             return result
+
+        # Some stations fetch the check-in state asynchronously well after the
+        # body looks complete (链趣 shows 「正在读取签到状态」). Probing too early
+        # reads a loading placeholder and reports a false `pending`.
+        _extra = extra_settle_for(url)
+        if _extra:
+            time.sleep(_extra)
 
         page = probe(tab=tab)
         if page.get("error"):
