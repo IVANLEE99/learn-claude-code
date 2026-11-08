@@ -60,7 +60,13 @@ echo "===== launch_<issue> start $(date '+%Y-%m-%d %H:%M:%S') pid=$$ ====="
 
 # ---------- 1. 等触发时刻（墙钟，睡眠唤醒后自动追赶） ----------
 TARGET_EPOCH=$(date -j -f '%Y-%m-%d %H:%M:%S' '<YYYY-MM-DD HH:MM:00>' '+%s')
-while [ "$(date '+%s')" -lt "$TARGET_EPOCH" ]; do sleep 30; done
+# 坑422（v3.85.0）：pidfile 只在启动时检查一次 —— 反复试跑会留下多个 wrapper，
+# 各自写 pidfile、各自睡到同一时刻，到点同时醒来抢跑（1106 实测残留 4 个）。
+# 等待循环里必须每轮校验「pidfile 还指向我」，否则自行退出。
+while [ "$(date '+%s')" -lt "$TARGET_EPOCH" ]; do
+  [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] || { echo "superseded by $(cat "$PIDFILE" 2>/dev/null)"; exit 0; }
+  sleep 30
+done
 echo "===== target reached $(date '+%Y-%m-%d %H:%M:%S') ====="
 
 proxy_ok() { nc -z -w2 127.0.0.1 7897 >/dev/null 2>&1; }
@@ -418,3 +424,66 @@ sqlite3 /tmp/h.db "select datetime(max(last_visit_time)/1000000-11644473600,'uni
 4. 让 `_resume_<issue>.sh` 从当前批重抓：1106 的 batch13 在 kill 前已落盘 `n=15 valid=14 err=1`，`_resume` 按 `isComplete` 跳过 0-12、重抓 batch13，新 node 26500 + 新 Chrome（12 进程）恢复。
 
 **沙箱用例（§6 表第 11 行）**：把 `crawl.log` 的 mtime 改成 31 分钟前、`CRAWL_PIDFILE` 指向一个 `sleep 300` 伪进程、Chrome History 用一份 31 分钟前的副本 → 期望唯一输出 `ALERT "crawl stalled..."`。门限是 `-mmin +30`，31 分钟才命中；30 分钟内仍应走 `RUNNING`。
+
+
+---
+
+## 10. 多 wrapper 并存与「归属校验」（v3.85.0 新增，坑 422，1107 实测）
+
+`_launch_<issue>.sh` 的 pidfile 检查是**一次性**的（启动瞬间）。1106 上午为了试跑反复 `nohup bash data/_launch_1106.sh`，
+留下了 **4 个** 进程：每个都通过了「pidfile 不存在或进程已死」的检查 → 每个都覆写 pidfile → 每个都进入
+`while ... sleep 30` 睡到同一个 22:35。到点时 4 个同时醒来调 `_resume_<issue>.sh`。
+
+本期没出事**纯属侥幸**：`_resume` 自己也有 pidfile，后到的 3 个直接被 `already running` 挡掉。
+但若第一个 fail 得够快（例如 auth 失败），另外 3 个会依次接手并各自重试，很容易把「失败一次」放大成**三次全量重抓**。
+
+**派生器加固（必须写进 `_launch_<issue>.sh` 的等待循环）**：
+
+```bash
+while [ "$(date '+%s')" -lt "$TARGET_EPOCH" ]; do
+  [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] || { echo "superseded by $(cat "$PIDFILE" 2>/dev/null)"; exit 0; }
+  sleep 30
+done
+```
+
+**开工前自检**：
+
+```bash
+pgrep -fl "_launch_<issue>.sh" | wc -l     # 期望 1（或 0=尚未启动）；>1 立即 kill 多余进程
+ps -o pid,ppid,etime,command -p $(cat data/logs/<issue>-launch.pid)
+```
+
+**收工后**（DONE 已写、loop 已退）顺手清理：
+
+```bash
+for p in $(pgrep -f "_launch_<issue>.sh"); do
+  case "$(ps -p "$p" -o command=)" in *data/_launch_<issue>.sh*) kill "$p" && echo "killed $p";; esac
+done
+```
+
+---
+
+## 11. `connect_over_cdp` 超时的固定处置（v3.85.0 新增，坑 421，1107 两次实测）
+
+症状：ws **已经连上**（日志里出现 `ws connected`），但 30 s 后抛 `BrowserType.connect_over_cdp: Timeout 30000ms exceeded`。
+
+**固定顺序，不要跳步、不要重启浏览器**：
+
+```bash
+curl -s --max-time 8 http://127.0.0.1:9222/json/version     # 有 JSON = daemon 活着
+python3 templates/revive_frozen_tabs.py                     # 末行 PLAYWRIGHT_OK 即可；DEAD: 是正常的
+# 然后重跑原脚本
+```
+
+1107 实测：两次超时都是跑一次 `revive_frozen_tabs.py`（第一次 `DEAD 1 → revived 1`，第二次 `DEAD 2 → revived 2`）
+之后立即恢复。**不要因为 ws 连上就判定「浏览器没问题」**——冻结的是 tab，不是 daemon。
+
+**已知副作用**：revive 会把冻结的 tab 重新导航，长驻的 `mp` home 标签可能因此被关掉、`token` 变化。
+下个脚本若报 `mp home tab not found`，按坑 403 用 `PUT /json/new?<home+token>` 补一个，
+**登录态（cookie）不受影响**，不需要重新扫码。
+
+## 12. 看门狗日志「只在状态变化时写」（v3.85.0 复核）
+
+1107 全程看门狗日志**只有 4 行**（start / GUARD / READY / DONE），而 1102 同期写了 51 KB。差异全部来自 `emit()` 的
+「同串 + `DEDUP_WINDOW` 内不重复」逻辑。派生时**不要**为了「看得到心跳」去掉去重——
+排查靠 `data/logs/<issue>-watchdog.verdict`（每次 tick 都覆写），不是靠日志行数。

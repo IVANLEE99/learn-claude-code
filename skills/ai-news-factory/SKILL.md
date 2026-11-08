@@ -1,12 +1,105 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.84.0
+version: 3.86.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.84.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.86.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.86.0 核心改进（2026-11-08 1108 日报全链实跑：CDP daemon 没起 ≠ ws 挂起 / 知乎图片失败块假绿 / step 词表不统一静默空转 / 视频号弹窗判据假阳性，坑 423-426）**
+>
+> 本期 307 帖（323 进队列 / 22 批 / **err=0**）→ 视频 207.66 s / 24.6 MB / 1920×1080，锚点 `multimodal` **0.7111**，audit **38/38 PASS**；
+> 五平台草稿全成（公众号 100001942 / 知乎 / B站 / 抖音 `done_with_caveat` / 视频号 CH_VERIFY）。
+> **视频链一次过，返工 100% 在上传链的「判据层」与「调度层」**——继续印证坑 241 的模式：内容层写对了，卡住你的永远是判据。
+>
+> ① **坑 423：`ECONNREFUSED 9222` 是「daemon 没起」，不是「ws 挂起」——三种 CDP 故障必须分开判别（新）**。
+> 本期五个平台**全部**报 `connect_over_cdp: connect ECONNREFUSED ::ffff:127.0.0.1:9222`，一次性全灭。这与过去记录的两种形态**根因完全不同**，误判会浪费大量时间：
+>
+> | 现象 | 含义 | 正确动作 |
+> |---|---|---|
+> | `ECONNREFUSED 127.0.0.1:9222` | **daemon 进程不存在**（或端口没监听） | `nohup python3 templates/browser_daemon.py &` 起裸 Chrome |
+> | `curl /json/version` 有 JSON，但 `connect_over_cdp` 在 `ws connected` **之后**超时 | attach 层故障（坑 262/404/421） | 跑 `templates/revive_frozen_tabs.py` → 重试；**绝不重启浏览器** |
+> | HTTP 面健康、`/json/list` 正常，playwright 整体挂起 | attach-all 卡在冻结 target（坑 373/306） | 切 raw CDP（`templates/cdp_helper.py`） |
+>
+> **判据先分层**：`curl` 探 HTTP 面 → 通了才谈 attach，不通直接起 daemon。**别把「端口不通」解释成「登录失效」或「daemon 抖动等它自愈」**——1108 实测它就是没起，起完立刻五个平台全通。
+> ⚠️ 视频链（PDF / 封面 / audit / 生图 / TTS / 字幕 / 渲染）**全程不需要 CDP**，可以在 daemon 缺席时先跑完；上传链才依赖 9222。
+>
+> ② **坑 424：知乎图片「上传失败」块照样被计入 IMG 计数 = 假绿（新）**。`step_images` 的收尾断言是
+> `imgs == len(img_marks)`，而 `read_state` 的块分类器是 `img ? 'IMG' : 'TXT'`——**上传失败的块里同样有 `<img>` 元素**（`src` 为空或指向占位），于是失败也会计入，7 图全灭也照样 `7 == 7` PASS。
+> 更隐蔽的是**时序**：`read_state` 可能**抢在最后一张传完之前**执行，读到的 `IMG|上传失败` 是瞬时态（1108 首轮即如此，复核时 8 图全部 `naturalWidth >= 1440`）。
+> **修法（两道新断言，缺一不可）**：
+> ```python
+> bad_fail = [b for b in st['blocks'] if '上传失败' in b]
+> assert not bad_fail, f'存在上传失败的图片块: {bad_fail}'
+> dims = page.evaluate("""() => Array.from(
+>   document.querySelector('div.public-DraftEditor-content').querySelectorAll('img')
+> ).map(i => i.naturalWidth || 0)""")
+> assert not [w for w in dims if w <= 100], f'有图片未真正加载: {dims}'
+> ```
+> 与坑 368（配图只认 `draft_token`）/ 坑 311（ProseMirror 分隔符）同族：**「数量对」从来不等于「加载成功」，必须回到图元尺寸**。读到失败痕迹时**先复核再重跑**——它是瞬时态的可能性不低。
+>
+> ③ **坑 425：平台脚本的 step 词表不统一，传 `all` 会「静默空转、exit 0」（新）**。`mp_*_run.py` 与 `zhihu_upload_*.py` 都写了 `if STEP in ('open','all')` 这类分支，但 `channels_upload_*.py` **只认** `upload|meta|ai|cover|album|save|verify`，**没有 `all`**。
+> 传 `all` 进去，脚本正常连上浏览器、正常打印前两行日志，然后**所有 `elif STEP == ...` 全不匹配 → 什么都不做 → 退出码 0**。
+> **这是最坏的一类失败：不报错、有输出、退出码干净，看日志像「跑过了」。**
+> **修法（派生时给每个平台脚本加 step 白名单 fail-fast）**：
+> ```python
+> VALID = {'upload','meta','ai','cover','album','save','verify'}
+> if STEP not in VALID:
+>     raise SystemExit(f'FATAL: unknown step {STEP!r}; valid={sorted(VALID)}')
+> ```
+> **统一约定**：要么每个平台脚本都支持 `all`（按 `mp`/`zhihu` 的顺序串行），要么**一律不支持 `all`**，由外部 runner 显式逐步调用。**禁止混用**——混用必然导致某天用统一 runner 时静默漏掉一个平台。
+>
+> ④ **坑 426：视频号 `dialogOpen` 用祖先容器 `textContent` 判定 = 假阳性（新，修正坑 419）**。坑 419 说「`CH_COVER: ok, dialog_closed= False` = 封面没落上」——**1108 实测这个关联不成立**：本期 `dialog_closed= False`，但回读 `.vertical-img-wrap` 得到 **810×1080**，封面**已正确生效**。
+> 根因是判据本身错：`Array.from(sr.querySelectorAll('*')).some(e => /上传封面/.test(e.textContent))` 会命中**任意祖先容器**——只要页面某个深处还留着含该文案的隐藏节点，整棵祖先链都判 true。
+> **修法：只认叶子节点**：
+> ```js
+> Array.from(sr.querySelectorAll('*')).some(e =>
+>   e.offsetParent && e.children.length === 0 && /上传封面/.test(e.textContent || ''))
+> ```
+> **铁律不变且要强化**：封面唯一判据 = **回读槽位 `img.naturalWidth/naturalHeight`**（竖封面 3:4 比例，本期实测 810×1080）。
+> **`dialog_closed` 只是过程日志，不许进任何断言**——正反两个方向都会骗你（坑 419 的假阴性 + 坑 426 的假阳性）。
+>
+> ⑤ **坑 405 补强：抖音终态复判必须先「回到 draft 页」再读槽位**。本期 `DY_E2E_FAILED` 又是假阴性，但这次找到了**可复现的读取路径**：
+> save 完成后页面已跳回上传页（`hasUploadArea: true`、`.coverControl-CjlzqC` 数量 **0**），`rb_slots()` 在这个 DOM 上必然读空 → `covers_ok=False`。
+> **正确复核姿势**（只读，不消费令牌）：点「继续编辑」→ 等 URL 变为 `enter_from=draft` → 再读 `.coverControl-CjlzqC` 槽位。
+> 1108 实测复核结果：标题正确、`slots = [{1536,1151}, {1006,1343}]`（横 4:3 + 竖 3:4 俱在）→ **草稿完好，记 `done_with_caveat`，不重传**。
+> 注意坑 295：**「继续编辑」是一次性令牌**，复核读完后**必须再点一次「暂存离开」**，否则草稿消失。
+
+> **🔴 v3.85.0 核心改进（2026-11-07 1107 日报全链实跑：断言层连踩三次 / 封面步静默失效 / 派生清单串期 / 多 wrapper 并存，坑 413-422）**
+>
+> 本期 397 帖（401 进队列 / 27 批 / **err=0**，22:35→23:09 共 34 分钟）→ 视频 206.42 s / 23.1 MB / 1920×1080，锚点 `ai_kill_switch` **0.7435**，audit **38/38 PASS**，字幕 mp4 词级复核中位 **+0.115 s**；五平台草稿全成（公众号 100001930 / 知乎 2102199881502832007 / B站 / 抖音 `done_with_caveat` 假阴性 / 视频号 `CH_VERIFY`）。
+>
+> **本期返工全部发生在断言层与「判据层」，内容层一次过**——与坑 241 的模式完全一致。七条：
+>
+> ① **坑 326 一晚连踩三次：上期禁词表 / 上期事件词表会误伤本期主线**。1107 的三次分别是：`mp_*_run.py` 的 `stale_1106` 把 `英伟达`（本期股价主线）判成上期残留；`channels_upload_*` 两个脚本的 issue-word 整块还是上期的（还在断言 `ERNIE` **必须在场**）；`gen_publish` 的 `douyin/channels.description` 缺 `Qwen 4`。
+>    **纪律**：① 派生后立刻做「**上期词表 × 本期成品文案**」双向交叉 grep——既要查「上期词是否还在断言表里」，也要查「上期词是否是本期合法内容」；② issue-word **缺失 = 补描述，不是放宽断言**（坑 380）；③ 修完断言后**先单跑 verify/对应步骤复用已存草稿**，不要整链重来（1107 公众号正文早已存好，只改了判据就 `MP_VERIFY_OK`）。
+>
+> ② **坑 419 视频号 cover 步静默失效（新）**：`channels_upload_<issue>.py cover` 打印 `CH_COVER: ok, dialog_closed= False`，但**竖封面实际没落上**——回到草稿编辑页回读 `.vertical-img-size` 仍是 `720×405`（=视频默认帧缩略），而正确值应是 `810×1080`（`1152×1536` 的 0.703 等比）。
+>    **判据必须是「回读封面图元尺寸」而不是「点没点到确认按钮」**。修法：草稿箱首条 → 悬停露出 `.opr .opr-item` 编辑按钮 → 进入 `post/create` → 点 `.vertical-img-wrap` 中心 → `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(vertical-3-4.png)` → 用**真实坐标**点确认 → 回读 `naturalWidth/naturalHeight == (810, 1080)`。
+>    ⚠️ 该弹窗变体的确认按钮**不在 `<button>` 内**时（`/确认|完成|保存/` 只能匹配到页面级「保存草稿」），**不要为了「点掉弹窗」去点它**——`保存草稿` 与 `发表` 同在底部，误触风险高于收益。
+>
+> ③ **坑 420 派生器不会重写 `review-checklist.md` 正文（新）**：`_derive_video_<issue>.py` 只给它加 `<!-- __REWRITE_FOR_<issue>__ -->` 哨兵、不换内容 → 清单的 §一~§十三 全是上期文案（本期渲染完才发现 §十三 还写着上期 appmsgid 与「已扫码重登」）。
+>    **纪律**：`review-checklist.md` 必须在**渲染之前**整份重写（它是渲染门禁的一部分，不能是上期快照）；派生器可保留哨兵，但人工重写要排在 audit 之前。
+>
+> ④ **坑 421 `connect_over_cdp` 30 s 超时（坑 262/404 复发）**：ws 已经连上但卡在建上下文。**固定顺序**：`curl /json/version` 探活 → 跑一次 `templates/revive_frozen_tabs.py`（输出 `DEAD: ...` 是正常的，末行 `PLAYWRIGHT_OK` 即可）→ 重试。1107 两次超时都是这样一次救回，**不要重启浏览器**。
+>    已知副作用：revive 后长驻的 `mp` home 标签可能被关掉，`token` 会变；下个脚本若报 `mp home tab not found`，按坑 403 用 `PUT /json/new?<home+token>` 补一个即可，**登录态不受影响**。
+>
+> ⑤ **坑 422 多个 launch wrapper 并存（新）**：`_launch_<issue>.sh` 的 pidfile 只在**启动瞬间**检查一次。1106 上午反复启动/试跑时留下了 4 个 wrapper，它们各自写 pidfile、各自 `while` 睡到同一个 22:35 —— 到点时 4 个进程同时醒来抢跑（本期因 resume 的 pidfile 与 `isComplete` 幂等，未造成重复抓取，但纯属侥幸）。
+>    **派生器加固**：等待循环里每轮（或每 N 轮）重新比对 `cat pidfile` 与 `$$`，不等于自己就 `exit 0`：
+>    ```bash
+>    while [ "$(date '+%s')" -lt "$TARGET_EPOCH" ]; do
+>      [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] || { echo "superseded by $(cat "$PIDFILE")"; exit 0; }
+>      sleep 30
+>    done
+>    ```
+>
+> ⑥ **重生成 `publish.json` 会清空 `platform.zhihu.article_id`**：该字段靠上传脚本回填，`gen_publish` 里恒为 `''`。1107 为补 `Qwen 4` 重跑生成器后 id 丢失，若不补回，知乎脚本就找不到「本期文章」做身份断言。
+>    **纪律**：任何 `gen_publish` 重跑后立刻执行 `python3 -c "...; pub['platform']['zhihu']['article_id']=OLD; json.dump(...)"` 回填，并断言非空再进上传。
+>
+> ⑦ **生图端点会中途死掉，`_missing.txt` 机制要会用**：1107 的 rainflow（用户 25 张额度）**首轮出 3 张后 `curl rc=35` 被标 dead**，其余 5 张由 prism 补齐；scene5 三个端点全失败 → 脚本写 `images/_missing.txt: [5]` 并 `exit 1`。
+>    **正确动作**：**再跑一次同一个脚本**——`need_api()` 会读 `_missing.txt` 强制重出该场景，无需手工删图或改 prompt；8/8 成功后 `_missing.txt` 自动清空。**不要用本地 PIL 兜底图充数**（坑 378：兜底图会被 exists-OK 判据骗过，导致「8/8 OK」但全是占位图）。
 
 > **🔴 v3.84.0 核心改进（2026-11-06 1106 日报实跑：公众号作者字段 / 正文下限按本期推导 / 公众号与视频号入口恢复 / 状态写盘防覆盖）**
 >
@@ -3919,9 +4012,12 @@ page.mouse.click(target['x'], target['y'])
 
 **🔴 封面对话框（`.vertical-img-wrap .edit-btn` → 标题「编辑个人主页卡片」→ 取消/确认）的上传必须用 Playwright locator，不能取 ElementHandle（v3.61.0 坑 294）**：`page.evaluate_handle(...).as_element().set_input_files(path)` 必抛 `Cannot set input files to detached element`（shadow 内节点在取句柄到设文件之间被重渲染）；改用 `page.locator('wujie-app input[type=file][accept*="image"]').first.set_input_files(path)`（locator 每次动作前重新解析）。确认按钮 JS 常从错误 wrapper 查 `.weui-desktop-btn_primary` 得空 → 取可见 `.weui-desktop-dialog__wrp` 内「确认」的 rect 做坐标点击。弹窗有开关状态机（坑 280）：每次操作前先 Esc 清残留再重开。
 
-**🔴 两条验收补充（v3.63.0 / 1025 实测）**：
+**🔴 三条验收补充（v3.63.0 / 1025 实测；v3.86.0 / 1108 补第三条）**：
 1. **「弹窗是否关闭」不能用「容器还在不在」判**。`edit-cover-dialog-container` 关闭后**仍留在 DOM 里**，只是 `rect` 变成 0×0——`container exists` / `offsetParent !== null` 都会给出「还开着」的**假阳性**（1025 一度以为封面没生效，截图一看早已换成本期海报）。判据改为 `rect.width > 0 && rect.height > 0`，或干脆**回读槽位实图**。**⚠️ 但尺寸断言必须按比例判，不能写死 1152×1536（v3.70.0 / 1029 实测）**：页面会把上传图**等比缩放**后回填槽位，1029 上传 1152×1536 后 `img.naturalWidth/naturalHeight` 实测为 **810×1080**（同为 3:4，缩放系数 0.703）。写死 `=== 1152/1536` 会判成「封面没生效」并触发重复上传。正确写法：`Math.abs(w/h - 0.75) < 0.01`（3:4）或 `Math.abs(w/h - 4/3) < 0.01`（4:3），再配合页面自身的 `封面已更新` 文案确认。
 2. **喂图后必须等预览图长到目标尺寸比例再点「确认」**。`set_input_files` 是异步上传，立刻点确认可能确认的是**旧图**。轮询槽位 `img.naturalWidth/naturalHeight` 达到 `1152×1536`（±2px）后再点。
+3. **🔴 v3.86.0 坑 426：判「弹窗还开着」时，`querySelectorAll('*')` + `textContent` 会命中任意祖先容器 = 假阳性。** `Array.from(sr.querySelectorAll('*')).some(e => /上传封面/.test(e.textContent))` 只要页面深处**还留着含该文案的隐藏节点**，整条祖先链都判 true。1108 实测：脚本打印 `dialog_closed= False`，但回读槽位是 **810×1080**，封面**已生效**——坑 419 那个「弹窗没关 ⇒ 封面没落上」的关联**不成立**。
+   **正确写法（只认叶子）**：`e.offsetParent && e.children.length === 0 && /上传封面/.test(e.textContent || '')`。
+   **铁律**：封面唯一判据 = **回读槽位 `img.naturalWidth/naturalHeight` 并校验比例**；**`dialog_closed` 是过程日志，禁止进任何断言**——它正反两个方向都会骗人（419 假阴性 + 426 假阳性）。
 
 **封面尺寸**：
 - 个人主页卡片：3:4（1152×1536）→ `vertical-3-4.png`
@@ -5774,7 +5870,7 @@ browser_handle_dialog(accept=true)
 | 标题 | `textarea[placeholder="请输入标题（最多 100 个字）"]` |
 | 正文 | `div.public-DraftEditor-content`（Draft.js，`innerHTML` 直赋无效）；**合成 `ClipboardEvent` + `DataTransfer` 比真剪贴板更稳**（无需 `grant_permissions`） |
 | 正文块 | `div.public-DraftEditor-content [data-block="true"]`；`VIDEO` / `IMG` / `TXT` 三类靠 `.Editable-video` / `img` 判别 |
-| 图片 | `input[type=file][accept*="image/webp"]`（常驻 DOM）；先贴 `<p>__IMG__</p>` 占位再逐张替换。**v3.76.0 坑 368 两条计数铁律**：① **占位符 -1 ≠ 图片 +1**——失败的替换会「吃掉占位符但不产生卡片」，每步必须同时回读 `img` 数；② **配图只认 `src` 含 `draft_token=<文章id>` 的 `img`**，`naturalWidth === 1920` 的是**视频封面缩略图**，按 `naturalWidth` 数会把 8 图数成 9。上传成功后常残留一个只含 `__IMG__` 的空块，要单独清掉（判 `innerText === '__IMG__'` 且块内无 `img`） |
+| 图片 | `input[type=file][accept*="image/webp"]`（常驻 DOM）；先贴 `<p>__IMG__</p>` 占位再逐张替换。**v3.76.0 坑 368 两条计数铁律**：① **占位符 -1 ≠ 图片 +1**——失败的替换会「吃掉占位符但不产生卡片」，每步必须同时回读 `img` 数；② **配图只认 `src` 含 `draft_token=<文章id>` 的 `img`**，`naturalWidth === 1920` 的是**视频封面缩略图**，按 `naturalWidth` 数会把 8 图数成 9。上传成功后常残留一个只含 `__IMG__` 的空块，要单独清掉（判 `innerText === '__IMG__'` 且块内无 `img`）。**🔴 v3.86.0 坑 424：收尾断言 `imgs == len(img_marks)` 会漏掉「上传失败」的块**——失败块同样含 `<img>`，照样被分类成 `IMG`。必须补两道断言：`assert not [b for b in st['blocks'] if '上传失败' in b]` **且** `assert not [w for w in dims if w <= 100]`（`dims` = 正文所有 `img` 的 `naturalWidth`）。另注意**时序**：`read_state` 可能抢在最后一张传完之前执行，读到的是瞬时失败态——**见到失败痕迹先复核，别急着重跑** |
 | 视频 | `button[aria-label="视频"]` 开弹窗；真 input 是 `input.VideoUploadButton-fileInput`。**🔴 v3.76.0 坑 367：raw CDP 的 `DOM.setFileInputFiles` 对它是无效的**——该 input 是 `display:none`，CDP 返回 `{}`（成功）但 `input.files.length` 恒为 0，喂完 `/json` 一直显示 `files: 0`；ASCII 路径、复位面板、真实鼠标点击、「导入视频」弹窗四条替代路全部无效。**必须用 Playwright 的 `page.locator('input.VideoUploadButton-fileInput').first.set_input_files(VIDEO)`**，同一 CDP 端口上一试就成（约 40 s 出卡片，25 MB / 196 s 文件）。判 `.Editable-video` 的 `data-video-playable === 'true'` |
 | 视频落位 | **🔴 v3.76.0 坑 367 修正上表旧结论**：知乎媒体块**一律追加到文档末尾**，光标位置不决定落点。想放文首只有一条路 —— **先插视频、再粘正文**（实测得到 block 1 = 视频）。事后搬动全部失败：光标置顶无效、`Ctrl+X`/`Ctrl+V` 剪切粘贴无效（`vids` 仍为 1）、**HTML5 拖拽（DataTransfer + dragover/drop）会直接把视频块删掉且不可恢复** |
 | 视频去重 | **🔴 v3.76.0 坑 367：视频卡片「延迟出现」**。每轮 `set_input_files` 都会成功，但在等待窗口里反复重试会**累积成多个视频块**（实测一次会话堆到 5 个）。上传后**不要立刻重试**；稳定后按块去重到 1 个：选中 `vs[vs.length-1].closest('[data-block]')` → 断言块内除视频外无正文文本 → `Range.selectNode(块)` + `Backspace`；每删一个立刻回读块数/视频数/图片数 |
@@ -7040,6 +7136,218 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.86.0（2026-11-08 1108 日报全链实跑：CDP 故障三形态分层 / 知乎图片失败块假绿 / step 词表不统一静默空转 / 弹窗判据假阳性，坑 423-426）
+
+1108 期五平台草稿全成（公众号 `MP_VERIFY_OK` appmsgid=100001942 / 知乎 `ZHIHU_DRAFT_OK` / B站 `BILI_RESULT` /
+抖音 `done_with_caveat` / 视频号 `CH_VERIFY`），daily 307 帖 / 22 批 / err=0，视频 207.66 s / 24.6 MB / 1920×1080，
+锚点 `multimodal` 0.7111，audit 38/38。**视频链一次过；上传链的每个问题都在判据层或调度层。**
+
+#### 坑 423：`ECONNREFUSED 9222` ≠ ws 挂起，CDP 三种故障必须分开判别（新）
+
+五个平台一次性**全部**报 `connect_over_cdp: connect ECONNREFUSED ::ffff:127.0.0.1:9222`。
+历史上 CDP 有**三种**根因完全不同的故障，混为一谈会白白空转（1104 曾把 attach 挂起误判成「等它自愈」空转 7 小时；1108 前一轮又把「daemon 没起」当成登录问题）:
+
+| 现象 | 含义 | 正确动作 |
+|---|---|---|
+| `ECONNREFUSED 127.0.0.1:9222` | **daemon 进程不存在** / 端口未监听 | `nohup python3 templates/browser_daemon.py &` |
+| `curl /json/version` 有 JSON，但 `connect_over_cdp` 在 `ws connected` **之后**超时 | attach 层故障（坑 262/404/421） | `python3 templates/revive_frozen_tabs.py` → 重试；**绝不重启浏览器** |
+| HTTP 面健康、`/json/list` 正常，playwright 整体挂起 | attach-all 卡在冻结 target（坑 373/306） | 切 raw CDP（`templates/cdp_helper.py`） |
+
+**分层探活是第一步**：先 `curl -s --max-time 8 http://127.0.0.1:9222/json/version`。**不通 = daemon 没起，直接起，不要去读登录态、不要等自愈。**
+
+```bash
+curl -s --max-time 8 http://127.0.0.1:9222/json/version || \
+  nohup python3 <skill>/templates/browser_daemon.py > data/logs/<issue>-daemon.log 2>&1 &
+sleep 8; tail -1 data/logs/<issue>-daemon.log   # 期望 DAEMON_READY port=9222
+```
+
+⚠️ **视频链全程不需要 CDP**（PDF / 封面 / audit / 生图 / TTS / 字幕 / Remotion 渲染），daemon 缺席时可先跑完；只有上传链依赖 9222。
+
+#### 坑 424：知乎图片「上传失败」块被计入 IMG 计数 = 假绿（新）
+
+`step_images` 收尾断言 `imgs == len(img_marks)`，而块分类器是 `img ? 'IMG' : 'TXT'` ——
+**上传失败的块同样含 `<img>`**（`src` 空或指向占位），失败也会被计成 IMG，7 图全灭照样 PASS。
+
+**还有时序陷阱**：`read_state` 可能抢在最后一张传完之前执行，读到的 `IMG|上传失败` 是**瞬时态**
+（1108 首轮 `blocks[5]` 显示 `IMG|上传失败`，复核时 8 图全部 `naturalWidth >= 1440`）。
+
+两道新断言，缺一不可：
+
+```python
+bad_fail = [b for b in st['blocks'] if '上传失败' in b]
+assert not bad_fail, f'存在上传失败的图片块: {bad_fail}'
+dims = page.evaluate("""() => Array.from(
+  document.querySelector('div.public-DraftEditor-content').querySelectorAll('img')
+).map(i => i.naturalWidth || 0)""")
+assert not [w for w in dims if w <= 100], f'有图片未真正加载: {dims}'
+print(f'  image naturalWidths: {dims}')
+```
+
+与坑 368（只认 `draft_token`）/ 坑 311（ProseMirror 分隔符）同族：**「数量对」≠「加载成功」，必须回到图元尺寸。**
+**读到失败痕迹先复核再重跑**——瞬时态概率不低。
+
+#### 坑 425：平台脚本 step 词表不统一，传 `all` 静默空转 exit 0（新）
+
+`mp_*_run.py` / `zhihu_upload_*.py` 有 `if STEP in ('open','all')` 分支；**`channels_upload_*.py` 没有 `all`**，
+只认 `upload|meta|ai|cover|album|save|verify`。传 `all` 的结果：脚本正常连上浏览器、正常打印前两行、
+**所有 `elif` 全不匹配 → 什么也没做 → 退出码 0**。
+
+**这是最坏的一类失败**：不报错、有日志、退出码干净，看起来像跑过了。
+
+派生时给每个平台脚本加白名单 fail-fast：
+
+```python
+VALID = {'upload','meta','ai','cover','album','save','verify'}
+if STEP not in VALID:
+    raise SystemExit(f'FATAL: unknown step {STEP!r}; valid={sorted(VALID)}')
+```
+
+**统一约定**：要么全部支持 `all`，要么全部不支持、由 runner 显式逐步调用。**禁止混用**——
+混用必然导致某天用统一 runner 时静默漏掉一个平台。
+
+#### 坑 426：视频号 `dialogOpen` 用祖先 `textContent` 判 = 假阳性（新，修正坑 419）
+
+坑 419 记「`dialog_closed= False` ⇒ 封面没落上」。**1108 实测该关联不成立**：本期同样打印
+`CH_COVER: ok, dialog_closed= False`，但回读 `.vertical-img-wrap` 得到 **810×1080**，封面**已生效**。
+
+根因是判据本身错——`Array.from(sr.querySelectorAll('*')).some(e => /上传封面/.test(e.textContent))`
+会命中**任意祖先容器**：页面深处只要还留着含该文案的隐藏节点，整条祖先链都判 true。
+
+只认叶子节点：
+
+```js
+Array.from(sr.querySelectorAll('*')).some(e =>
+  e.offsetParent && e.children.length === 0 && /上传封面/.test(e.textContent || ''))
+```
+
+**铁律强化**：封面唯一判据 = **回读槽位 `img.naturalWidth/naturalHeight` 并校验比例**
+（竖封面 3:4，1108 实测 `810×1080`，为 `1152×1536` 的 0.703 等比）。
+**`dialog_closed` 只是过程日志，禁止进任何断言**——正反两个方向都会骗人（419 假阴性 + 426 假阳性）。
+
+#### 坑 405 补强：抖音终态复判要先「回到 draft 页」再读槽位
+
+本期 `DY_E2E_FAILED` 仍是假阴性，但这次定位到可复现的读取路径：save 完成后页面已跳回上传页
+（`hasUploadArea: true`、`.coverControl-CjlzqC` 数量 **0**），`rb_slots()` 在这个 DOM 上必然读空 → `covers_ok=False`。
+
+**正确复核姿势（只读）**：点「继续编辑」→ 等 URL 变为 `enter_from=draft` → 再读槽位。
+1108 复核：标题正确、`slots = [{1536,1151}, {1006,1343}]`（横 4:3 + 竖 3:4 俱在）→ **草稿完好，记 `done_with_caveat`，不重传**。
+注意坑 295：**「继续编辑」是一次性令牌**，复核后**必须再点一次「暂存离开」**，否则草稿消失。
+
+#### 1108 正例读数（备查）
+
+- 公众号：`appmsgid=100001942`，标题 40 字，作者「今日羊报AI」，正文 1587 字，占位符 0，封面 `block + hasQpic`，合集「今日羊报 AI」。
+- 知乎：标题 + 8 图（7 场景 + 1 视频封面）+ 1 视频 + 声明「包含AI辅助创作作者对内容负责」。
+- B站：标题 38 字，「人工智能」分区，6 标签（`今日羊报AI/AI日报/人工智能/OpenAI/Gemini/多模态`），草稿箱见标题。
+- 视频号：descLen 240，竖封面 810×1080，AI 标注 `Contains AI-generated content`，合集「今日羊报AI」，草稿箱首条本期。
+- 抖音：标题/descLen 254/5 标签/声明/合集「今日羊报AI（147 作品）」/双封面 1536×1151 + 1006×1343。
+
+### v3.85.0（2026-11-07 1107 日报全链实跑：断言层连踩三次 + 封面步静默失效 + 派生清单串期 + 多 wrapper 并存，坑 413-422）
+
+1107 期五平台草稿全成（公众号 MP_VERIFY_OK / 知乎 ZHIHU_DRAFT_OK / B站 / 抖音 done_with_caveat / 视频号 CH_VERIFY），
+daily 397 帖 / 27 批 / err=0，视频 206.42 s 锚点 0.7435，audit 38/38。**返工 100% 发生在断言层与判据层，内容层一次过。**
+
+#### 坑 419：视频号 cover 步「点了确认」但封面没落上（新）
+
+`channels_upload_<issue>.py cover` 打印 `CH_COVER: ok, dialog_closed= False`，看似只是弹窗没关；实际**竖封面根本没替换**——
+打开草稿编辑页回读 `.vertical-img-size` 得到 `720×405`（视频默认帧的缩略），而本期正确值应为 `810×1080`
+（`1152×1536` 按页面 0.703 等比缩放，与 1029 期实测一致）。
+
+**根因**：该步骤的「确认」按钮在 DOM 里不是 `<button>`，脚本按 `button` + 文案正则找候选、拿到的是**页面级**「保存草稿」，
+于是在错误的元素上点了坐标（或 `btnbox=None` 直接跳过），弹窗未关、图未应用。
+
+**正确判据**：**回读封面图元的 `naturalWidth/naturalHeight`**，而不是「有没有点到确认按钮」。
+```python
+st = page.evaluate('''() => {
+  const sr = document.querySelector('wujie-app').shadowRoot;
+  const pick = cls => { const e = sr.querySelector('.'+cls); if (!e) return null;
+    const i = e.tagName === 'IMG' ? e : e.querySelector('img');
+    return i ? {nw: i.naturalWidth, nh: i.naturalHeight} : null; };
+  return {v: pick('vertical-img-size'), h: pick('horizon-img-size')};
+}''')
+assert abs(st['v']['nw'] / st['v']['nh'] - 1152/1536) < 0.02, f"vertical cover not applied: {st['v']}"
+```
+
+**补做路径（手工/脚本均可）**：
+1. `/platform/post/draftListManager` → 首条 `.post-draft-item` 悬停 → `.opr .opr-item`（编辑）真实坐标点击；
+2. 进入 `post/create` 后点 `.vertical-img-wrap` 中心 → 弹窗；该 input 是 `input[type=file][accept*="image"]`（**非** `video/mp4`），用 locator 喂 `vertical-3-4.png`；
+3. 用真实坐标点确认 → 回读 `(810, 1080)` 通过。
+
+⚠️ **该弹窗变体的底部按钮可能是 `直接编辑 / 使用素材 / 保存草稿 / 手机预览 / 发表`**（没有「确认」）。此时**不要为了关弹窗去点「保存草稿」旁边的任何按钮**——
+`保存草稿` 与 `发表` 相邻，误触风险远高于收益。横封面（4:3）保持视频默认帧是可接受状态，视频号展示以竖封面为主。
+
+#### 坑 420：派生器不会重写 `review-checklist.md` 正文（新）
+
+`_derive_video_<issue>.py` 只给清单加 `<!-- __REWRITE_FOR_<issue>__ -->` 哨兵、不替换内容 → §一~§十三 全是上期文案
+（1107 渲染完才发现 §十三 写着上期 appmsgid 与「已扫码重登」，§六 写着上期锚点）。
+
+**纪律**：`review-checklist.md` 是**渲染门禁的一部分**，必须在 `audit` 之前整份重写。派生器保留哨兵没问题，
+但人工重写要排进流水线顺序：**派生 → 删哨兵（内容层）→ 重写 checklist → audit → 渲染**。
+
+#### 坑 421：`connect_over_cdp` 30 s 超时（坑 262/404 复发）
+
+ws 已连上但卡在建上下文。**固定顺序**（1107 两次超时均一次救回）：
+```bash
+curl -s --max-time 8 http://127.0.0.1:9222/json/version      # 有 JSON = daemon 活着
+python3 templates/revive_frozen_tabs.py                       # 末行 PLAYWRIGHT_OK 即可；DEAD: 是正常的
+```
+**不要重启浏览器。** 已知副作用：revive 后长驻的 `mp` home 标签可能被关、`token` 变化；下个脚本若报
+`mp home tab not found`，按坑 403 用 `PUT /json/new?<home+token>` 补一个，**登录态不受影响**。
+
+#### 坑 422：多个 launch wrapper 并存（新）
+
+`_launch_<issue>.sh` 的 pidfile **只在启动瞬间**检查一次。1106 上午反复试跑留下 4 个 wrapper，各自写 pidfile、
+各自睡到同一个 22:35 —— 到点同时醒来抢跑（本期靠 `_resume` 的 pidfile 与 `isComplete` 幂等侥幸无事）。
+
+**派生器加固**：等待循环里每轮比对 pidfile 与自身 `$$`：
+```bash
+while [ "$(date '+%s')" -lt "$TARGET_EPOCH" ]; do
+  [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] || { echo "superseded by $(cat "$PIDFILE")"; exit 0; }
+  sleep 30
+done
+```
+
+#### 坑 326 复发：一期之内连踩三次（断言表误伤本期主线）
+
+| # | 文件 | 错在哪 | 修法 |
+|---|---|---|---|
+| 1 | `mp_<issue>_run.py` | `stale_<prev>` 把 `英伟达` 当上期残留，但它是本期**股价主线** | 从陈旧词表移除，换成本期真正缺席的词（`ERNIE`/`Kimi`/`十二分之一`）；只改判据、**不重传**（正文早已存好） |
+| 2 | `channels_upload_<issue>*.py` | issue-word 整块还是上期的（还在断言 `ERNIE` **必须在场**） | 换成本期事件词，同时把上期词移入禁词表 |
+| 3 | `gen_publish_<issue>.py` | `douyin/channels.description` 缺 `Qwen 4` | **补描述，不是放宽断言**（坑 380）；改生成器后重生成 `publish.json` |
+
+**机械防线（派生器里加，别靠记性）**：
+```bash
+# A) 上期事件词是否还残留在本期「断言表」里（排除 STALE/forbidden/prior_* 这些正当位置）
+grep -rn "<上期事件词1>\|<上期事件词2>" news-pipeline/<DATE>/scripts/*.py   | grep -v "STALE\|forbidden\|prior_tokens\|prior_hits"     # 命中 = 还没重写
+# B) 本期断言用的 issue word 是否真的出现在本期成品文案里
+python3 -c "import json;d=json.load(open('news-pipeline/<DATE>/publish.json'));
+blob=json.dumps(d,ensure_ascii=False);print([w for w in ['<w1>','<w2>'] if w not in blob] or 'NONE')"
+```
+
+**⚠️ 连带坑**：**重生成 `publish.json` 会清空 `platform.zhihu.article_id`**（该字段靠上传脚本回填，生成器里恒为 `''`）。
+重跑生成器后必须立刻回填并断言非空，否则知乎脚本的身份断言找不到本期文章。
+
+#### 生图端点中途死亡：`_missing.txt` 的正确用法
+
+1107 期 rainflow（用户 25 张额度）**首轮出 3 张后 `curl rc=35` 被标 dead**，其余 5 张由 prism 端点补齐；
+scene5 三端点全失败 → 脚本写 `images/_missing.txt: [5]` 并 `exit 1`。
+
+**正确动作：再跑一次同一个脚本。** `need_api()` 会读 `_missing.txt` 强制重出该场景，**无需手工删图或改 prompt**；
+8/8 成功后 `_missing.txt` 自动清空。**绝不用本地 PIL 兜底图充数**（坑 378：兜底图也会满足 exists-OK 判据，
+日志打 8/8 OK 但全是占位图）。
+
+#### 本期留下的待办（非阻塞）
+
+- [ ] 「公众号标题 + 作者必填」目前靠脚本 `title_ok`/`author_ok` 断言，建议再加一层**草稿箱列表独立回读**（本期已人工做，见 `To_Learn.md` ✅4）；把回读做成 `mp` 的 `verify` 附加项，避免「证据与判据同源」。
+- [ ] `channels_upload_<issue>.py` 的 cover 步确认按钮定位（坑 419）应在下一期派生时直接修在脚本里，而不是每次手工补。
+- [ ] 横封面（4:3）该弹窗变体的确认控件仍未定位——下期有空时用 DOM dump 定位后补进脚本。
+
+#### 1108 期对上述两条待办的回收结果（v3.86.0）
+
+- [x] **`channels_upload_<issue>.py` cover 步的判据**——1108 实测证明**问题不在确认按钮，而在判据本身**（坑 426）：`dialog_closed` 用祖先 `textContent` 判定必假阳性。派生时把判据换成「回读槽位 `img.naturalWidth/naturalHeight` 比例」即可，**确认按钮不需要修**。见 v3.86.0 §坑 426。
+- [x] **横封面（4:3）确认控件**——1108 实测横封面保持视频默认帧即为可接受终态（视频号展示以竖封面为主，坑 419 已记）；**不再投入定位成本**。
+- [ ] **`channels_upload_*.py` 等脚本的 step 白名单 fail-fast**（坑 425）——本期暴露后已写入 `templates/derive-checklist.md` §6⑥，但**尚未落到派生模板的生成代码里**；下一期派生时应直接生成带 `VALID` 断言 + 统一是否支持 `all` 的脚本。
+- [ ] **知乎 `step_images` 的两道新断言**（坑 424）同样只在 1108 的脚本里打了补丁，**未回灌 `platform-zhihu.md` 模板**；下期派生时须从模板带出。
 
 ### v3.84.0（2026-11-06 1106 日报：公众号作者必填 + 断言下限按本期推导 + 公众号/视频号入口恢复）
 

@@ -225,6 +225,148 @@ head -1 news-pipeline/<DATE>/review-checklist.md    # 必须以 '# ' 开头
 
 ---
 
+## 2e. **断言表 × 本期成品文案 双向交叉 grep（v3.85.0 新增，1107 一期连踩三次）**
+
+2d 管的是「平台脚本必备步骤**有没有**」，本节管的是「平台脚本的**判据指向哪一期**」。
+1107 期的三次 `MP_VERIFY_FAILED` / `AssertionError` 全部出自这里，且**内容层完全正确**：
+
+| # | 文件 | 症状 | 性质 |
+|---|---|---|---|
+| 1 | `mp_<issue>_run.py` | `stale_<prev>` 里含 `英伟达`，但它是本期**股价主线** | 上期禁词表误伤 |
+| 2 | `channels_upload_<issue>*.py` | issue-word 整块还是上期的（断言 `ERNIE` **必须在场**） | 断言表未重写 |
+| 3 | `gen_publish_<issue>.py` | `douyin/channels.description` 缺 `Qwen 4` | 内容该补，不是断言该放 |
+
+**派生完立刻跑这条（一条命令覆盖 A/B/C 三段）**：
+
+```bash
+python3 templates/assertion_crosscheck.py --date <DATE> \
+  --prev-words <上期词1> <上期词2> <上期词3> \
+  --issue-words <本期词1> <本期词2>
+```
+
+它做六件事：A 本期词是否真在成品文案里；B 上期词是否漏进成品文案；C 上期词是否留在
+**正向断言**里；D `publish.video` 是否等于实际文件名 + `zhihu.article_id` 是否被清空；
+E 内容层哨兵是否清干净；F `review-checklist` 是否指向本期。
+
+### ⚠️ 交叉检查工具本身也会犯坑 326（v3.85.0 现场教训）
+
+首版 `assertion_crosscheck.py` 在 **1107 已完成的正确产物上**报了 **13 处假 FAIL**。
+原因不是产物有问题，是判据写错了。**三种形态**，每个写判据的人都会遇到：
+
+| 形态 | 错误判据 | 正确判据 |
+|---|---|---|
+| **① 把工作笔记当成品文案** | 整篇读 `script-<date>.md`，命中了「3 天去重」段落里合法列出的近三天事件（`FlashProve` / `ERNIE` / `白宫住宅代理`） | 只取 `## 正文` 之后的章节，并剥离「去重/历史/上期」说明行 |
+| **② 不区分「要求在场」和「要求缺席」** | 见到 `for w in [...]: assert w not in DESC`（**禁词断言**）和 `'stale_<prev>': (...)`（**残留检测**）也报「上期词还在断言表里」 | 按语义判：只有 `assert w in ...`（正向断言）才可能是坑 326；含 `not in` / `stale_` / `prior_` 的一律跳过 |
+| **③ 把 JSON 判据键当内容载荷** | 整份 `json.load` 后 `json.dumps` 塞进 blob，于是 `wechat-sections-<issue>.json` 的 `must_not_have` 里那 8 个上期词全被判「漏进成品文案」 | JSON 按**键名语义**取载荷：`sections`/`tail`/`scenes`/`text`/`title`/`description` 收，`must_have`/`must_not_have`/`forbidden`/`stale*`/`prior*`/`checks`/`issue_words`/`COLLOQ` 一律丢 |
+
+**结论（本期最该记住的一条）**：判据的语义是「**要求在场**」还是「**要求缺席**」，
+比「这个词来自哪一期」更重要。禁词表里出现上期词是**功能**，不是残留。
+同理，**同一个 JSON 文件里「发出去的内容」和「用来判它的表」必须分开读**。
+
+**纪律**：任何新写的门禁/检查器，**必须做双向控制**——
+① 在已通过的正确产物上跑，**必须 PASS**；② 喂一个已知错误的输入，**必须 FAIL 且非零退出**。
+只测单向等于没测。如果它在正确产物上报 FAIL，先怀疑判据，再怀疑产物：
+这是「判据自欺」的反向形态，不是假绿而是**假红**，同样会把你逼去改本来对的东西。
+
+> 1107 现场：假红修了**两轮**才干净——第一轮修了 ①②，第二轮才发现 ③（`must_not_have`）。
+> 而且第一轮验证时我用 `| tail` 接管道，`$?` 拿到的是 `tail` 的退出码，**假 PASS 过一次**。
+> 验证退出码必须 `> log 2>&1` 后单独读 `$?`，**不要接管道**。
+
+
+**判据纪律**：
+
+- **B 命中 = 补描述，不是放宽断言**（坑 380）。改的是 `gen_publish` 的 `description`，不是删 `assert`。
+- **A 命中 = 该词是本期合法内容**，从禁词表移出，同时把「本期真正缺席」的上期词补进去（否则禁词表就形同虚设）。
+- **C 命中要先判断**：是本期合法引用（如 1103 的 `招股书`）就移出禁词表；是真残留就改文案。**不要为了让它过而放宽断言**（坑 326 第三次命中的教训）。
+
+**⚠️ 连带必查：重跑 `gen_publish` 会清空 `platform.zhihu.article_id`。** 该字段由上传脚本回填、生成器里恒为 `''`。
+
+```bash
+python3 - <<'EOF'
+import json
+pp = 'news-pipeline/<DATE>/publish.json'
+pub = json.load(open(pp, encoding='utf-8'))
+aid = pub['platform']['zhihu'].get('article_id')
+if not aid:
+    print('WARN: zhihu.article_id empty — 若本期已上传过知乎，必须回填旧 id 后再进上传')
+else:
+    print('zhihu.article_id =', aid)
+EOF
+```
+
+---
+
+## 2f. **视频号封面必须回读图元尺寸（v3.85.0 新增，坑 419）**
+
+`channels_upload_<issue>.py cover` 打印 `CH_COVER: ok` **不代表封面落上了**。1107 实测：脚本报 `dialog_closed= False`，
+回读编辑页 `.vertical-img-size` 仍是 `720×405`（视频默认帧缩略），正确值应为 **`810×1080`**（`1152×1536` × 0.703）。
+
+**根因**：该弹窗变体的确认控件不是 `<button>`，脚本按 `button` + `/确认|完成|保存/` 正则匹配到的是**页面级「保存草稿」**，
+于是在错误元素上点了坐标 / 直接跳过。
+
+**判据（回读图元，不问按钮）**：
+
+```python
+st = page.evaluate('''() => {
+  const sr = document.querySelector('wujie-app').shadowRoot;
+  const pick = cls => { const e = sr.querySelector('.'+cls); if (!e) return null;
+    const i = e.tagName === 'IMG' ? e : e.querySelector('img');
+    return i ? {nw: i.naturalWidth, nh: i.naturalHeight} : null; };
+  return {v: pick('vertical-img-size'), h: pick('horizon-img-size')};
+}''')
+assert st['v'] and abs(st['v']['nw'] / st['v']['nh'] - 1152 / 1536) < 0.02, \
+    f"vertical cover NOT applied: {st['v']}（720×405 = 视频默认帧，说明 cover 步静默失效）"
+```
+
+**补做路径**（不依赖原 cover 步）：草稿箱首条 → 悬停 `.post-draft-item` → 点 `.opr .opr-item` → 进入 `post/create`
+→ 点 `.vertical-img-wrap` 中心 → `page.locator('wujie-app input[type=file][accept*="image"]').first`
+喂 `images/vertical-3-4.png` → **真实坐标**点确认 → 回读 `(810, 1080)`。
+
+⚠️ **该弹窗底部可能是 `直接编辑 / 使用素材 / 保存草稿 / 手机预览 / 发表`（没有「确认」）。此时不要为了关弹窗去点底部按钮**——
+`保存草稿` 与 `发表` 相邻，误触「发表」是不可逆的。横封面保持视频默认帧是可接受状态（视频号展示以竖封面为主），
+**如实记录**即可，不要谎报「双封面已上」。
+
+---
+
+## 2g. **`review-checklist.md` 必须整份重写，且排在 audit 之前（v3.85.0 新增，坑 420）**
+
+`_derive_video_<issue>.py` 只给清单加 `<!-- __REWRITE_FOR_<issue>__ -->` 哨兵、**不替换正文**
+→ §一~§十三 全是上期文案（1107 渲染完才发现 §十三 还写着上期 appmsgid、§六 写着上期锚点）。
+
+它是**渲染门禁的一部分**，不能是上期快照。流水线顺序固定为：
+
+```
+派生脚本 → 删内容层哨兵 → 重写 review-checklist（按本期实跑前状态）→ audit → 渲染 → 用实跑结果回填 checklist
+```
+
+自检：
+
+```bash
+C=news-pipeline/<DATE>/review-checklist.md
+grep -n "<上期期号>\|<上期appmsgid>\|<上期锚点概念>" "$C" && echo CHECKLIST_STALE || echo CHECKLIST_OK
+grep -rn "__REWRITE_FOR_<issue>__" news-pipeline/<DATE>/ | wc -l   # 渲染前应为 0
+```
+
+---
+
+## 2h. **launch wrapper 必须防「多实例并存」（v3.85.0 新增，坑 422）**
+
+`_launch_<issue>.sh` 的 pidfile **只在启动瞬间检查一次**。1106 上午反复试跑留下 **4 个** wrapper，
+它们各自写 pidfile、各自 `while` 睡到同一个 22:35 —— 到点**同时醒来抢跑**。
+
+派生器在等待循环里加「归属校验」：
+
+```bash
+while [ "$(date '+%s')" -lt "$TARGET_EPOCH" ]; do
+  [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] || { echo "superseded by $(cat "$PIDFILE")"; exit 0; }
+  sleep 30
+done
+```
+
+开工前自检（真仓库）：`pgrep -fl "_launch_<issue>" | wc -l` 应为 **1**（或 0，若尚未启动）。
+
+---
+
 ## 3. 禁词表 × 当日报告 交叉 grep（坑 326，每期必查）
 
 **上期禁词表照抄 = 误伤本期合法引用。** 本期真实案例：`workbuddy` / `codebuddy` / `反代封号` / `二三十倍` 在 1102 是禁词，但 1103 的报告**合法引用**它们（新政策禁的正是这类玩法）。
@@ -396,13 +538,29 @@ for t in json.load(sys.stdin):
 #    知乎    = /write 或 /p/<id>/edit 结尾
 #    B站     = member.bilibili.com + 页面含「投稿」
 
-# ④ CDP 分层探活（坑 404 / 262）
+# ④ CDP 分层探活（坑 404 / 262 / ★423）
+#    ★ 1108 教训：先分层，再决定动作。三种 CDP 故障根因不同，别混为一谈。
+#      ECONNREFUSED 9222          → daemon 进程不存在 → 起 browser_daemon.py（别读登录态、别等自愈）
+#      curl 通 + ws 后超时        → attach 层故障     → revive_frozen_tabs.py → 重试，绝不重启浏览器
+#      curl 通 + 整体挂起         → 冻结 target       → 切 raw CDP（cdp_helper.py）
 curl -s --max-time 8 http://127.0.0.1:9222/json/version   # 有 JSON = daemon 活着
+# 不通就起（视频链不需要 CDP，可以先跑完 PDF/封面/audit/生图/TTS/字幕/渲染）：
+#   nohup python3 skills/ai-news-factory/templates/browser_daemon.py > data/logs/<issue>-daemon.log 2>&1 &
+#   sleep 8; tail -1 data/logs/<issue>-daemon.log    # 期望 DAEMON_READY port=9222
 
 # ⑤ ★ ws 挂起 → revive（v3.81.0 新增；顺序固定，别跳过）
 #    connect_over_cdp 在 ws connected 后超时 → 跑 revive_frozen_tabs.py → 重试
 python3 skills/ai-news-factory/templates/revive_frozen_tabs.py
 # 期望末行 PLAYWRIGHT_OK；出现 DEAD: 是正常的，说明找到并解冻了冻结页
+
+# ⑥ ★ step 词表统一性自检（v3.86.0 新增，坑 425）
+#    传 all 给不认 all 的脚本 = 静默空转 exit 0（最坏的一类失败）。
+#    派生后先确认每个平台脚本的 VALID 集合，或全部支持 all，或全部不支持 + runner 显式逐步调用。
+for f in mp_<issue>_run.py zhihu_upload_<issue>.py bili_upload_<issue>.py \
+         douyin_e2e_<issue>.py channels_upload_<issue>.py; do
+  echo "== $f"; grep -n "sys.argv\[1\]\|STEP =\|step =" "$f" | head -2
+  grep -q "'all'\|\"all\"" "$f" && echo "   supports all" || echo "   ⚠️ NO 'all' — runner 必须逐步调用"
+done
 ```
 
 ---
@@ -416,6 +574,27 @@ touch data/logs/<issue>-DONE
 # ③ 概念库回填（本期锚点用了就必须记，坑 355「未回写=未修复」）
 #    usage-log.json 追加一条 + concepts.json 的 use_count/last_used 更新
 ```
+
+---
+
+## 附：本期（1108）实际踩点与耗时
+
+| # | 坑 | 何时暴露 | 若不提前查会怎样 |
+|---|---|---|---|
+| 423 | `ECONNREFUSED 9222` | 上传链第一行 | 五个平台一次全灭；易误判为「登录失效」或「等自愈」→ 空转 |
+| 424 | 知乎图片失败块计入 IMG | zhihu images 步 | **假绿**：7 图全灭也打印 PASS，草稿缺图发出 |
+| 425 | channels 脚本不认 `all` | channels 步 | **静默空转 exit 0**，日志像跑过了，实际一平台全漏 |
+| 426 | `dialogOpen` 祖先链假阳性 | channels cover 步 | 误信坑 419「弹窗没关=封面没落上」，去重传封面（有误触发表风险） |
+
+| 阶段 | 实际 | 备注 |
+|---|---|---|
+| 抓取 | 307 入库 / 22 批 / err=0（队列 323） | 22:35 → 23:01 |
+| 报告 / press / PDF | 10.6 KB / 5.8 KB / 272,643 B | 9 required / 4 forbidden；禁词 × 当日报表交叉 grep 过 |
+| 视频链 | 207.48 s 音频 → 207.66 s 成片 / 24.6 MB | audit 38/38；锚点 `multimodal` 0.7111；**一次过** |
+| 上传链 | 五平台草稿 | 卡在坑 423（daemon 没起），起完即通；坑 424/425/426 全在判据层 |
+
+**本期最大教训**：视频链零返工，上传链的每一步返工**都不是内容错**，而是「判据在骗人」或「调度没对齐」。
+枚举判据时先问一句：**这个判据在失败时会给出什么读数？** 若答案也是「pass」，它就不是判据。
 
 ---
 
