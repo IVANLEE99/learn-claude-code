@@ -1,13 +1,72 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.3.0
+version: 16.4.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.3.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.4.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+> **🔴 v16.4 核心改进（2026-11-10 1110 日报实跑·跨机迁移首日：linux.do 列表页 i18n 变中文导致 created 全空、32h 窗口过滤成 0；抓取链对本机环境的三处硬依赖）**
+>
+> 1110 期在新机器（macOS 14.6 / arm64，整目录从旧机迁移）跑通：双源 900 + 273 → 合并去重 1153 → 标题去重 917 →
+> 公益站过滤 824 → **32h 窗口 405** → 26 批正文（err=1）→ **daily 393 帖**。**当期最贵的一条坑不在抓取逻辑，而在页面文案。**
+>
+> **① 坑 A：`td.activity[title]` 已本地化，`Created:` 正则全部落空 → 所有帖子 `created=''` → 32h 窗口 0 条 → `daily total=0` 假成功（新，本期最重要）**
+> **症状链**：`_fetch_lists_*.mjs` 正常跑完（Source A 900 / B 273），`_build_queue_*.py` 也正常输出，但窗口统计是
+> `32h window: 0 (no_created=824 parse_fail=0 too_old=0)` → `crawl_queue total=0` → `crawl bodies queue: 0 posts` →
+> `saved data/daily/<DATE>.json total=0` → **整条链"成功"退出**，launch wrapper 却因 `total < 100` 卡在 600s 空转。
+> **根因**：`td.activity` 的 `title` 文案已本地化，从 `Created: Nov 8, 2026 10:14 pm` 变成 `创建日期：2026 年 11月 8 日 15:36`
+> （`最新：…` 另起一行）。旧正则 `/Created:\s*(.+?)(?:\n|$)/` **永远不匹配**，`created` 恒为 `''`。
+> **修法（两段都要）**：
+> ```js
+> let created = createdMatch ? createdMatch[1].trim() : '';   // 🔴 必须 let，const 会抛 Assignment to constant variable
+> if (!created) {                                             // 中文回退
+>   const cn = titleAttr.match(/创建日期[：:]\s*(.+?)(?:\n|$)/);
+>   if (cn) created = cn[1].trim().replace(/\s+/g, ' ');
+> }
+> if (created && !createdMatch) {                             // 归一化成 dateutil 可解析形态
+>   const m = created.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(\d{1,2}):(\d{2})/);
+>   if (m) created = `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+> }
+> ```
+> **本期踩的二次坑**：补丁第一版写成 `const created = ...` 再赋值 → 浏览器抛 `TypeError: Assignment to constant variable`，
+> `page.evaluate` 把整批 result 变成 `attempt N failed`。改 `let` 后一次通过。
+> **判据**：跑 `_build_queue` 后**必须看 `no_created` 计数** —— `no_created > 0` 就说明时间解析又变了。健康值 `no_created=0 parse_fail=0`。
+>
+> **② 坑 B：`daily total=0` 会被链路当成"成功"，必须显式拦截（新）**
+> `_resume_*.sh` 的判据是 `crawl complete have>=n` —— 当 `n=0` 时 `0>=0` 恒真，直接 merge 并写出 `total=0` 的 daily。
+> **修法**：`_build_queue` 输出 `crawl_queue total=0` 时**主动非 0 退出**；`_resume` 加
+> `[ "$(python3 -c "import json;print(json.load(open('data/crawl_queue.json'))['total'])")" -eq 0 ] && exit 4`；
+> launch wrapper 把 `rc=4` 判为「数据源异常，停止重试并告警」。
+> **排查口诀**：`daily total=0` + `crawl.log` 有 `queue: 0 posts` → **先查 `source_a.json` 的 `posts[0].created` 是否为空**，
+> 空就是坑 A；不是网络问题、不是 CF 拦截、不是站点封禁。
+>
+> **③ 坑 C：新机抓取链的三处硬依赖（一次性全踩）**
+> | 依赖 | 本期现象 | 处置 |
+> |---|---|---|
+> | **node ≥ 18** | PATH 首位是 nvm **v14.21.3**，`playwright-core` 报 `Playwright requires Node.js 18 or higher` | shell 脚本 `set -u` 后注入 `export PATH="$HOME/.nvm/versions/node/<ver>/bin:$PATH"` |
+> | **playwright-core** | 旧路径 `~/.nvm/.../openclaw/node_modules/playwright-core` 不存在 → `MODULE_NOT_FOUND` | `npm i -g playwright-core@<ver>`，把 `createRequire` 路径改到 `$(npm root -g)/playwright-core/package.json`；**版本必须与本机 chromium 缓存 revision 对齐**（chromium-1223 ↔ playwright-core 1.60.0） |
+> | **机器路径** | 派生脚本 ROOT 仍是旧机 `/Users/olduser/Documents/learn-claude-code` | 派生器加 `text.replace('/Users/olduser/...', '/Users/newuser/...')`；**只换日期不换路径 = 全部脚本 cd 失败**（本期 launch 启动即 exit，watchdog 一直误报 GUARD） |
+>
+> **④ 坑 D：`_archive_*.py` 对无 `date` 字段的中间态一律归档**
+> `batch_ids_*.json` 没有 `date` 字段 → 判 `date=None` → 一律搬走。冷启动正确，但**续跑时会把手上的 batch_ids 搬空**。
+> **纪律**：归档只在**开工前**跑一次，续跑一律不跑；脚本注释里写清。
+>
+> **⑤ 坑 E：watchdog 的 `GUARD` 分支只看 pid，wrapper 早退仍报"armed"**
+> 本期 `alive()` 校验了 pidfile + cmdline，但 wrapper 因 `cd` 失败 exit 后 pid 被复用/或 pidfile 残留 → 仍报
+> `GUARD … wrapper pid XXXXX armed`。**修法**：`GUARD` 分支加「`launch.log` 最近 10 分钟有无新行」或 `ps -p $pid -o lstart=` 比对。
+> 另：**`crawl.log` 出现 `queue: 0 posts` 时直接 ALERT**，不等 wrapper 空转 600s。
+>
+> **⑥ 本期正例读数（未来基线）**
+> 双源 900 + 273 → 合并去重 1153 → 标题去重 917（掉 216）→ 公益站 824（掉 93）→ **32h 窗口 405（no_created=0）** →
+> 26 批（batch 17 有 1 err）→ `crawl complete 406/405` → **daily 393（with_content 393 / removed 11 / errors_skipped 1）**。
+>
+> **⑦ 与 ai-news-factory 的衔接（本期新增）**
+> 抓取稳定后，**视频链内容层必须整份重写**（见 ai-news-factory v3.87.0 坑 429）：事件、口播、图片 prompt、公众号 sections
+> 全部由本期报告驱动，禁止沿用上期脚本只改日期。判据：口播里的专名必须能在 `data/reports/<DATE>.md` 里找到。
+>
 > **🔴 v16.3 核心改进（2026-11-06 1106 日报实跑：无超时 `page.evaluate` 挂死 + 看门狗盲区 + kill 顺序）**
 >
 > 1106 期 batch13 最后一帖（第 15 帖，tid=`3126308`）把整条抓取链挂死约 60 分钟；三个新增判据与处置如下：
@@ -31,6 +90,19 @@ version: 16.3.0
 > **v14 核心改进**：Cloudflare 点击绕过、周报模式完整流程、并行 Agent 优化、旧 batch 文件清理。
 > **v13 核心改进**：新增月报模式。月报基于当月已抓取数据与已生成的日报数据聚合，不重复抓取，输出月度趋势总结 + 主题归纳 + 下月展望。
 > **v12 核心改进**：批量抓取数据强制保存、空帖检测跳过、官方警告检测、全量抓取支持、Typst 特殊字符处理。
+
+## ⚡ 开工前环境自检（v16.4.0 新增，新机 / 换机必跑）
+
+```bash
+bash ~/.claude/skills/ai-news-factory/templates/env-preflight.sh $(date '+%Y-%m-%d')
+```
+
+它一次检查 15 项：pipeline python 及其依赖（PIL / jieba / faster_whisper / playwright / av）、
+`ffmpeg`/`ffprobe`、ffmpeg 字幕滤镜、`edge-tts` 版本、**node ≥ 18**、`playwright-core` 全局安装、
+**chromium revision 与 playwright-core 是否对齐**、上传 profile、CDP daemon、Remotion compositor 可用性、中文字体。
+
+**1110 期在新机上六处依赖全靠"跑到一半才发现"，这个脚本把它们前置成一次检查。**
+输出 `FAIL>0` 时先修环境；`WARN` 决定链路走法（例如无 `ass` 滤镜就必须走 PIL overlay 烧字幕）。
 
 ## ⚡ 工作目录与冷启动（v15.2 必读）
 
@@ -1477,6 +1549,21 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.4.0 (2026-11-10) — 跨机迁移首日：列表页 i18n 变中文致 created 全空
+
+1110 期在新机器（macOS 14.6 / arm64）跑通：双源 900 + 273 → 合并去重 1153 → 标题去重 917 → 公益站 824 →
+**32h 窗口 405（no_created=0）** → 26 批正文（err=1）→ **daily 393 帖**。
+
+| # | 坑 | 一句话处置 |
+|---|---|---|
+| A | `td.activity[title]` 已本地化（`创建日期：2026 年 11月 8 日 15:36`），`Created:` 正则全落空 → `created=''` → 窗口 0 条 | 加中文回退 + 归一化成 `YYYY-M-D H:MM`；**`const` 必须改 `let`**（否则 `Assignment to constant variable` 整批失败） |
+| B | `daily total=0` 被链路当"成功"（`have>=n` 在 `n=0` 时恒真） | `_build_queue` 输出 `total=0` 时非 0 退出；`_resume` 加 `rc=4`；**判据看 `no_created` 而非 `total`** |
+| C | 新机三处硬依赖：node v14（要 ≥18）、`playwright-core` 路径不存在、派生脚本 ROOT 仍是旧机路径 | PATH 注入新 node；`npm i -g playwright-core` 且 revision 对齐；派生器加路径替换 |
+| D | `_archive_*.py` 把无 `date` 字段的 `batch_ids_*.json` 一律归档 | 归档只在开工前跑一次，续跑不跑 |
+| E | watchdog `GUARD` 只看 pid，wrapper 早退仍报 armed | 加 `launch.log` 近 10 分钟有无新行；`queue: 0 posts` 直接 ALERT |
+
+**排查口诀**：`daily total=0` + `crawl.log` 有 `queue: 0 posts` → **先看 `source_a.json` 的 `posts[0].created` 是否为空**（空 = 坑 A）。
 
 ### v16.0.0 (2026-09-18～2026-09-20)
 基于 **连续三期全量日报**（过滤后全部抓取完 + 视频工厂联跑）实战，将 v15.9 的 Node 直连 Playwright 从临时兜底固化为可复用协议：

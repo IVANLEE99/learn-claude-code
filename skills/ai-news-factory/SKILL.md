@@ -1,12 +1,59 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.86.0
+version: 3.87.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.86.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.87.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.87.0 核心改进（2026-11-10 1110 日报全链实跑·跨机迁移首日：Remotion compositor 在新机启动即挂 / 派生器只换日期不换内容 / 环境依赖全链重建，坑 427-434）**
+>
+> 1110 期在**全新机器**（macOS 14.6 / arm64，整目录从旧机迁移）跑通全链：daily 393 帖 → 报告 + press + PDF(708 KB) →
+> 视频 **107.48 s / 10.2 MB / 1920×1080**（锚点 `model_routing` **0.7380**，audit **38/38 PASS**）→
+> 公众号 `MP_VERIFY_OK`（appmsgid=**100001991**）+ 知乎 `ZHIHU_DRAFT_OK`（p/2103398886874338620）；
+> 视频号 / 抖音 / B站由用户手动发布（坑 215 全程未碰）。**本期没有一条坑出在内容层，全部来自「换了一台机器」和「派生器图省事」。**
+>
+> **① 坑 427：Remotion `compositor` 二进制在 macOS 14 上启动即挂 —— 不要死磕，立即切 ffmpeg 直合成（新，最重要）**
+> 症状：`remotion render` 无任何输出、0% CPU 永久挂起；单独跑 `compositor-darwin-arm64/remotion --version` 同样挂死。
+> `sample <pid>` 显示全部样本落在**同一个未知地址**、物理内存仅 **96K** —— 二进制在动态链接/初始化阶段就卡住，从未执行到 main。
+> **已排除（别再逐条重试）**：清 `com.apple.quarantine`（无效）、`env -i` 干净环境（无效）、`DYLD_PRINT_LIBRARIES=1`（**0 行输出**，连 dyld 都没开始加载库）、换 node v14/v18/v22/v25（全一样）、重装 compositor@4.0.463（无效）。
+> `otool -l` 显示 `minos 11.0` / `SDK 26.1` —— **SDK 26 构建的二进制在 macOS 14 上初始化失败**。
+> **判定口诀：`sample` 所有样本落在同一未知地址 + 物理内存 < 200K + 无 dyld 输出 = 二进制与本机 OS 不兼容**，不是依赖缺失/权限/配置问题。
+> **正确动作**：改用 **ffmpeg 直合成**（模板见新增 `templates/ffmpeg-fallback-compose.md`）。代价对比：Remotion 在本机**永远跑不完**；ffmpeg 直合成 **8 分钟**出片。
+>
+> **② 坑 428：ffmpeg 兜底的四个必踩点（缺一个就渲不出）**
+> 1. **`libx264` 拒绝奇数高度**：生图端点出 `1672×941`（高为奇数）→ `height not divisible by 2` + `Nothing was written into output file`。必须 `-vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"`。
+> 2. **Homebrew ffmpeg 9.0.2 没有 `ass`/`drawtext` 滤镜**（`ffmpeg -filters | grep ass` 为空）→ 烧字幕这条路断。兜底：**PIL 逐条预渲染字幕 PNG（半透明圆角底）+ `overlay` + `enable=between(...)` 叠加**。
+> 3. **`between()` 的逗号必须转义**：filtergraph 里逗号是选项分隔符，`between(t,0.000,0.740)` 会被拆成 `No such filter: '0.000'`。正解 `between(t\,0.000\,0.740)`。
+> 4. **本机 ffmpeg 9 没有 `-filter_complex_script`**（`Unrecognized option`）→ 必须把整条 filter_complex 作为**单个 argv 元素**用 `subprocess.run([..., '-filter_complex', fc_str, ...])` 直传，**不要**走 shell 拼串（引号会切碎过滤链，出现 `Unrecognized option 'i/tmp/...png'`）。
+>
+> **③ 坑 429：派生器只换日期不换内容 —— 哨兵拦住了，但拦在最后一秒**
+> 1110 的视频链脚本由 1109 派生，`script-2026-11-10.md` / `voiceover-texts.json` / `image-prompts.json` / `wechat-sections.json` **全部还是 1109 的事件**（GitHub Rubicon / Menlo / SAIR / FinalShell / magpie），只有日期变成 11-10。
+> 本期实际浪费：先按旧内容生成了 scene1/scene2 两张图（4 MB，rainflow 额度），发现事件对不上才重写内容层、删图重出。
+> **纪律（比坑 241 更早一步）**：派生完成后、跑任何生成脚本之前，先做「事件词 × 当日报告」交叉核对 —— 口播里的大写英文/中文专名必须能在当日报告里找到，找不到就是内容层没重写。
+> **顺序铁律：`派生 → 内容层重写（script/voiceover/prompts/sections）→ 删哨兵 → 生图/TTS`。** 本期做反了（先删哨兵加生图），代价是 2 张废图 + 一次全链返工。
+>
+> **④ 坑 430：`av` 19.x 与 `faster_whisper` 1.2.1 的 `metadata_errors` 不兼容 —— monkeypatch 即可，别改 site-packages**
+> `faster_whisper/audio.py` 调用 `av.open(..., metadata_errors="ignore")`，而 av 19.0.2 的 `open()` 是 C builtin 不接受该 kwarg → `TypeError`。降级 av 到 13.x 无 arm64 wheel（`No matching distribution found`）。
+> **正解（不碰 site-packages，避免权限闸门）**：写外层 runner，import 后 monkeypatch `av.open` 与 `av.container.core.open`，`kw.pop('metadata_errors', None)`，再 `runpy.run_path('gen_captions.py', run_name='__main__')`。
+>
+> **⑤ 坑 431：新机的 `python3` 不是「能跑流水线」的那个 python3**
+> 本机同时有 **Python 3.15.2（homebrew，PATH 首位）/ 3.14.2（python.org，依赖装在这里）/ 3.9.6（系统）**。`python3` 解析到 3.15 → 所有 `--user` 安装的包（PIL / jieba / faster_whisper / playwright / av）**全部不可见**，报 `ModuleNotFoundError`，而 `pip show jieba` 明明已安装。
+> **纪律**：流水线脚本一律用**绝对路径解释器** `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3`，并在脚本头 `os.environ['PATH'] = '/opt/homebrew/bin:' + PATH`（ffmpeg/ffprobe 走 brew，edge-tts 走 `~/Library/Python/3.14/bin`）。
+> **新机环境自检（开工前一次跑完）**：`$PY -c "import PIL, jieba, faster_whisper, playwright, av"` / `which ffmpeg ffprobe edge-tts` / `ffmpeg -filters | grep -cE "\bass\b|drawtext"`（0 = 无字幕滤镜，走 PIL overlay）/ `ls ~/Library/Caches/ms-playwright*/mcp-chrome-*`。
+>
+> **⑥ 坑 432：mp 脚本的「拒绝覆盖」是对的，但续跑判定要用签名而不是占位符**
+> `mp_<issue>_run.py` 的 body 步原本判 `cur_len > 800 and 'PLACEHOLDER_IMG_' in txt` 才算「已完成跳过」。本期草稿正文已粘好、**图片步已把占位符全换掉** → 再进入时 `PLACEHOLDER_IMG_` 不存在 → 落到 `assert cur_len < 300`，报「本期草稿正文非空(1575)，拒绝覆盖」。
+> 断言方向是对的（防串期），但**续跑判据选错锚点**。正解：**用本期签名判定归属**，长度只作辅助 —— `if cur_len > floor and norm(SIGNATURE) in full and TAIL_SIG in full: skip`。
+> **同族**：任何「已完成则跳过」的判据，锚点都应该是**本期内容签名**（首段标题 + 尾段固定句），而不是「上一步的中间产物还在不在」（占位符 / temp 文件 / 临时标记都会被后续步骤消耗掉）。
+>
+> **⑦ 坑 433：`must_not_have` 命中的词，先问「本期是否合法引用」（坑 326 第三次复发）**
+> `SAIR` 在 1110 的 `must_not_have` 里（1109 主线词），但 1110 场景 5 原句是「**继上期 SAIR 模组接管国行 Apple 智能之后**，这次直接落在系统本体上」——**合法的跨期承接引用**，断言直接炸。
+> 处置：从 `must_not_have` 移除并在注释写明理由。**反向也成立**：`must_have` 里的数字必须用**口播里的中文读法**（`1050 亿` → `一千零五十亿`），否则断言找不到（本期连炸两次：`missing 1050` → `missing 十一月第十天`）。
+>
+> **本期正例**：audit 38/38 一次过（只改三处：封面大字改 Hook 原词、选材表维度收敛到 `{1,3,5}`、场景 prompt 补 `no logo, no facial features, no people`）；锚点占比 0.6918 → 0.7380 一次调准（只缩短 CTA 20.16 s→13.0 s，仅重跑 scene8 TTS）；知乎「上传失败」块确认瞬时态（复核 0 个失败块、8 图全 `≥1440`、`draft_token` 齐全，第 3 次证明坑 424「先复核再重跑」正确）；三平台手动发布一次记全（视频号/抖音/B站 均 `manual_by_user`，全程未打开上传页）。
 
 > **🔴 v3.86.0 核心改进（2026-11-08 1108 日报全链实跑：CDP daemon 没起 ≠ ws 挂起 / 知乎图片失败块假绿 / step 词表不统一静默空转 / 视频号弹窗判据假阳性，坑 423-426）**
 >
@@ -816,9 +863,30 @@ W42 实测可用区间：**S1 Hook 20 字；S2–S8 单段 70–95 字；S9 锚�
 - 确认 `data/monthly/{YYYY-MM}.md` 存在；若不存在，提示用户先运行 linuxdo-daily 月报模式生成。
 - 确认 B站/公众号后台已创建合集「羊报AI月报」（首次运行月报前必须人工创建，否则 Phase 11/12 合集选择失败）。
 
-### Phase 0.5: 派生自检（**新增，v3.80.0；不通过不许进 Phase 1**）
+### Phase 0.5: 派生自检（**v3.80.0 新增；v3.87.0 起有可执行脚本，不通过不许进 Phase 1**）
 
-> 完整可跑清单见 **`templates/derive-checklist.md`**。这里只列「必须记住的四条」。
+> 完整可跑清单见 **`templates/derive-checklist.md`**。
+> **v3.87.0 起有两条命令必须先跑过再往下走**（本期 1110 的教训：靠人工查会漏，且漏在花钱的那一步）：
+
+```bash
+PY=/Library/Frameworks/Python.framework/Versions/3.14/bin/python3
+
+# ① 环境自检（新机 / 换机必跑）：python 依赖 / ffmpeg / 字幕滤镜 / edge-tts / node / playwright-core /
+#    chromium revision 对齐 / 上传 profile / CDP daemon / Remotion compositor 可用性
+bash ~/.claude/skills/ai-news-factory/templates/env-preflight.sh <YYYY-MM-DD>
+
+# ② 内容层交叉核对（派生完成 → 生图 / TTS 之前必跑）：
+#    串期（口播/公众号 sections 还是上期事件）、日期形态漏改（十一月九日 / 11月9日）、锚点资格与逐字嵌入
+$PY ~/.claude/skills/ai-news-factory/templates/check-derived-content.py --date <YYYY-MM-DD>
+```
+
+`check-derived-content.py` 的核心判据（**已用正负样本双向验证**，见 v3.87.0 changelog）：
+- **孤儿英文专名 ≥ 2 个 → 硬失败**（本期负样本：口播里同时残留 GitHub / Rubicon / Menlo / Ventures）
+- **上一期日期的中文形态**（`十一月九日` / `11月9日`）也算残留（只查 `2026-11-09` 会漏）
+- **prompts 层默认豁免**孤儿检查（英文 prompt 与中文报告词表天然不同）；要查用 `--strict-prompts`
+- **锚点**必须 `ready` + `narrator` + `reviewed` + `script_15s` 逐字嵌入
+
+> 这里只列「必须记住的四条」+ 上述两条命令。
 
 **① 派生源只从 `templates/` 拷，不从上一期脚本拷。**
 `cdp_helper.py` / `issue_guard.py` / `gen_captions.py` / `revive_frozen_tabs.py` 属于「随 skill 演进」的部分，上一期脚本是「那天正确的快照」（坑 395）。
@@ -7136,6 +7204,86 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.87.0（2026-11-10 1110 日报全链实跑·跨机迁移首日：Remotion compositor 启动即挂 → ffmpeg 直合成；派生器只换日期不换内容；环境依赖全链重建，坑 427-433）
+
+1110 期在**全新机器**（macOS 14.6 / arm64，整目录迁移）跑通全链：daily 393 帖 → 报告 + press + PDF(708 KB) →
+视频 **107.48 s / 10.2 MB / 1920×1080**（锚点 `model_routing` **0.7380**，audit **38/38 PASS**）→
+公众号 `MP_VERIFY_OK`（appmsgid=**100001991**，标题 43 字 / 作者「今日羊报AI」/ 正文 1452 字 / 占位符 0 / 封面 qpic / 合集「今日羊报 AI」）
++ 知乎 `ZHIHU_DRAFT_OK`（p/2103398886874338620，正文 985 字 / 视频可播 / 8 图全 `≥1440` / AI 声明 / 专栏）；
+视频号 / 抖音 / B站由用户手动发布（坑 215 全程未碰，`manual_by_user`）。
+
+**七条坑（427-433），全部出在「换机」与「派生器」两处，内容层零返工：**
+
+| # | 坑 | 一句话处置 |
+|---|---|---|
+| 427 | Remotion compositor 在 macOS 14 启动即挂（SDK 26 构建） | `sample` 全落同一未知地址 + 内存 96K + 无 dyld 输出 = 二进制不兼容；**立即切 ffmpeg 直合成**，见 `templates/ffmpeg-fallback-compose.md` |
+| 428 | ffmpeg 兜底四陷阱 | 奇数高度要 pad 到偶尺寸；无 `ass`/`drawtext` 走 PIL overlay；`between()` 逗号要转义；无 `-filter_complex_script` 用 `-filter_complex` 传整串 |
+| 429 | 派生器只换日期不换内容 | 生图前先做「事件词 × 当日报告」交叉核对；顺序 = 派生 → 内容重写 → 删哨兵 → 生图/TTS |
+| 430 | av 19 与 faster_whisper 的 `metadata_errors` 不兼容 | 外层 runner monkeypatch `av.open` / `av.container.core.open`，不改 site-packages |
+| 431 | 新机 `python3` 解析到 3.15，`--user` 包全不可见 | 用绝对路径解释器 `.../Versions/3.14/bin/python3`；开工前跑一次环境自检 |
+| 432 | mp 续跑判据锚在占位符上，占位符被图片步消耗后误报「拒绝覆盖」 | 改用**本期签名**（首段标题 + 尾段固定句）判归属 |
+| 433 | `must_not_have` 误伤跨期合法引用（SAIR） | 命中先问「本期是否合法引用」；反向：`must_have` 数字用中文读法 |
+| 434 | 抓取与上传 daemon 争抢同一个 Chrome profile（潜伏两期） | `-L` 判锁（`-e` 跟随符号链接恒假）+ `alive_crawl` 护栏 + `reclaim_profile` + 上传前恢复 daemon；见下 §434 |
+
+**新增模板**：`templates/ffmpeg-fallback-compose.md` —— Remotion 不可用时的完整可跑出片流程（逐场景切片 / concat / PIL 字幕与标题栏 / filter_complex 四铁律 / ffprobe 验收门 / 归档命名）。
+
+#### 坑 434：抓取与上传 daemon 争抢同一个 Chrome profile（新，潜伏于 1109/1110，1111 期布防时查清）
+
+**现象**：1109/1110 期 launch wrapper 从触发到真正开始抓取之间，稳定出现 `--- launch attempt N ---` /
+`resume rc=1` 成对刷屏，每轮间隔 1 分钟（1110 期 attempt 1–11 连续 11 次），之后才莫名转好。
+当时按「CF 拦截 / 网络抖动」解释，实际根因是**浏览器 profile 抢占**。三个独立缺陷叠加才导致「静默空转整夜」：
+
+| # | 缺陷 | 证据 | 修法 |
+|---|---|---|---|
+| ① | `browser_daemon.py` 首选 `~/Library/Caches/ms-playwright/mcp-chrome-*`（注意是 `ms-playwright`，**不带** `-mcp`），本机不存在 → `glob` 回退命中 `ms-playwright-mcp/mcp-chrome-10b76e5` = **抓取用的同一个 profile** | `data/logs/<issue>-daemon.log` 的 `DAEMON_START ... profile=.../ms-playwright-mcp/mcp-chrome-10b76e5` | 抓取前显式停 daemon，抓完再起（`data/_restart_upload_daemon_<issue>.sh`） |
+| ② | 门禁用 `[ ! -e "$PROFILE/SingletonLock" ]` 判占用，但 SingletonLock 是**指向 `<host>-<pid>` 的符号链接，目标文件不存在** → `-e` 跟随链接恒为假 → 门禁**恒判「未上锁」**，照样放行 | 同一时刻同一文件：`[ -e ]` → FALSE；`[ -L ]` → TRUE | 判据改 `[ ! -L ] && [ ! -e ]`，符号链接本身存在即视为上锁 |
+| ③ | 门禁命中后只 `sleep 180; continue` **死等**——占用者是自己家的上传 daemon，永远不会自己让出来 | 1110 期 wrapper 日志里 GATE 行从 23:15 一直刷到 23:59 | 改成 `reclaim_profile`：停自家 daemon + 其 Chrome，**再放行** |
+
+**最关键的一条护栏：reclaim 之前必须先判「自家 crawl 是不是还在跑」。**
+`reclaim_profile` 无脑 `kill` 持有 profile 的 Chrome，如果上一轮 crawl 还没结束、正握着锁，
+就会**把正在抓正文的浏览器砍掉**——比原来的死等更糟。必须先 `alive_crawl`（pidfile + cmdline 双校验）：
+
+```bash
+if ! profile_unlocked; then
+  if alive_crawl; then
+    echo "GATE: 自家 crawl 仍持有 profile — 等它跑完，180s 复查"
+    sleep 180; continue
+  fi
+  reclaim_profile      # 只停 browser_daemon.py 及其 --user-data-dir=$CRAWL_PROFILE 的 Chrome
+fi
+```
+
+**安全边界（不可越线）**：`reclaim_profile` 只按 `--user-data-dir=$CRAWL_PROFILE` 精确匹配主进程
+（`grep -v Helper`），**绝不碰用户日常 Chrome**（不带 `--user-data-dir` 的那个，是唯一有登录态的）。
+实测本机：holders=`31433`（流水线 daemon Chrome），日常 Chrome=`832` 不命中。
+
+**配套告警**：看门狗加 2b-2 分支——`RECLAIM ≥4 次 且 launch attempt ≥4 次` 就 `ALERT`「profile 抢占反复失败」，
+避免 reclaim 救不回来时又退回「整夜空转、无人知晓」。
+
+**Why:** 「浏览器起不来」在日志里长得像「网络问题」；`[ -e ]` 判符号链接是 shell 的经典陷阱
+（`-e` 跟随链接，`-L` 才看链接本身）；而「等待别人释放资源」在占用者是自己人时就是死锁。
+**How to apply:** 派生 `<issue>` 期 launch wrapper 时直接带出 `profile_unlocked`（`-L` 版）+ `profile_holders` +
+`alive_crawl` + `reclaim_profile` 四件套；上传阶段前必须先跑 `data/_restart_upload_daemon_<issue>.sh`
+（幂等：9222 已通则直接返回，crawl 还在跑则 REFUSE）。
+
+**待办（非阻塞）**：
+> **🔴 skill 是双份的：`~/.claude/skills/`（系统生效）与 `<repo>/skills/`（版本管理）必须同步。**
+> 本期 1110 收尾时发现 repo 侧 linuxdo-daily 还停在 16.3.0（Nov 6），而系统侧已是 16.4.0 —— **系统侧改了不同步，git 里就是旧版，换机/协作时会丢**。
+> **收尾清单固定一条**（放在写 DONE marker 之前）：
+> ```bash
+> for f in ai-news-factory/SKILL.md linuxdo-daily/SKILL.md; do
+>   diff -q ~/.claude/skills/$f <repo>/skills/$f || echo "SYNC NEEDED: $f"
+> done
+> diff -rq ~/.claude/skills/ai-news-factory/templates <repo>/skills/ai-news-factory/templates | grep -v __pycache__
+> ```
+> 有差异就 `cp` 系统版 → repo 版（**系统版是权威源**，因为那才是实际被加载执行的）。
+> ⚠️ 注意 `diff` 要避开 `__pycache__`，否则永远报不同。
+
+- [x] `templates/derive-checklist.md` 增加「派生后、生图前」的事件词交叉核对脚本 —— **已落成 `templates/check-derived-content.py`**（正负样本双向验证通过）。
+- [ ] `templates/platform-zhihu.md` 补一条：稿件派生必须带 `![场景N](zhihu-images/sceneN.jpg)` 图片标记，本期漏插导致 `imgs=0`（坑 376 复发）。
+- [ ] `templates/platform-zhihu.md` 的 `AI_DISCLOSURE` 固定句需在派生稿件时**逐字写入**，本期先写成自拟版本、上传时被断言拦下。
+- [x] 环境自检清单固化成 `templates/env-preflight.sh` —— **已落盘并实测**（本机 15 项检查、FAIL=0/WARN=2，含 Remotion compositor 三态判定）。
 
 ### v3.86.0（2026-11-08 1108 日报全链实跑：CDP 故障三形态分层 / 知乎图片失败块假绿 / step 词表不统一静默空转 / 弹窗判据假阳性，坑 423-426）
 
