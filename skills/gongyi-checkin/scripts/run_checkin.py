@@ -38,6 +38,9 @@ BOOKMARKS = os.path.expanduser(
     "~/Library/Application Support/Google/Chrome/Default/Bookmarks"
 )
 DEFAULT_FOLDER_ID = "6233"
+# Chrome regenerates the numeric folder id when the folder is moved/recreated.
+# The NAME is the stable identifier, so keep it and fall back to it.
+FOLDER_NAME = "daily-check-in"
 
 # Stations that are known NOT to be check-in targets even though they live in
 # the same bookmark folder (status pages, dashboards without a check-in).
@@ -76,8 +79,14 @@ def log(msg):
 # Bookmarks
 # ---------------------------------------------------------------------------
 
-def read_bookmarks(folder_id=DEFAULT_FOLDER_ID, path=BOOKMARKS):
-    """Return [{'name','url'}] for the given bookmark folder id."""
+def read_bookmarks(folder_id=DEFAULT_FOLDER_ID, path=BOOKMARKS,
+                   folder_name=FOLDER_NAME):
+    """Return [{'name','url'}] for the given bookmark folder.
+
+    Chrome regenerates a folder's numeric id when the folder is moved/recreated
+    (2026-11-11: `daily-check-in` was 6233, after a move it became 5923).
+    So fall back to matching by NAME when the id no longer resolves.
+    """
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
 
@@ -90,6 +99,15 @@ def read_bookmarks(folder_id=DEFAULT_FOLDER_ID, path=BOOKMARKS):
                 return got
         return None
 
+    def find_by_name(node):
+        if node.get("type") == "folder" and node.get("name") == folder_name:
+            return node
+        for child in node.get("children", []):
+            got = find_by_name(child)
+            if got:
+                return got
+        return None
+
     target = None
     for root in data["roots"].values():
         if isinstance(root, dict):
@@ -97,7 +115,17 @@ def read_bookmarks(folder_id=DEFAULT_FOLDER_ID, path=BOOKMARKS):
             if target:
                 break
     if not target:
-        raise SystemExit("bookmark folder %s not found in %s" % (folder_id, path))
+        for root in data["roots"].values():
+            if isinstance(root, dict):
+                target = find_by_name(root)
+                if target:
+                    log("bookmark folder id %s not found — resolved by name %r "
+                        "-> id %s" % (folder_id, folder_name,
+                                       target.get("id")))
+                    break
+    if not target:
+        raise SystemExit("bookmark folder %s (%s) not found in %s"
+                         % (folder_id, folder_name, path))
 
     out = []
     for child in target.get("children", []):

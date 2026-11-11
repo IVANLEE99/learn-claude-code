@@ -28,6 +28,25 @@
   `累计获得: N 次` 是历史累计，都不是今天的奖励。
 - 2026-11-04 余额标签可能只在 **hover 浮层**里（innerText 会丢），金额却在 header；
   所以余额走 DOM 邻接而不是 innerText 文本。
+- **2026-11-11 00:05 签到失败不是 Chrome 挂了，是 Mac 锁屏**：脚本报
+  `cannot talk to Chrome (tabs=__TIMEOUT__). Is Chrome running?`，但 Chrome 进程在跑、单实例、无绑定冲突。
+  根因是 macOS 锁屏时不向 GUI 应用投递 AppleEvent（TextEdit/Safari/Finder 同样全超时）。
+  判据：`ioreg -n Root -d1 -a | grep -A1 CGSSessionScreenIsLocked` → `true` 即锁屏；
+  解锁后该 key **整个消失**（grep 命中 0），要配合 `IOConsoleLocked` 一起看。
+  `caffeinate -u` 唤醒不了锁屏。处理：**不要 kill/重启 Chrome**，先判锁屏，锁屏就等解锁再跑。
+  详见 SKILL.md 坑 15。
+- **2026-11-11 书签文件夹 id 变了**：`daily-check-in` 的 id 从 `6233` 变成 `5923`
+  （Chrome 在文件夹被移动/重建时重新生成 id；`Bookmarks.bak` 里也没有 6233）。
+  旧脚本只按 id 找 → `SystemExit: bookmark folder 6233 not found`，31 个站一个没跑。
+  修法：`read_bookmarks()` 找不到 id 时**按名字 `daily-check-in` 回退**，日志打印实际 id。
+  详见 SKILL.md 坑 16。
+- **2026-11-11 AppleScript 绑的是 mcp-chrome，不是日常 Chrome**：机器上有两个 Chrome 时，
+  `tell application "Google Chrome"` 绑到 ai-news-factory 的那个
+  （`--user-data-dir=.../mcp-chrome-10b76e5`，CDP 9222），`name of window 1` 返回「公众号」。
+  判据：先 `URL of every tab of every window` 看是不是五个平台页面。
+  `open -a "Google Chrome"` 不改变绑定；必须按 `kill daemon → kill mcp-chrome → 复查` reclaim，
+  **绝不 kill 不带 `--user-data-dir` 的日常 Chrome**（30 站登录态全在它那儿）。
+  签完 `bash data/_restart_upload_daemon_1111.sh` 恢复 pipeline。详见 SKILL.md 坑 17。
 - 2026-11-04 单站打不开重试 3 次即可判「暂时失联」，不要死磕（可能是站点自己挂了或被墙）。
 
 ## 站点笔记
@@ -88,10 +107,10 @@
 - **PM-Plan**（`https://plan.pmcat.top/`）：点 `今日签到` 弹「签到人机验证 — 拖动滑块拼合缺口」。
   前端收集 `track: [{x, y, t}]` 高频轨迹数组送审，模拟拖动会被报 `vr.reason === 'bot_behavior'` 拦截。
   **处置策略**：脚本开标签页置顶并唤起弹窗，**需人工在浏览器中拖动滑块 1 秒完成**。
+  2026-11-09 遇 Cloudflare Tunnel Error 1033 隧道宕机。
 - **简直了**（`https://jianzhile.vip/console/personal`）：点 `Check in now` 弹
   「Security verification / Refresh captcha」5位彩色英数字图形验证码。
-  **处置策略**：提取 `<img src="data:image/png;base64,...">` 进行 OCR 识别，通过 React Synthetic Event
-  （`HTMLInputElement.prototype.value` setter）填入输入框并点击 Confirm，**可全自动通过签到**。
+  **处置策略**：提取 `<img src="data:image/png;base64,...">` 进行 OCR 识别，通过 React 状态绑定或置顶标签页人工输入 5 位验证码完成签到。
 
 ### dicksuck / 多数 new-api 站：重复点会被拒
 - 页面文案 `You can only check in once per day` = **今天已经签过了**，不是失败。

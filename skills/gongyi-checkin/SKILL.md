@@ -66,7 +66,7 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 
 ---
 
-## 🚨 十四个会静默失败的坑
+## 🚨 十七个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
@@ -180,6 +180,55 @@ Consumption 额（都不是钱）。
 - 月城 2026-11-06 显示 `当前余额 -$13.92` → 金额正则必须允许前导负号，否则整段解析成 `None`。
 - 三水 2026-11-06 显示 `付费 $0 免费 $16.12`，签到奖励进的是**免费额度**。
   付费余额为 0 时要回落到 `免费|赠送|赠金|Gift|Free` 标签，否则报告一个没用的 `$0`。
+
+### 坑 15：Mac 锁屏时不投递 AppleEvent，`run_checkin.py` 会误报「Chrome 没开」
+
+2026-11-11 00:05 实测：Mac 屏幕锁着（`CGSSessionScreenIsLocked=true`）时跑签到，脚本直接退出并报
+`cannot talk to Chrome (tabs=__TIMEOUT__). Is Chrome running?` —— **Chrome 进程其实好好地在跑**
+（单实例、pid 正常、没有第二个实例抢绑定），是 macOS 在锁屏时不给 GUI 应用投递 AppleEvent。
+
+- 判据：`ioreg -n Root -d1 -a | grep -A1 CGSSessionScreenIsLocked` → `true` 即锁屏。
+- 锁屏时**所有** GUI 应用的 AppleEvent 都超时（TextEdit / Safari / Finder 同样），
+  只有不触碰窗口的 `tell app "X" to return version` 还能返回 —— 所以「app 在跑」≠「AppleEvent 通」。
+- `caffeinate -u` 只能唤醒显示器，**解不开锁屏**；`stat -f%Su /dev/console` 显示 console user 也不代表未锁。
+- **处理**：不要 kill / 重启 Chrome（那是日常唯一有登录态的实例）。改为先判锁屏，
+  锁屏就挂一个「解锁后再跑」的轮询任务，等解锁后重跑。
+- 定时任务放 08:05 的另一个好处：人通常在白天，屏幕多半是解锁的，撞上锁屏的概率远低于 00:05。
+- **解锁判据要两个都查**：`CGSSessionScreenIsLocked`（存在且为 true）与 `IOConsoleLocked`。
+  解锁后 `CGSSessionScreenIsLocked` 这个 key 会**整个消失**（不只是变成 false），
+  `grep` 命中数为 0 —— 只 grep `-A1` 一行容易误判。
+
+### 坑 16：书签文件夹的数字 id 会变，名字才稳
+
+2026-11-11 实测：Chrome 里 `daily-check-in` 文件夹的 id 从 `6233` 变成了 `5923`
+（文件夹被移动/重建时 Chrome 会重新生成 id；`Bookmarks.bak` 里也没有 `6233`）。
+旧脚本只按 id 找，直接 `SystemExit: bookmark folder 6233 not found`，31 个站一个都跑不了。
+
+- 修法：`read_bookmarks()` 先按 id 找，**找不到就按文件夹名字 `daily-check-in` 回退**，
+  并在日志里打印实际解析到的 id。
+- 跑之前先自查：
+  ```bash
+  python3 -c "import sys;sys.path.insert(0,'~/.claude/skills/gongyi-checkin/scripts');import run_checkin as r;print(len(r.read_bookmarks()))"
+  ```
+  打印 31 就是好的；报 not found 就是 id 又变了。
+- **别把 `DEFAULT_FOLDER_ID` 写死当唯一事实源** —— 名字是稳定标识，id 只是缓存。
+
+### 坑 17：AppleScript 绑的是「最后注册/最后激活」的那个 Chrome，不是「你的」那个
+
+2026-11-11 实测：机器上同时有日常 Chrome（pid 832，默认 profile，30 站登录态全在这）
+和 ai-news-factory 的 mcp-chrome（pid 82854，`--user-data-dir=.../mcp-chrome-10b76e5`）。
+`tell application "Google Chrome"` 绑的是 **mcp-chrome**，不是日常 Chrome ——
+表现是 `name of window 1` 返回「公众号」而不是用户自己的标签页。
+
+- 判据：跑签到前先 `osascript -e 'tell application "Google Chrome" to return URL of every tab of every window'`，
+  看返回的是不是五个平台的页面（weixin/zhihu/bilibili/douyin）—— 是就说明绑错了。
+- `open -a "Google Chrome"` **不解决问题**：它只是激活某个实例，绑定不变。
+- 正确 reclaim 顺序（repo 里 `data/_launch_1111.sh` 的 `reclaim_profile` 同款）：
+  1. `kill <browser_daemon.py pid>`（先停 daemon，否则 Chrome 会被它守着）
+  2. `kill <mcp-chrome Chrome pid>`；残留就 `kill -9`
+  3. `sleep 3` 后复查绑定：`name of window 1` 应该是用户自己的标签页
+  4. **绝不 kill 日常 Chrome**（不带 `--user-data-dir` 的那个）
+- 签完要恢复 pipeline：`bash data/_restart_upload_daemon_1111.sh`（幂等，9222 已通会直接返回）。
 
 ---
 
