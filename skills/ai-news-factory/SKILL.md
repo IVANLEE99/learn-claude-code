@@ -1,14 +1,35 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.87.0
+version: 3.90.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.87.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.90.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
-> **🔴 v3.87.0 核心改进（2026-11-10 1110 日报全链实跑·跨机迁移首日：Remotion compositor 在新机启动即挂 / 派生器只换日期不换内容 / 环境依赖全链重建，坑 427-434）**
+> **🔴 v3.90.0 核心改进（2026-11-11 1111 期上传链实跑：抖音暂存离开点不到 / 视频号 save 假成功 / 表单判据硬编码 / 事件词表第三次串期 / 交叉检查器自身两面性，坑 438-442）**
+>
+> 五平台上传全跑通：公众号 `MP_VERIFY_OK`（100002003）/ 知乎 `ZHIHU_DRAFT_OK`（p/2103788986774860805）/ B站 `BILI_DRAFT_OK` / 视频号 `CH_VERIFY_OK`（草稿箱 8→9）/ 抖音由用户手动上传。
+> **五条坑全在「判据」层，没有一条在内容层**——再次印证坑 241 的模式。
+>
+> ① **坑 438：抖音「暂存离开」有二次确认弹窗，按钮 y=1553 却在 770 高的视口外** → `elementFromPoint` 命中自证恒失败；页面底部还有一对同名按钮会被误点。**先 `Emulation.setDeviceMetricsOverride` 放大视口再点**，且**验收只认草稿箱出现当日标题**（横幅出现过又消失 ≠ 落库）。
+> ② **坑 439：视频号 `save: clicked` ≠ 草稿存在**。重载 `post/create` 发现标题/描述/合集/视频全丢。**不要只重跑 save，直接整链重跑 `all`**（upload→meta→ai→cover→album→save→verify），重跑后草稿箱 8→9。
+> ③ **坑 440：视频号表单就绪硬编码 `dur > 200`**（上期 210s 成片），本期 143.5s → 空转 3.5 分钟后必失败。**时长一律 ffprobe 实测比对**。
+> ④ **坑 441：派生器只换日期不换内容，第三次复发**——B站/抖音/视频号三个脚本的 issue-word 表仍写着 `GitHub`/`7200`/`Menlo`，上传第一步就被自己的断言拦住。**事件词表必须集中生成 + 派生后交叉核对**。
+> ⑤ **坑 442：交叉检查器自身两面性**。`assertion_crosscheck.py` ① 会扫到 `scripts.bak-*/` 备份目录 → **每期必报 20 条假 FAIL**；② C 段只查 `--prev-words`，调用方漏传就全绿放行（本期 `GitHub`/`7200`/`Menlo` 就是这样溜过去的）。**新增 C2 段**：不问「词来自哪期」，直接对账「正向断言要求的词在本期内容里是否存在」，并抓出了人工 review 漏掉的 `channels_upload_<issue>_rawcdp.py` 分支。改检查器必须做**双向控制**（正确→exit 0，注入上期词→exit 1）。
+>
+> **🔴 v3.88.0 核心改进（2026-11-11 1111 日报实跑：profile 抢占根因查清 / typst 与 edge-tts CLI 缺席 / 短会话登录态三角判定，坑 434-437）**
+>
+> 1111 期 daily **392 帖**（26 批 / err=0 / **attempt 1 一次过**）→ 视频 **143.5 s / 13.0 MB / 1920×1080**（锚点 `pelican_test`，audit **40/40 PASS**）→ 封面 2 张。
+> **上传未完成：cdp 9222 是全新 profile，五平台全部未登录**——需要用户扫码，流水线不得代做。
+>
+> ① **坑 434：抓取与上传 daemon 抢同一个 Chrome profile**（潜伏两期）。`browser_daemon.py` 首选路径不存在 → glob 回退到抓取用的 `ms-playwright-mcp/mcp-chrome-10b76e5`；门禁用 `-e` 判 `SingletonLock`（符号链接指向不存在的目标 → **恒判未上锁**）；命中后又只 `sleep 180` 死等自家 daemon 释放。三件叠加 = 整夜空转。修法：`-L` 判锁 + `alive_crawl` 护栏 + `reclaim_profile`。**本期 attempt 1 直接开抓。**
+> ② **坑 435：`typst` 二进制缺席** → PDF 改走 Playwright chromium 打印（`_md2html_<issue>.py`），注意 `launch()` 要显式传 `executable_path`、`connect_over_cdp()` 不接受该参数。
+> ③ **坑 436：`edge-tts` 只有模块没有 CLI** → 一律 `python -m edge_tts`。
+> ④ **坑 437：「URL 没跳登录页」≠「已登录」** → 公众号/B站/抖音 都在原 URL 上挂着扫码登录页。判定必须 **URL + title + body 文本**三角合一；登录只能用户本人扫码。
+>
+> **🔴 v3.87.0 核心改进（2026-11-10 1110 日报全链实跑·跨机迁移首日：Remotion compositor 在新机启动即挂 / 派生器只换日期不换内容 / 环境依赖全链重建，坑 427-433）**
 >
 > 1110 期在**全新机器**（macOS 14.6 / arm64，整目录从旧机迁移）跑通全链：daily 393 帖 → 报告 + press + PDF(708 KB) →
 > 视频 **107.48 s / 10.2 MB / 1920×1080**（锚点 `model_routing` **0.7380**，audit **38/38 PASS**）→
@@ -7204,6 +7225,213 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.88.0（2026-11-11 1111 日报实跑：profile 抢占根因查清 / typst 与 edge-tts CLI 双双缺席 / 短会话不放大字幕，坑 434-442）
+
+1111 期在**已有环境**上跑通：daily **392 帖**（26 批 / **err=0** / attempt 1 一次过）→ 报告 + press + PDF(1.09 MB / 7 页) →
+视频 **143.5 s / 13.0 MB / 1920×1080**（锚点 `pelican_test`，audit **40/40 PASS**）→ 封面 2 张（带双十一角标）。
+**上传五平台全部落地**：公众号 `MP_VERIFY_OK`（100002003）/ 知乎 `ZHIHU_DRAFT_OK`（p/2103788986774860805）/
+B站 `BILI_DRAFT_OK`（分区人工智能 · 6 标签 · 合集）/ 视频号 `CH_VERIFY_OK`（草稿箱 8→9）/ 抖音由用户手动上传。
+登录态卡了 2 小时后才由用户扫码解开（坑 437），解锁后上传链又连踩 438-441——**这四条全在判据层**。
+
+#### 坑 434：抓取与上传 daemon 争抢同一个 Chrome profile（潜伏 1109/1110，本期查清并修掉）
+
+1109/1110 的 `launch attempt 1–11 / resume rc=1` 每分钟空转，一直被解释成「CF 拦截 / 网络抖动」，实际是 profile 抢占，**三个缺陷叠加**：
+
+| # | 缺陷 | 判据 | 修法 |
+|---|---|---|---|
+| ① | `browser_daemon.py` 首选 `~/Library/Caches/ms-playwright/mcp-chrome-*`（**不带 `-mcp`**），本机不存在 → `glob` 回退命中 `ms-playwright-mcp/mcp-chrome-10b76e5` = **抓取同一个 profile** | `DAEMON_START ... profile=.../ms-playwright-mcp/...` | 抓取前停 daemon，抓完用 `_restart_upload_daemon_<issue>.sh` 恢复 |
+| ② | 门禁用 `[ ! -e "$PROFILE/SingletonLock" ]`，但 SingletonLock 是**指向 `<host>-<pid>` 的符号链接、目标不存在** → `-e` 跟随链接恒假 → 门禁**恒判「未上锁」** | 同一文件：`[ -e ]`→FALSE，`[ -L ]`→TRUE | 判据改 `[ ! -L ] && [ ! -e ]` |
+| ③ | 命中后只 `sleep 180` **死等**，而占用者是自家 daemon，永远等不到释放 | GATE 行从 23:15 刷到 23:59 | `reclaim_profile`：停自家 daemon + 其 Chrome 后放行 |
+
+**最关键护栏：reclaim 之前必须先判「自家 crawl 还在不在跑」。** 上一轮 crawl 没结束时持有锁的正是它自己，无条件 kill 会把**正在抓正文的浏览器**砍掉，比死等更糟：
+
+```bash
+if ! profile_unlocked; then
+  if alive_crawl; then
+    echo "GATE: 自家 crawl 仍持有 profile — 等它跑完，180s 复查"; sleep 180; continue
+  fi
+  reclaim_profile      # 只按 --user-data-dir=$CRAWL_PROFILE 匹配主进程，grep -v Helper
+fi
+```
+
+**安全边界**：只匹配 `--user-data-dir=$CRAWL_PROFILE` 的主进程，**绝不碰日常 Chrome**（不带 `--user-data-dir` 的那个，唯一有登录态）。实测 holders=`31433`（daemon Chrome），日常=`832` 不命中。
+**效果对照**：1110 期 attempt 24 才成功；1111 期 **attempt 1 直接开抓**，26 批 13 分钟跑完、err=0。
+
+#### 坑 435：`typst` 二进制缺席，PDF 全链断在最后一步
+
+`_md2typ_<issue>.py` 直接 `subprocess.run(['typst', ...])` → `FileNotFoundError: 'typst'`。
+`command -v typst` 无、Spotlight（`mdfind -name typst`）也搜不到 —— **1109/1110 能出 PDF 说明当时装过、后来没了**，属于「环境静默退化」。
+`pip install typst` 属外部软件包，需用户授权，**流水线不自作主张**。
+
+**兜底（已落地 `data/_md2html_<issue>.py`）**：自写 Markdown 子集渲染（标题/粗体/引用/列表/表格/行内代码）+ Playwright chromium `page.pdf()`。
+两个必踩点：① `p.chromium.launch()` 默认 revision 与本机不符会提示 `playwright install` → 必须按磁盘实际存在的 `chromium-*` 显式传 `executable_path`；② `connect_over_cdp()` **不接受** `executable_path`（只有 `launch()` 接受）。
+主脚本已改成有 typst 用 typst、没有就走兜底，并把 `engine=` 打进日志，避免下次又误以为是 typst 出的。
+
+#### 坑 436：`edge-tts` 只有模块没有 CLI，`subprocess` 调 `'edge-tts'` 直接 FileNotFoundError
+
+`import edge_tts` 正常（7.3.1），但 `~/.local/bin` 之类路径上没有可执行脚本 → `gen_tts_edge_<issue>.py` 第一行探版本就崩。
+**修法**：统一 `subprocess.run([sys.executable, '-m', 'edge_tts', ...])`，版本号从 `stdout or stderr` 取最后一行（`-m` 形式会把版本打到 stderr）。
+同类风险：任何「模块装了但 CLI 没装」的依赖，都不要在脚本里裸调命令名。
+
+#### 坑 437：全新 profile 下「URL 没跳登录页」≠「已登录」——五平台上传全部阻塞
+
+cdp 9222 起来后探测五个平台，结果是**全部未登录**，但表现分成两类，只看 URL 会漏掉一半：
+
+| 平台 | 最终 URL | 页面正文 | 真实状态 |
+|---|---|---|---|
+| 知乎 | `/signin?next=...` | 验证码/密码登录 | 需登录（URL 可见） |
+| 视频号 | `/login.html` | 登录视频号助手 | 需登录（URL 可见） |
+| 公众号 | `mp.weixin.qq.com/` | 「使用账号登录 / 扫码登录」 | **需登录（URL 不可见）** |
+| B站 | `/platform/home` | 标题却是「账号登录」，正文全是扫码 | **需登录（URL 不可见）** |
+| 抖音 | `/creator-micro/home` | 「扫码登录 / 验证码登录」 | **需登录（URL 不可见）** |
+
+**判定必须三角合一：最终 URL + `document.title` + `body.innerText` 前 200 字**。只判 URL 会把公众号/B站/抖音误判成「已登录」，然后在上传脚本里走到一半才炸。
+**处置**：登录是扫码动作，**只能由用户本人完成**，流水线不得代做、不得绕过。正确动作是——把所有不依赖登录的产物（视频/封面/双稿/配图/publish.json/预检）全部备齐并跑通预检，然后一次性告知用户「只剩扫码」。
+**改进**：`preflight_<issue>.py` 一次性检查 22 项（daily/报告三件套/视频规格/封面两图/场景图/口播/字幕/双稿的双十一与促销词/publish/审核门禁/上传素材），登录态单独探测，两者分离——这样登录一到位就能立刻上传，不用再回头查产物。
+
+#### 坑 438：抖音「暂存离开」有二次确认弹窗，且按钮在视口外 —— 点击自证必失败
+
+抖音桌面端**没有独立的「存草稿」按钮**，草稿全指望「暂存离开」。但点它会弹一个确认层：
+
+```
+发布暂存离开
+点击发布后，如作品还在上传中，请勿关闭页面，等待上传发布完成。
+[发布]  [暂存离开]
+```
+
+两个致命细节：
+
+| 现象 | 实测 | 后果 |
+|---|---|---|
+| 弹窗内两个按钮的 `getBoundingClientRect().y ≈ 1553`，而 `window.innerHeight = 770` | 坐标远在视口外 | `elementFromPoint(cx, cy)` 恒返回 null → **命中自证 `hitOk: false`**，按坑 317 的规矩「自证失败就不许点」，于是永远点不到 |
+| 页面底部**也有**一对同名按钮（同一组 `button-dhlUZE ... fixed-J9O8Y`） | 扫全页 `button` 会先命中它们 | 点的是底部那对，弹窗没关，无任何报错，静默空转 |
+
+**修法**：先放大视口再点。
+
+```python
+cdp = ctx.new_cdp_session(page)
+cdp.send('Emulation.setDeviceMetricsOverride',
+         {'width': 1600, 'height': 2200, 'deviceScaleFactor': 1, 'mobile': False})
+# 之后 y=1553 落进视口，elementFromPoint 自证通过，点击生效
+```
+
+**判据**：点完后应出现「你还有上次未发布的视频」横幅，且 URL 回到 `content/upload`。
+**⚠️ 但这仍不等于草稿落库**——本轮实测：横幅出现过、随后又消失，草稿箱始终只有 7 条历史（无当日）。
+即「暂存离开」可能只写本地 resume 标记。**验收必须以草稿箱 `content/manage?tab=draft` 里出现当日标题为唯一标准。**
+
+**How to apply:** 派生 `douyin_e2e_<issue>.py` 时，把「暂存离开」点击封装成 `zoom_viewport → 弹窗内定位 → elementFromPoint 自证 → 点击 → 等横幅`，并在结尾**独立开一个新标签读草稿箱**（证据不能与判据同源）。
+
+#### 坑 439：视频号 `save` 成功 ≠ 草稿存在 —— 重载后内容全丢，必须整链重跑
+
+本轮 `channels_upload_<issue>.py save` 打印 `save: clicked`、按钮 `disabled=false`、无报错；
+`verify` 读草稿箱：**8 条，无当日**。重新打开 `post/create` 一看——**标题、描述、合集、视频全没了**（`textLen` 只剩 235）。
+
+即：点击动作发生 ≠ 服务端落库。这是坑 289「空壳」的同类，但更隐蔽：**它不报错、不置灰、还给你一个正常的编辑页**。
+
+**正确动作**：一旦 verify 发现草稿箱无当日，**不要只重跑 save**，直接整链重跑：
+
+```bash
+python3 channels_upload_<issue>.py all      # upload→meta→ai→cover→album→save→verify
+```
+
+本轮整链重跑后：草稿箱 8→**9 条**，出现 `2026年11月11日 11:42`，`CH_VERIFY hasTitle: true`。
+
+**How to apply:** `verify` 的判据必须是草稿箱列表里的**日期 + 标题**，不能是 save 的返回值；save 返回只当过程日志。
+
+#### 坑 440：视频号「表单就绪」硬编码 `dur > 200` —— 成片 143.5 s 时永远等不到
+
+`channels_upload_<issue>.py` 的上传轮询：
+
+```python
+if st['videos'] >= 1 and st['dur'] > 200 and not st['uploading']:
+    ready = True; break
+```
+
+`200` 是**上期 210 s 成片**的硬编码。本期成片 143.5 s → 条件恒假 → 70 轮 × 3 s = **3.5 分钟空转**后才 `assert ready` 失败。
+
+**修法**：时长从文件实测，再比对：
+
+```python
+EXP_DUR = float(subprocess.run(
+    ['ffprobe','-v','error','-show_entries','format=duration','-of','csv=p=0', VIDEO_SRC],
+    capture_output=True, text=True, check=True).stdout.strip())
+...
+if st['videos'] >= 1 and abs(st['dur'] - EXP_DUR) <= 5 and not st['uploading']:
+    ready = True; break
+```
+
+**How to apply:** 所有「等上传完成」的轮询，阈值**一律从产物实测**，禁止写字面量。同理适用于音频时长、文件大小、页数。
+
+#### 坑 441：派生器只换日期不换内容 —— 本轮 4 个平台脚本全部中招
+
+`bili_upload_<issue>.py` / `douyin_e2e_<issue>.py` / `channels_upload_<issue>.py` 的 issue-word 断言表里，**仍然全是上期事件词**：
+
+```python
+for w in ['GitHub', '7200', '智能体', 'Menlo', 'Agent']:
+    assert w in DESC, f'missing issue word: {w}'   # GitHub/7200/Menlo 都是 1110 的话题
+```
+
+本期内容是 Fable 5.2 / Gemini 4 / Muse Ember，于是**三个平台在上传第一步就被自己的断言拦住**（`AssertionError: missing issue word: GitHub`）。这已经是坑 429 第三次复发。
+
+**为什么难发现**：语法检查过、哨兵删净、`py_compile` 全绿——**断言是「内容层」的，只有真跑到那一步才炸**，而它排在上传链最前面，等于整条上传链被一行过时断言堵死。
+
+**修法（两次）**：
+1. **把「事件词表」抽成派生器的显式产物**，不要让每个平台脚本各写一份。派生时从当日报告的高频专名生成 `issue_words.json`，平台脚本统一读它。
+2. 派生完成后跑一次静态扫描，把「断言表里的词 × 当日报告」做交叉核对：**报告里没有的词，一律视为上期残留**。
+
+```bash
+# 机械防线：找出现场还带着上期词的脚本
+grep -rn "GitHub\|7200\|Menlo\|Agent Harness" news-pipeline/<DATE>/scripts/*.py \
+  | grep -v "STALE\|stale\|forbidden\|prior"
+```
+
+**How to apply:** 派生器「只换日期」这个问题已经复发三次，**必须从流程上消灭**：事件词表集中生成 + 派生后强制交叉核对，而不是每期靠人肉重写三份。
+
+#### 坑 442：交叉检查器自己会假 FAIL（扫到备份目录）与假 PASS（上期词表靠人肉传参）
+
+本期把 `templates/assertion_crosscheck.py` 拿来验 1111 产物，连续暴露它自身两个缺陷：
+
+**① 假 FAIL：`glob(f'{D}/**/*', recursive=True)` 把派生器的 `scripts.bak-<ts>/` 备份目录也扫了。**
+备份里本来就带着派生时刻的哨兵，于是 E 段「无残留哨兵」**每期必然报 20 条**，全是备份目录的 `.py` / `.pyc`。
+→ 改为只扫「会真正被上传/渲染消费」的位置（`D` 顶层 + `scripts/` + `prompts/` + `captions/`），并跳过 `scripts.bak-*` / `__pycache__`。
+
+**② 假 PASS：C 段只查 `--prev-words` 里给的词。**
+本期 B站/抖音/视频号的 issue-word 表都还写着 `GitHub`/`7200`/`Menlo`，但调用方只手工传了报告里的显性词（`H200`/`Seedream`…），**三个都没有被传** → C 段全绿放行，上传第一步才被自己的 assert 拦住。
+
+试过「从上一期产物自动推导 prev_words」——**不可行**：任何自动推导都会把 `title` / `scenes` / `.mp4` / `今日羊报` 这类通用字面量当事件词（实测 144 个里一半是噪声），反而制造 351 处假 FAIL。
+
+**正解：加 C2 段，换个问法。**
+坑 441 的本质不是「词来自上期」，而是「**断言要求某词必须在场，但本期内容里没有**」。这不需要知道上期是什么词，直接对账即可：
+
+```
+对每个脚本的每个 list 块：
+  跳过负向断言（禁用词表 / 残留检测）
+  只认紧随其后形如 `assert x in <blob>` 且不含 not/any/hits 的真正向断言
+  提取块内全部字面量（剔掉字段名 name / platform.* / *.title）
+  若「块内 ≥3 项」且「≥60% 不在本期成品文案里」→ 整表是上期的，报 FAIL
+```
+
+**实测效果**：C2 抓出了主脚本已修、但 `channels_upload_<issue>_rawcdp.py` **漏改的那份拷贝**——这是人工 review 完全漏掉的分支。
+
+**双向控制（改检查器必须做）**：
+- ① 正确产物 → `exit 0` 且全 PASS；
+- ② 把 rawcdp 的词表注入回 `['GitHub','7200','智能体','Menlo','Agent']` → `exit 1`，且报错精准指到 `channels_upload_1111_rawcdp.py:37` 与那四个词。
+
+**How to apply:** 派生完立刻跑
+```bash
+python3 ~/.claude/skills/ai-news-factory/templates/assertion_crosscheck.py \
+    --date <DATE> --issue-words <本期主线词...>
+```
+不给 `--prev-words` 也安全（B/C 自动跳过，C2 仍然完整生效）。**这是渲染/上传前最后一道闸**。
+
+#### 本期其他沉淀
+
+- **派生器「只换日期不换内容」再次命中（坑 429 复发）**：连 `wechat-sections` 的 `must_have` 都还是上期事件词（H200/Seedream/gestaltx）。修法是逐表重写 + 用 `must_have × 当日报告` 交叉核对，**不能只删哨兵**。
+- **`gen_publish` 的 `anchor.concept_id` 会被 `fields suspiciously identical` 断言抓住**——这正是它该做的事，改锚点时必须同步改这一行，否则会带着上期锚点发布。
+- **`between()` 逗号转义 / 奇数高度 / 无 `-filter_complex_script` / 不走 shell 拼串** 四铁律再次全中，`compose_video_<issue>.py` 按模板一次过。
+- **标题栏必须实测收缩**：`pub_title[:36]` 这种硬截断会静默吃掉右半截，改成「按可用宽度循环缩字号 + 必要时省略号」，并在抽帧目检里确认。
+- **带点的标签会被平台拆断**：`#Fable5.2` 在抖音话题解析器里变成 `#Fable5 2`（点被当分隔符）。跨平台 tags 一律用 `#Fable52` 这种无点写法。
 
 ### v3.87.0（2026-11-10 1110 日报全链实跑·跨机迁移首日：Remotion compositor 启动即挂 → ffmpeg 直合成；派生器只换日期不换内容；环境依赖全链重建，坑 427-433）
 

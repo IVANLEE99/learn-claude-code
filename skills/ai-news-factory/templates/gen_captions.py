@@ -20,7 +20,7 @@ import sys
 from difflib import SequenceMatcher
 from pathlib import Path
 
-ROOT = Path('/Users/youngsdream/Documents/learn-claude-code')
+ROOT = Path('/Users/yihuan/Documents/youngs/learn-claude-code')
 
 PUNCT = set('。！？；，、：')
 SENT_END = set('。！？；')
