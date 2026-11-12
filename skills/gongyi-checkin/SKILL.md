@@ -6,7 +6,7 @@ version: 1.0.0
 
 # gongyi-checkin — 公益站每日签到
 
-对 Chrome 书签文件夹 `daily-check-in`（id `6233`）里的公益站逐个完成每日签到，
+对 Chrome 书签文件夹 `daily-check-in`（当前 id `5923`，以文件夹名兜底）里的公益站逐个完成每日签到，
 产出归档报告（签到成功 / 暂时失联 / 需登录），并记录**签到金额**与**余额**。
 
 ---
@@ -64,9 +64,17 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 `tell application "/Applications/Google Chrome.app"`。
 `System Events` 查 bundle id 反而能列出真实 pid —— 可用它做诊断，但不能用来发 JS。
 
+### 🔮 演进方向：本地 CF 验证转发 + `curl_cffi` 协议直连（待实现）
+
+当前版本受制于 AppleScript 链路（macOS 锁屏阻断 AppleEvent、多 Chrome 实例抢绑定、Turnstile 需切前台激活）。后续规划替代方案如下：
+
+1. **本地 CF 验证转发**：由本地 Chrome（或轻量扩展/代理）完成 Cloudflare 人机验证后，提取并转发有效 `cf_clearance` 与站点会话 Cookie。
+2. **`curl_cffi` 指纹模拟直连**：使用 `curl_cffi` 并指定 `impersonate="chrome{ver}"`（对齐本机 Chrome 主版本），复刻真实浏览器的 **TLS 指纹（JA3/JA4）与 HTTP/2 指纹**。
+3. **请求头严格对齐**：随请求同步透传匹配的 `User-Agent`、`Sec-Ch-Ua`、`Sec-Ch-Ua-Mobile`、`Sec-Ch-Ua-Platform` 及业务头（`Origin`、`Referer`、`New-Api-User` 等），避免 `cf_clearance` 因指纹或头信息不一致被 CF 拦截（403）。
+
 ---
 
-## 🚨 十七个会静默失败的坑
+## 🚨 二十五个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
@@ -139,8 +147,10 @@ Consumption 额（都不是钱）。
 
 公益站的人机验证分为两类，不能一刀切：
 1. **图形验证码（如 简直了）**：弹窗中包含静态 Base64 图片（`<img src="data:image/png;base64,...">`）。
-   此类可通过 OCR 识别字符（如 `3WFYB`），并通过 React 原生 Setter（`HTMLInputElement.prototype.value`）
-   派发 input/change 事件填入并提交，可做到**全自动过验证**。
+   此类可通过 OCR 识别 5 位字符，再用 **React 原生 Setter** 填入并提交，可做到**全自动过验证**。
+   **注意**：直接执行 `input.value = code` 会被 React 受控组件忽略；必须通过
+   `Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, code)`
+   赋值，并依次派发 `input`（`{bubbles: true}`）和 `change` 事件后再点击 Confirm（`chrome_driver.py` 已封装 `solve_react_captcha()`）。
 2. **行为轨迹滑块验证码（如 PM-Plan）**：前端不仅收集最终拼合坐标 `finalX`，还会采集高频鼠标移动轨迹
    数组 `track: [{x, y, t}]` 提交服务端模型校验。任何脚本模拟事件会被判 `vr.reason === 'bot_behavior'`
    （提示“这次操作轨迹未通过风控，请再自然一点重试”），可能招致封号。
@@ -177,8 +187,8 @@ Consumption 额（都不是钱）。
 
 ### 坑 14：余额可以是负数；也可能是「免费额度」而不是付费余额
 
-- 月城 2026-11-06 显示 `当前余额 -$13.92` → 金额正则必须允许前导负号，否则整段解析成 `None`。
-- 三水 2026-11-06 显示 `付费 $0 免费 $16.12`，签到奖励进的是**免费额度**。
+- 月城 2026-11-06 显示 `当前余额 -$X` → 金额正则必须允许前导负号，否则整段解析成 `None`。
+- 三水 2026-11-06 显示 `付费 $0 免费 $X`，签到奖励进的是**免费额度**。
   付费余额为 0 时要回落到 `免费|赠送|赠金|Gift|Free` 标签，否则报告一个没用的 `$0`。
 
 ### 坑 15：Mac 锁屏时不投递 AppleEvent，`run_checkin.py` 会误报「Chrome 没开」
@@ -229,6 +239,74 @@ Consumption 额（都不是钱）。
   3. `sleep 3` 后复查绑定：`name of window 1` 应该是用户自己的标签页
   4. **绝不 kill 日常 Chrome**（不带 `--user-data-dir` 的那个）
 - 签完要恢复 pipeline：`bash data/_restart_upload_daemon_1111.sh`（幂等，9222 已通会直接返回）。
+
+### 坑 18：Cloudflare 5 秒盾与 Turnstile 验证弹窗必须「切前台激活 + 显式轮询等待」
+
+2026-11-12 实测：多个 new-api 站（AzureKilnAPI、三水公益站等）在打开站点、LinuxDO OAuth 授权页跳转，
+或点击 `Check in now` 后，会触发 Cloudflare 5 秒盾或弹出
+`Security Check: Please complete the security check to continue` 弹窗（内嵌 `challenges.cloudflare.com/turnstile` iframe）。
+
+- **修法**：
+  1. `is_cf_challenge()` 同时判定整页挑战与页内 Turnstile 弹窗（`hasCfModal || isCfPage`），避免因页面已加载站内文案而漏检弹窗；
+  2. `open_station()` 与 `handle_linuxdo_oauth_authorize()` 接入 `wait_cf_pass()`，检测到 CF 盾时显式轮询等待通过；
+  3. 点击签到后的验证循环每轮调用 `activate_tab(tab)` **将标签置为前台激活态**（后台标签中 Turnstile 常会卡死不自动校验），
+     并尝试触发 Turnstile checkbox，等待 10~30 秒直到带 token 的 `/api/user/checkin?turnstile=...` 请求发出且状态翻转；且若检测到 CF/验证码仍在进行中，不得盲目重试点击以免重置 Turnstile。
+
+### 坑 19：日历底部静态规则 `You can only check in once per day` ≠ Toast 成功提示
+
+new-api 系日历组件底部常驻静态规则说明 `You can only check in once per day`（**未签到时也在 DOM 里**）。
+若将其放进全局文本的 `DONE_PATTERNS` 或 `_hard_done`，会直接击穿「有可点动作按钮优先判 `pending`」的护栏，导致真实待签到站点被误判为 `done` 而漏签。
+
+- **修法**（2026-11-12 已在 `chrome_driver.py` 修正）：
+  1. 从全局正文匹配 `DONE_PATTERNS` 和 `_hard_done` 中移除 `You can only check in once per day` 与 `Do not repeat check-in`；
+  2. `probe()` 单独采集 Toast 容器（`.ant-message-notice`、`.semi-toast`、`.Toastify__toast`、`[data-sonner-toast]`、`.el-message`、`.v-toast` 等）写入 `toasts` 字段，**只有命中最外层 Toast 容器** 里的提示（含 `You can only check in once per day` / `Check-in successful` / `签到成功`）才认作服务端明确回复；
+  3. 正文仅认硬完成语（`今日已签到`/`今日已领取`/`今日已打卡`/`明天 00:00`/`明日再来`/`已领取，明天再来`）或按钮翻转为 disabled / `Checked in`。
+
+### 坑 20：AppleScript 动态 Tab 索引安全保护与越界防御（`-1719` 无效索引）
+
+多标签场景或 OAuth 登录弹窗导致窗口标签数动态增减时，脚本里写死 `tab %d` 会抛出 `(-1719 无效的索引)` 中断流程。此外，若盲目将超出标签数的索引下夹（clamp）到 `totalTabs`，可能在临时标签提前关闭时误向用户的日常工作标签注入脚本！
+
+- **修法**（2026-11-12 已在 `chrome_driver.py` 与 `run_checkin.py` 统一加固）：
+  1. 所有操作 tab 的 AppleScript 封装（`js`、`navigate`、`current_url`、`activate_tab`）严格执行边界校验：
+     `if tIdx < 1 or tIdx > totalTabs then error "Tab index out of bounds: " & tIdx & " (total: " & totalTabs & ")"`，拒绝误伤用户标签；
+  2. 关闭临时标签 `release_scratch_tab()` 严格限定 `tIdx > 1 and tIdx <= totalTabs`，**绝对不关闭 tab 1**；
+  3. `claim_scratch_tab()` 在超时未检测到新标签生成时抛出明确异常，绝不 fallback 到 tab 1。
+
+### 坑 21：单站必须「循环验证确认成功」才切下一站，不能等固定秒数就走
+
+旧流程点完按钮只 `sleep(SETTLE_SECONDS)` 一次即切往下一站，遇到 Turnstile 弹窗延迟、异步接口慢或转盘动画，容易没签上就离开导致漏签或误报。
+
+- **修法**（2026-11-12 已在 `run_checkin.py` 落地 Verification Loop）：
+  1. 常规 `pending` 站点点击后进入最多 14 轮 × 2s（约 28~30s）循环验证：每轮激活前台标签、辅助点击 Turnstile、`probe/classify`，
+     直到明确翻转为 `done`/`auto`、命中 Toast 成功、或识别出 `blocked_captcha` 才退出循环；
+     仅在第 8 轮仍 `pending` 且确认**无 CF Turnstile / 图形验证码进行中**（`not cf_active and not has_captcha`）时才自动补点一次，避免重置 Turnstile；
+  2. **薄荷公益站（`up.x666.me`）**：点击 `开始转动` 后等待 5 秒转盘动画，**必须重新 `navigate(url)` 刷新页面**并重新 `probe/classify` 确认 `done`。
+
+### 坑 22：Cloudflare Tunnel Error 1033 宕机与「签到功能未启用」的分类归因
+
+- **Cloudflare Tunnel `Error 1033`**（如 PM-Plan 2026-11-09 起的隧道中断）：属于目标站服务端隧道宕机，`classify()` 直接归为 `unreachable`（`⚫ 暂时失联`，evidence 标明 `Cloudflare Tunnel Error 1033 (HTTP 530)`），不要当作脚本点击逻辑故障反复调试。
+- **签到模块未启用**（如 君の星辰 `/api/user/checkin` 返回 `{"message":"签到功能未启用","success":false}`）：站点本身关闭了签到功能，`classify()` 直接归为 `unsupported`（`ℹ️ 未启用签到`，同时保留读取到的余额），不再误判为 `⚠️ 状态未知` 或漏签。
+
+### 坑 23：SPA 异步渲染延迟与初始探针重试（如 CM-API-公益站）
+
+像 `CM-API-公益站` 等 React/Vue SPA 站点，页面在 `document.readyState === 'complete'` 时仅完成了骨架渲染，根组件仍在异步拉取 chunk 或初始配置数据。若在初次 `probe()` 阶段 body 字符数刚达标但签到卡片与按钮尚未挂载，会导致 `hits` 为空而直接被误判为 `⚠️ 状态未知`。
+
+- **修法**（2026-11-12 在 `run_checkin.py` 落地）：
+  当初次分类状态为 `unknown` 且没有任何 `hits` 与 `apiHits` 时，脚本额外暂停 3.0 秒并二次执行 `probe()` + `classify()`，给 SPA 充分的挂载与接口请求时间，彻底消除假阴性。
+
+### 坑 24：DOM 最内层原子节点匹配与正则剥离安全（`strip_js_comments`）
+
+1. **DOM 嵌套层级误取**：在复杂前端框架（如 Semi-UI / Ant Design）中，按钮往往被嵌套在外层容器中（例如 `<div><button disabled>签到</button></div>`），外层 `div` 与内层 `button` 具有完全一致的 `textContent`。若在候选去重时从外层判定 `contains(inner)`，会错误剔除内层真正带有 `disabled` 属性的 `<button>` 而保留无 disabled 属性的外层 `<div>`，引发漏判已签到。
+   - **修法**：在 `PROBE_JS` 中改为通过 `e.querySelectorAll('*')` 递归检查子节点，只要子节点中已存在相同文本的元素即跳过外层，精准抓取最内层的原子按钮控件。
+2. **AppleScript 单行换行折叠与正则字面量安全**：AppleScript 的 `execute javascript` 要求注入的字符串不能跨行，`strip_js_comments()` 必须先剔除代码中的注释。但若 JS 代码包含正则字面量（如 `/https?:\/\//`、`/linux\s*do/i`），朴素的注释过滤会把正则内部的 `//` 或 `/*` 截断为行内注释，导致脚本语法破损，AppleScript 返回 `missing value`。
+   - **修法**：`strip_js_comments()` 引入完整的 JavaScript 词法扫描状态机，追踪前驱字符与关键字，精准区分除号运算符与正则字面量，并在正则内完整识别字符集 `[...]` 与转义字符 `\`。
+
+### 坑 25：Toast 成功提示与按钮未翻转站点的豁免（Aether API 模式）
+
+部分站点（如 Aether API）在完成签到后，服务端接口已成功记录签到，且页面弹出 `You can only check in once per day` 或 `签到成功` 的 Toast 提示，但页面上的按钮文案仍保持 `Check in now` 且不设置为 `disabled`。若单站验证循环（Verification Loop）死板地要求 `state_v["state"] != "pending"`，会导致脚本在已成功签到后反复轮询直到超时。
+
+- **修法**（2026-11-12 已在 `run_checkin.py` 落地）：
+  在单站验证循环中，只要 Toast 容器捕获到明确的服务端回复（`Check-in successful` / `签到成功` / `You can only check in once per day` 等），即明确判定为 `done` 并提前退出循环，避免无谓等待。同时在 `classify()` 中保持严谨：仅当 Toast 容器匹配时豁免，页面普通静态正文中的规则说明仍不得击穿可点按钮。
 
 ---
 
@@ -293,10 +371,11 @@ Consumption 额（都不是钱）。
 
 ---
 
-## 失联判定
+## 失联与异常分类判定
 
-单个站点**重试 3 次**仍打不开（`chrome-error://` 或 body 为空）→ 标记
-`⚫ 暂时失联`，**不重试更多次、不算签到失败**（那是站点自己的问题）。
+- 单个站点**重试 3 次**仍打不开（`chrome-error://`、body 为空，或 Cloudflare Tunnel `Error 1033` 隧道宕机）→ 标记
+  `⚫ 暂时失联`，**不重试更多次、不算脚本失败**（那是站点自己的问题）。
+- 页面或接口明确返回 `签到功能未启用`（如 君の星辰）→ 标记 `ℹ️ 未启用签到`（`unsupported`），不视为漏签。
 
 ---
 
@@ -340,7 +419,9 @@ python3 run_checkin.py --no-login         # 不尝试 OAuth 登录
 | `✅ 签到成功` | 已签到（含"打开即签到"） |
 | `🟡 待签到` | 有可点按钮但未点（dry-run 或点击失败） |
 | `🔴 需登录` | 页面要求 LinuxDO 登录且自动登录没成功 |
-| `⚫ 暂时失联` | 重试 3 次打不开 |
+| `⚫ 暂时失联` | 重试 3 次打不开（含 Tunnel Error 1033 宕机） |
+| `🔒 需人工验证` | 遇到行为轨迹滑块或待识别图形验证码弹窗 |
+| `ℹ️ 未启用签到` | 站点接口明确返回「签到功能未启用」（非漏签） |
 | `⚠️ 状态未知` | 打开了但判据不明确 |
 
 奖励金额各站币种/单位不同（`$`/`¥`/`¤`），合计仅供参考，不做跨站折算。
@@ -349,12 +430,12 @@ python3 run_checkin.py --no-login         # 不尝试 OAuth 登录
 
 ## 同步规则
 
-本 skill 必须**双向同步**（见 `~/.claude/projects/.../memory/feedback_skill_sync.md`）：
+本 skill 必须**双向同步**（见 `~/.claude/projects/.../memory/skill-dual-copy-sync.md`）：
 
-- 系统：`~/.claude/skills/gongyi-checkin/`（实际软链到 `~/.config/magpie/library/skills/gongyi-checkin`）
-- 项目：`~/Documents/learn-claude-code/skills/gongyi-checkin/`
+- 系统：`~/.claude/skills/gongyi-checkin/`（运行时实际加载目录）
+- 项目：`~/Documents/youngs/learn-claude-code/skills/gongyi-checkin/`
 
-改完两处都要一致。用 `diff -rq` 校验。
+改完两处都要一致。用 `diff -rq -x data -x __pycache__` 校验。
 
 ---
 
@@ -363,8 +444,9 @@ python3 run_checkin.py --no-login         # 不尝试 OAuth 登录
 ```
 gongyi-checkin/
 ├── SKILL.md
+├── EXPERIENCE.md              # 手写脱敏站点笔记与踩坑记录
 ├── scripts/
 │   ├── chrome_driver.py   # AppleScript↔Chrome 驱动 + 探针 + 分类器
 │   └── run_checkin.py     # 主流程 + 报告渲染
-└── data/                  # last-run.json / last-run.md
+└── data/                  # last-run.json / last-run.md / run-log.md（不入库）
 ```

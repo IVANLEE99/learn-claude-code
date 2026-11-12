@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """gongyi-checkin — daily check-in runner for public-benefit API stations.
 
-Reads the Chrome bookmark folder `daily-check-in` (id 6233), opens each station
-in the logged-in daily Chrome, performs the daily check-in, and writes a report.
+Reads the Chrome bookmark folder `daily-check-in` (id 5923, falls back to name),
+opens each station in the logged-in daily Chrome, performs the daily check-in,
+and writes a report.
 
 Usage:
   python3 run_checkin.py                 # full run, default bookmark folder
@@ -27,8 +28,9 @@ from urllib.parse import urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from chrome_driver import (  # noqa: E402
-    ChromeError, classify, click_checkin, close_extra_tabs, count_tabs,
-    current_url, js, js_retry, navigate, new_tab, osa, probe, tab_count,
+    ChromeError, activate_tab, classify, click_checkin, close_extra_tabs,
+    count_tabs, current_url, is_cf_challenge, js, js_retry, navigate,
+    new_tab, osa, probe, solve_react_captcha, tab_count, wait_cf_pass,
     wait_for,
 )
 
@@ -37,7 +39,7 @@ DATA_DIR = os.path.join(SKILL_DIR, "data")
 BOOKMARKS = os.path.expanduser(
     "~/Library/Application Support/Google/Chrome/Default/Bookmarks"
 )
-DEFAULT_FOLDER_ID = "6233"
+DEFAULT_FOLDER_ID = "5923"
 # Chrome regenerates the numeric folder id when the folder is moved/recreated.
 # The NAME is the stable identifier, so keep it and fall back to it.
 FOLDER_NAME = "daily-check-in"
@@ -144,19 +146,22 @@ def read_bookmarks(folder_id=DEFAULT_FOLDER_ID, path=BOOKMARKS,
 
 def settle(tab=1, seconds=LOAD_SECONDS):
     """Wait until the tab stops loading and has real content."""
-    time.sleep(3)
+    time.sleep(2.0)
     deadline = time.time() + seconds
     while time.time() < deadline:
-        state = js(
-            "document.readyState + '|' + (document.body ? document.body.innerText.length : 0)",
+        raw = js(
+            "JSON.stringify({ready: document.readyState, len: document.body ? document.body.innerText.length : 0})",
             tab=tab,
         )
-        if state and "complete" in state.split("|")[0]:
-            body_len = 0
+        ready, body_len = "", 0
+        if raw:
             try:
-                body_len = int(state.split("|")[1])
+                d = json.loads(raw)
+                ready = d.get("ready", "")
+                body_len = int(d.get("len", 0))
             except Exception:  # noqa: BLE001
                 pass
+        if ready == "complete":
             if body_len > 200:
                 return True
             # new-api SPA: readyState complete but React may still mount
@@ -167,7 +172,7 @@ def settle(tab=1, seconds=LOAD_SECONDS):
                     return True
             except Exception:  # noqa: BLE001
                 pass
-        time.sleep(1.5)
+        time.sleep(1.0)
     return False
 
 
@@ -180,18 +185,20 @@ def page_identity(tab=1):
     completely wrong rewards/balances — the classic silent-stale-read bug.
     """
     raw = js(
-        "location.href + '|' + (document.body ? document.body.innerText.length : 0) "
-        "+ '|' + document.title",
+        "JSON.stringify({"
+        "  href: location.href,"
+        "  len: document.body ? document.body.innerText.length : 0,"
+        "  title: document.title || ''"
+        "})",
         tab=tab,
     )
-    parts = (raw or "").split("|")
-    href = parts[0].strip() if parts else ""
+    if not raw:
+        return "", 0, ""
     try:
-        body_len = int(parts[1].strip()) if len(parts) > 1 else 0
-    except ValueError:
-        body_len = 0
-    title = parts[2].strip() if len(parts) > 2 else ""
-    return href, body_len, title
+        data = json.loads(raw)
+        return data.get("href", ""), int(data.get("len", 0)), data.get("title", "")
+    except Exception:  # noqa: BLE001
+        return "", 0, ""
 
 
 def open_station(url, tab=1, retries=3):
@@ -206,7 +213,7 @@ def open_station(url, tab=1, retries=3):
         # Chrome will not re-request the document when the URL is unchanged, and
         # the auto-check-in detection relies on this load's network entries.
         navigate("about:blank", tab=tab)
-        time.sleep(0.6)
+        time.sleep(0.5)
         navigate(url, tab=tab)
         # Some stations redirect (e.g. /profile -> /dashboard/overview) or bounce
         # through the LinuxDO OAuth callback. Wait until we leave chrome-error://.
@@ -217,10 +224,16 @@ def open_station(url, tab=1, retries=3):
             ) else "",
             timeout=40, poll=2.0,
         )
+
+        # 🚨 关键：遇到 Cloudflare 人机验证/5秒盾/Turnstile 时，明确等待验证通过！
+        cf_passed = wait_cf_pass(tab=tab, timeout=60, poll=2.0, log_fn=log)
+        if not cf_passed:
+            log("     [CF验证] 超时未能通过 Cloudflare 验证！")
+
         settle(tab=tab, seconds=LOAD_SECONDS)
 
         # ---- identity check: is the document the one we asked for? ----
-        deadline = time.time() + 12
+        deadline = time.time() + 15
         committed = False
         while time.time() < deadline:
             href, body_len, _title = page_identity(tab=tab)
@@ -246,38 +259,98 @@ def linuxdo_login(tab=1):
 
     Returns one of: 'not_needed' | 'clicked' | 'not_found'.
     """
+    # 坑 12：先勾选 User Agreement 等复选框（Pigeonw 等站点不勾选协议时点 OAuth 按钮无反应）
+    js_prep = r"""
+    (function(){
+      var cbs = document.querySelectorAll('input[type="checkbox"]');
+      for (var i=0; i<cbs.length; i++){
+        if (!cbs[i].checked) {
+          try {
+            cbs[i].checked = true;
+            cbs[i].dispatchEvent(new Event('input', {bubbles: true}));
+            cbs[i].dispatchEvent(new Event('change', {bubbles: true}));
+          }catch(e){}
+        }
+      }
+    })()
+    """
+    js(js_prep, tab=tab)
+
     js_expr = r"""
-(function(){
-  function vis(e){
-    var r=e.getBoundingClientRect(), s=getComputedStyle(e);
-    return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';
-  }
-  var all=Array.from(document.querySelectorAll('a,button,[role=button],div,span'));
-  var cand=all.filter(function(e){
-    var tx=(e.textContent||'').trim();
-    if(!tx||tx.length>40) return false;
-    if(!/linux\s*do|linuxdo/i.test(tx)) return false;
-    if(!vis(e)) return false;
-    return true;
-  });
-  if(!cand.length) return 'NO_LINUXDO_BUTTON';
-  cand.sort(function(a,b){
-    var ra=a.getBoundingClientRect(), rb=b.getBoundingClientRect();
-    return (ra.width*ra.height)-(rb.width*rb.height);
-  });
-  var e=cand[0];
-  var tx=(e.textContent||'').trim();
-  e.scrollIntoView({block:'center'});
-  e.click();
-  return 'CLICKED:'+tx.slice(0,24);
-})()
-"""
+    (function(){
+      function vis(e){
+        var r=e.getBoundingClientRect(), s=getComputedStyle(e);
+        return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';
+      }
+      var all=Array.from(document.querySelectorAll('button, a, [role=button], div, span'));
+      var cand=all.filter(function(e){
+        var tx=(e.textContent||'').trim();
+        if(!tx||tx.length>40) return false;
+        if(!/linux\s*do|linuxdo/i.test(tx)) return false;
+        if(/已绑定|管理|解除/i.test(tx)) return false;
+        if(!vis(e)) return false;
+        return true;
+      });
+      if(!cand.length) return 'NO_LINUXDO_BUTTON';
+      // Rank button/a ahead of div/span, then by area
+      cand.sort(function(a,b){
+        var tagA = a.tagName.toUpperCase(), tagB = b.tagName.toUpperCase();
+        var prioA = (tagA === 'BUTTON' || tagA === 'A') ? 0 : 1;
+        var prioB = (tagB === 'BUTTON' || tagB === 'A') ? 0 : 1;
+        if (prioA !== prioB) return prioA - prioB;
+        var ra=a.getBoundingClientRect(), rb=b.getBoundingClientRect();
+        return (ra.width*ra.height)-(rb.width*rb.height);
+      });
+      var e=cand[0];
+      var tx=(e.textContent||'').trim();
+      e.scrollIntoView({block:'center'});
+      e.click();
+      return 'CLICKED:'+tx.slice(0,24);
+    })()
+    """
     res = js_retry(js_expr, tab=tab)
     if not res:
         return "not_found"
     if res.startswith("CLICKED"):
         return "clicked"
     return "not_found"
+
+
+def handle_linuxdo_oauth_authorize(tab=1, timeout=25):
+    """Wait for and click the authorize button on connect.linux.do."""
+    deadline = time.time() + timeout
+    seen_oauth = False
+    while time.time() < deadline:
+        u = current_url(tab)
+        if "connect.linux.do" in u:
+            seen_oauth = True
+        elif seen_oauth and "connect.linux.do" not in u:
+            # 已经授权并跳回原站
+            return "redirected_away"
+        elif "linux.do/login" in u:
+            # 用户的 LinuxDO 自身掉登录了
+            return "linuxdo_session_logged_out"
+
+        if seen_oauth:
+            # 授权页也可能有 Cloudflare 验证
+            is_cf, _ = is_cf_challenge(tab=tab)
+            if is_cf:
+                wait_cf_pass(tab=tab, timeout=30, poll=1.5, log_fn=log)
+
+            auth_js = r"""
+            (function(){
+              var b = Array.from(document.querySelectorAll('button, a, input[type=submit]'))
+                .filter(function(e){ return /授权|同意|允许|Authorize|Allow|Confirm/i.test((e.textContent||e.value||'').trim()); });
+              if (!b.length) return 'NO_AUTH_BUTTON';
+              b[0].click();
+              return 'AUTH_CLICKED:' + (b[0].textContent||b[0].value||'').trim();
+            })()
+            """
+            res = js(auth_js, tab=tab)
+            if res and res.startswith("AUTH_CLICKED"):
+                return res
+        time.sleep(1.0)
+    return "AUTH_TIMEOUT"
 
 
 def process_station(entry, tab=1, dry_run=False, do_login=True):
@@ -330,6 +403,11 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
         result["seen_host"] = seen_host
 
         state = classify(page)
+        # SPA (如 CM-API-公益站) 偶发初次 probe 尚未完成 React 挂载，重试一次
+        if state["state"] == "unknown" and not page.get("hits") and not page.get("apiHits"):
+            time.sleep(3.0)
+            page = probe(tab=tab)
+            state = classify(page)
         result["state"] = state["state"]
         result["reward"] = state["reward"]
         result["balance"] = state["balance"]
@@ -339,22 +417,29 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
         if state["state"] == "logged_out":
             result["action"] = "needs_login"
             if do_login and not dry_run:
+                log("     [登录] 页面未登录，正在通过 LinuxDO 授权登录...")
                 act = linuxdo_login(tab=tab)
                 result["evidence"] += " | 登录点击=%s" % act
                 if act == "clicked":
-                    time.sleep(LOGIN_SETTLE_SECONDS)
-                    # LinuxDO may show an authorize page -> click "授权/Authorize"
-                    auth = js_retry(r"""
-(function(){
-  var b=Array.from(document.querySelectorAll('button,a,input[type=submit]'))
-    .filter(function(e){return /授权|同意|允许|Authorize|Allow|Confirm/i.test((e.textContent||e.value||'').trim());});
-  if(!b.length) return 'NO_AUTH_BUTTON';
-  b[0].click(); return 'AUTH_CLICKED';
-})()
-""", tab=tab)
-                    result["evidence"] += " 授权=%s" % auth
-                    time.sleep(LOGIN_SETTLE_SECONDS)
+                    time.sleep(3)
+                    auth_res = handle_linuxdo_oauth_authorize(tab=tab, timeout=25)
+                    result["evidence"] += " 授权=%s" % auth_res
+                    # 等待跳回原站
+                    wait_for(lambda: current_url(tab) if "connect.linux.do" not in current_url(tab) else "", timeout=25)
+                    time.sleep(2)
+                    wait_cf_pass(tab=tab, timeout=30, poll=1.5, log_fn=log)
                     settle(tab=tab, seconds=LOAD_SECONDS)
+
+                    # 检查跳回后的 URL 是否偏离了目标签到页（例如 /sign-in -> /dashboard/overview，但签到页是 /profile）
+                    curr_u = current_url(tab)
+                    target_path = urlparse(url).path
+                    if target_path and target_path not in curr_u:
+                        log("     [OAuth后重定向] 当前在 %s，导航回目标签到页 %s ..." % (curr_u, url))
+                        navigate(url, tab=tab)
+                        time.sleep(2)
+                        wait_cf_pass(tab=tab, timeout=30, poll=1.5, log_fn=log)
+                        settle(tab=tab, seconds=LOAD_SECONDS)
+
                     page2 = probe(tab=tab)
                     state2 = classify(page2)
                     result["state"] = state2["state"]
@@ -363,26 +448,111 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                     result["evidence"] += " | 登录后=" + state2["evidence"]
                     result["final_url"] = current_url(tab)
 
-        # --- pending -> click the button ---
-        if result["state"] == "pending" and not dry_run:
+        host = (urlparse(url).hostname or "").lower()
+
+        # 1. 薄荷公益站 (up.x666.me): 点击转盘 -> 等待动画 -> 刷新确认
+        if "up.x666.me" in host and result["state"] == "pending" and not dry_run:
+            log("     [薄荷转盘] 触发开始转动...")
+            click_res = click_checkin(tab=tab)
+            result["action"] = "clicked_spin"
+            result["evidence"] += " | 点击=%s" % click_res
+            # 等待 5 秒转盘动画
+            time.sleep(5)
+            log("     [薄荷转盘] 动画结束，刷新页面确认签到结果...")
+            navigate(url, tab=tab)
+            time.sleep(3)
+            settle(tab=tab, seconds=LOAD_SECONDS)
+            p_spin = probe(tab=tab)
+            s_spin = classify(p_spin)
+            result["state"] = s_spin["state"]
+            result["reward"] = s_spin["reward"] or result["reward"]
+            result["balance"] = s_spin["balance"] or result["balance"]
+            result["evidence"] += " | 刷新后=" + s_spin["evidence"]
+            result["final_url"] = current_url(tab)
+            if result["state"] == "done":
+                log("     ✅ [明确确认成功] 薄荷公益站签到成功！奖励: %s | 余额: %s" % (result["reward"] or "—", result["balance"] or "—"))
+
+        # 2. 常规 pending 站点的点击与确认闭环 (Verification Loop)
+        elif result["state"] == "pending" and not dry_run:
+            log("     [签到动作] 点击待签到按钮...")
             clicked = click_checkin(tab=tab)
             result["action"] = "clicked" if clicked.startswith("CLICKED") else "click_failed"
             result["evidence"] += " | 点击=%s" % clicked
-            time.sleep(SETTLE_SECONDS)
-            page3 = probe(tab=tab)
-            state3 = classify(page3)
-            # After clicking, the button usually flips to disabled/"已签到"
-            result["state"] = state3["state"]
-            result["reward"] = state3["reward"] or result["reward"]
-            result["balance"] = state3["balance"] or result["balance"]
-            result["evidence"] += " | 点击后=" + state3["evidence"]
-            result["final_url"] = current_url(tab)
+
+            # 🚨 核心要求：明确签到成功才进行下一个！循环验证与确认（支持等待 CF Turnstile 弹窗完成）
+            log("     [验证确认] 等待签到结果确认与状态翻转（遇到CF盾/Turnstile持续等待）...")
+            verified = False
+            for v_round in range(1, 15):  # 最多等 30 秒，给 CF 充分时间
+                time.sleep(2.0)
+                activate_tab(tab=tab)
+                # 辅助尝试点击可能出现的 Turnstile checkbox
+                js(r"""
+                (function(){
+                  var iframes = document.querySelectorAll('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]');
+                  for(var i=0; i<iframes.length; i++){
+                    try {
+                      var doc = iframes[i].contentDocument || iframes[i].contentWindow.document;
+                      var box = doc.querySelector('input[type="checkbox"], .ctp-checkbox-label, #challenge-stage');
+                      if(box) box.click();
+                    }catch(e){}
+                  }
+                })()
+                """, tab=tab)
+
+                page_v = probe(tab=tab)
+                state_v = classify(page_v)
+
+                v_body = page_v.get("body", "")
+                v_toasts = page_v.get("toasts", "")
+                has_toast_done = bool(re.search(
+                    r"Check-?in successful|签到成功|今日已打卡|明日再来|You can only check in once per day|Do not repeat check-in",
+                    v_toasts, re.I
+                )) or bool(re.search(r"Check-?in successful|签到成功|今日已打卡|明日再来", v_body, re.I))
+
+                # 必须明确翻转为 done/auto，或者命中明确的完成 toast（解决 Aether API 按钮不翻转但弹窗提示 once per day 的问题）
+                if state_v["state"] in ("done", "auto") or has_toast_done:
+                    result["state"] = "done"
+                    result["reward"] = state_v["reward"] or result["reward"]
+                    result["balance"] = state_v["balance"] or result["balance"]
+                    result["evidence"] += " | 明确确认成功=" + (state_v["evidence"] if state_v["state"] in ("done", "auto") else ("Toast提示←" + v_toasts[:34]))
+                    result["final_url"] = current_url(tab)
+                    verified = True
+                    log("     ✅ [明确确认成功] 签到已成功完成！奖励: %s | 余额: %s" % (result["reward"] or "—", result["balance"] or "—"))
+                    break
+                elif state_v["state"] == "blocked_captcha":
+                    result["state"] = "blocked_captcha"
+                    result["reward"] = state_v["reward"] or result["reward"]
+                    result["balance"] = state_v["balance"] or result["balance"]
+                    result["evidence"] += " | 弹出图形验证码"
+                    result["final_url"] = current_url(tab)
+                    verified = True
+                    log("     🔒 [图形验证码] 检测到图形验证码弹窗，需识别输入！")
+                    break
+                elif v_round == 8 and state_v["state"] == "pending":
+                    # 仅在确认无 CF Turnstile 质询或验证码弹窗时才重试点击，避免重置 Turnstile
+                    cf_active, _ = is_cf_challenge(tab=tab)
+                    has_captcha = bool((page_v.get("captcha") or {}).get("hasModal"))
+                    if not cf_active and not has_captcha:
+                        log("     [重试] 按钮仍未翻转且无验证弹窗，再次点击...")
+                        click_checkin(tab=tab)
+                    else:
+                        log("     [等待质询] 检测到 CF Turnstile 或验证码进行中，保持等待不重复点击...")
+
+            if not verified:
+                page_final = probe(tab=tab)
+                state_final = classify(page_final)
+                result["state"] = state_final["state"]
+                result["reward"] = state_final["reward"] or result["reward"]
+                result["balance"] = state_final["balance"] or result["balance"]
+                result["evidence"] += " | 最终状态=" + state_final["evidence"]
+                result["final_url"] = current_url(tab)
 
         elif result["state"] == "pending":
             result["action"] = "dry_run_pending"
 
         elif result["state"] in ("done", "auto"):
             result["action"] = "already_done"
+            log("     ✅ [已签到] 该站点今日已签到！奖励: %s | 余额: %s" % (result["reward"] or "—", result["balance"] or "—"))
 
     except Exception as exc:  # noqa: BLE001
         result["error"] = "%s: %s" % (type(exc).__name__, exc)
@@ -401,6 +571,7 @@ STATE_LABEL = {
     "logged_out": "🔴 需登录",
     "unreachable": "⚫ 暂时失联",
     "blocked_captcha": "🔒 需人工验证",
+    "unsupported": "ℹ️ 未启用签到",
     "unknown": "⚠️ 状态未知",
 }
 
@@ -415,6 +586,7 @@ def render_report(results, meta):
     lines.append("")
 
     ok = [r for r in results if r["state"] in ("done", "auto")]
+    unsupported = [r for r in results if r["state"] == "unsupported"]
     bad = [r for r in results
            if r["state"] in ("logged_out", "unreachable", "unknown", "blocked_captcha")]
     pending = [r for r in results if r["state"] == "pending"]
@@ -431,6 +603,7 @@ def render_report(results, meta):
                  % len([r for r in results if r["state"] == "unreachable"]))
     lines.append("| 🔒 需人工验证 | %d |"
                  % len([r for r in results if r["state"] == "blocked_captcha"]))
+    lines.append("| ℹ️ 未启用签到 | %d |" % len(unsupported))
     lines.append("| ⚠️ 状态未知 | %d |" % len([r for r in results if r["state"] == "unknown"]))
     lines.append("")
 
@@ -476,6 +649,17 @@ def render_report(results, meta):
             lines.append("| %s | %s | %s |" % (
                 r["name"], money(r.get("balance")),
                 (r.get("evidence") or "").replace("|", "／")[:70]))
+        lines.append("")
+
+    if unsupported:
+        lines.append("## ℹ️ 未启用签到模块（%d）" % len(unsupported))
+        lines.append("")
+        lines.append("| 站点 | 余额 | 详情 |")
+        lines.append("| --- | --- | --- |")
+        for r in unsupported:
+            lines.append("| %s | %s | %s |" % (
+                r["name"], money(r.get("balance")),
+                (r.get("evidence") or "").replace("|", "／")[:80]))
         lines.append("")
 
     if bad:
@@ -531,7 +715,8 @@ def archive_experience(results, meta):
             meta["date"], r["name"],
             {"done": "✅ 签到成功", "auto": "✅ 打开即签到",
              "pending": "🟡 待签到", "logged_out": "🔴 需登录",
-             "unreachable": "⚫ 暂时失联", "unknown": "⚠️ 状态未知"}.get(
+             "unreachable": "⚫ 暂时失联", "blocked_captcha": "🔒 需人工验证",
+             "unsupported": "ℹ️ 未启用签到", "unknown": "⚠️ 状态未知"}.get(
                 r.get("state"), r.get("state")),
         )
         if r.get("reward"):
@@ -577,18 +762,20 @@ def claim_scratch_tab():
             # the new tab is the last one
             return after
         time.sleep(0.5)
-    return before  # fall back to tab 1 if counting failed
+    raise ChromeError("Timed out creating scratch tab (before=%d, after=%d)" % (before, count_tabs()))
 
 
 def release_scratch_tab(index):
     """Close only our scratch tab (never the user's)."""
-    if not index:
+    if not index or index <= 1:
         return
     try:
         osa(
             'tell application "Google Chrome"\n'
             "  try\n"
-            "    close tab %d of front window\n"
+            "    set totalTabs to count of tabs of front window\n"
+            "    set tIdx to %d\n"
+            "    if tIdx > 1 and tIdx <= totalTabs then close tab tIdx of front window\n"
             "  end try\n"
             "end tell\n" % index,
             timeout=30,
@@ -624,6 +811,18 @@ def main():
             fh.write(md)
         print(md)
         return 0
+
+    # 坑 15：Mac 锁屏时不向 GUI 应用投递 AppleEvent，会误报 Chrome 没开
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            "ioreg -n Root -d1 -a | grep -A1 CGSSessionScreenIsLocked",
+            shell=True, stderr=subprocess.DEVNULL
+        ).decode("utf-8", "ignore")
+        if "true" in out.lower():
+            raise SystemExit("macOS 当前处于锁屏状态（CGSSessionScreenIsLocked=true），系统拒绝投递 AppleEvent。请解锁屏幕后再运行！")
+    except subprocess.CalledProcessError:
+        pass  # key 不存在即未锁屏
 
     # sanity: Chrome must be running
     n_tabs = tab_count()

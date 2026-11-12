@@ -16,7 +16,8 @@
   咕咕嘎嘎 / HappyCoding 的卡片在**未签到时**也常驻一句 `Checked in`（隐藏态/文案残留），
   旧逻辑整页扫到 `Checked in` 就判 done → `already_done` 直接跳过点击，**当天实际没签**（用户发现漏签）。
   修法：页面存在**可见且可点的动作按钮**（`Check in now` / `立即签到` / `去签到`…）时一律判 pending，
-  除非同时出现硬完成语（`今日已签到` / `明天 00:00 再来` / `You can only check in once per day`）。
+  除非同时出现硬完成语（`今日已签到` / `明天 00:00 再来` / `已领取，明天再来`）。
+  注意：2026-11-12 已将 `You can only check in once per day` 从硬完成语和 `DONE_PATTERNS` 移除（详见 SKILL.md 坑 19）。
 - 2026-11-04 **导航后必须确认文档已提交**（读页面自己的 `location.href` 比对域名），
   否则会读到上一个站点的页面——奖励/余额全是上一个站的，数字看着正常所以不会报错。
   每次导航先走 `about:blank`，否则同 URL 不重新请求文档。
@@ -48,6 +49,30 @@
   **绝不 kill 不带 `--user-data-dir` 的日常 Chrome**（30 站登录态全在它那儿）。
   签完 `bash data/_restart_upload_daemon_1111.sh` 恢复 pipeline。详见 SKILL.md 坑 17。
 - 2026-11-04 单站打不开重试 3 次即可判「暂时失联」，不要死磕（可能是站点自己挂了或被墙）。
+- **2026-11-12 Cloudflare Turnstile 验证盾与弹窗显式等待闭环**：
+  多个 new-api 站（如 AzureKilnAPI、三水公益站等）点击 `Check in now` 后会唤起 `Security Check: Please complete the security check to continue` 弹窗（内嵌 `challenges.cloudflare.com/turnstile` iframe）。
+  `is_cf_challenge()` 需同时覆盖整页挑战与页内 Turnstile 弹窗（`hasCfModal || isCfPage`），在前台保持标签激活、提供 10~30 秒等待轮询，直到 Turnstile 完成校验发出带有 token 的 `/api/user/checkin?turnstile=...` 请求，并确认按钮翻转为 `Checked inToday +$X`。详见 SKILL.md 坑 18。
+  `probe()` 单独采集 Toast 容器（`.ant-message-notice` / `.semi-toast` 等）写入 `toasts` 字段，绝不把日历底部静态规则说明 `You can only check in once per day` 误判为 toast 成功。详见 SKILL.md 坑 19。
+- **2026-11-12 单站循环验证闭环（Verification Loop）**：
+  点击待签到按钮后不再等固定秒数就切换下一站，而是进入最多 14 轮 × 2s 轮询闭环（每轮激活标签、辅助触发 Turnstile、重新 `probe/classify`），明确确认状态翻转为 `done`/`auto`、命中 Toast 成功或识别出 `blocked_captcha` 才退出循环；仅在第 8 轮仍 `pending` 且确认无 CF/验证码弹窗时才补点一次，防止重置 Turnstile。薄荷转盘（`up.x666.me`）需等 5 秒动画后重新 `navigate` 刷新确认。详见 SKILL.md 坑 21。
+- **2026-11-12 AppleScript 动态 Tab 索引安全保护与防越界**：
+  多标签或 OAuth 弹窗导致标签数变化时，写死索引会触发 `(-1719 无效的索引)`。
+  若盲目把超界索引下夹到 `totalTabs`，可能在临时标签提前关闭时误向用户工作标签注入脚本。
+  在 AppleScript 驱动层统一增加边界校验（超界直接报错，绝不在用户标签上执行），且 `release_scratch_tab()` 严格限制 `tIdx > 1 and tIdx <= totalTabs` 严防误关 tab 1。详见 SKILL.md 坑 20。
+- **2026-11-12 SPA 异步渲染延迟与初始探针重试（如 CM-API-公益站）**：
+  React/Vue 架构的 SPA 站点在 `readyState === 'complete'` 时仅完成静态骨架加载，组件仍在拉取远程 chunk 与数据。
+  初次 probe 若因卡片未挂载导致 `unknown` 且无 hits，额外等待 3 秒二次 probe 可准确拿到待签到按钮。详见 SKILL.md 坑 23。
+- **2026-11-12 DOM 最内层原子节点匹配与正则剥离安全（strip_js_comments）**：
+  Semi-UI 等框架中外层容器与内层 button 拥有完全一致的 `textContent`。必须通过 `e.querySelectorAll('*')` 递归检查子节点跳过外层，精准抓取最内层带有 `disabled` 属性的原子按钮。
+  同时 `strip_js_comments()` 增加正则字面量状态机解析，避免将正则内的 `//` 截断导致 AppleScript 返回 `missing value`。详见 SKILL.md 坑 24。
+- **2026-11-12 Toast 成功提示与按钮未翻转站点闭环（Aether API 模式）**：
+  Aether API 等站点签到成功后按钮保持 `Check in now` 且不 disabled，仅通过服务端 Toast 提示已签到（`You can only check in once per day`）。
+  验证循环中只要捕获到明确的 Toast 成功或已签信息即直接判定完成退出，避免死等超时。详见 SKILL.md 坑 25。
+- **2026-11-12 图形验证码（简直了）全自动 OCR 与 React Setter 绕过**：
+  简直了点击签到后弹出 Base64 图片验证码（`<img src="data:image/png;base64,...">`）。
+  `probe()` 自动识别弹窗归类 `blocked_captcha`，通过 `solve_react_captcha()` 借助 `HTMLInputElement.prototype.value` 原生 Setter 注入受控组件并派发 input/change 事件，点击 Confirm 实现全自动闭环。详见 SKILL.md 坑 9。
+- **2026-11-12 Tunnel Error 1033 与「签到功能未启用」分类归因**：
+  Cloudflare Tunnel `Error 1033`（如 PM-Plan）属服务端隧道宕机，直接判 `unreachable`；接口返回 `{"message":"签到功能未启用","success":false}`（如 君の星辰）属站点关闭签到模块，归类为 `unsupported`（`ℹ️ 未启用签到`）并保留余额，均非脚本漏签。详见 SKILL.md 坑 22。
 
 ## 站点笔记
 
@@ -91,16 +116,16 @@
   勾选后正常跳 `connect.linux.do` →「允许」→ 回 `dashboard/overview`，再进 `/profile` 点 `Check in now`。
 
 ### [50ldc]三水公益站 — https://api.3sbqs.xyz/profile
-- 2026-11-06 头部显示 `付费 $0 免费 $16.12`。**签到奖励进的是「免费」额度，付费余额真的是 $0**。
+- 2026-11-06 头部显示 `付费 $0 免费 $X`。**签到奖励进的是「免费」额度，付费余额真的是 $0**。
   只报 `$0` 没用，余额解析要在此情形回落到「免费/赠送/Gift」标签。
 
 ### 君の星辰 — https://ai.centos.hk/wallet
-- 2026-11-06 直接查接口：`GET /api/user/checkin?month=2026-11`（带 `New-Api-User` 头）
-  返回 `{"message":"签到功能未启用","success":false}` —— **该站没有签到功能**，不是失败。
+- 2026-11-06 直接查接口：`GET /api/user/checkin?month=YYYY-MM`（带 `New-Api-User` 头）
+  返回 `{"message":"签到功能未启用","success":false}` —— **该站没有签到功能**，不是失败（详见 SKILL.md 坑 22）。
   `/wallet`、`/profile`、`/dashboard`、`/console/personal` 都没有签到卡片，也没有 checkin 资源请求。
 
 ### 月城公益站：余额可以是负数
-- **2026-11-06 实测 `当前余额 -$13.92`**。金额正则必须允许前导负号，否则整段解析成 None。
+- **2026-11-06 实测 `当前余额 -$X`**。金额正则必须允许前导负号，否则整段解析成 None。
 
 
 ### 验证码站点处置经验（2026-11-05 实测）
@@ -113,12 +138,12 @@
   **处置策略**：提取 `<img src="data:image/png;base64,...">` 进行 OCR 识别，通过 React 状态绑定或置顶标签页人工输入 5 位验证码完成签到。
 
 ### dicksuck / 多数 new-api 站：重复点会被拒
-- 页面文案 `You can only check in once per day` = **今天已经签过了**，不是失败。
-- 判据要包含这句：见到它直接判 `done`，不要再点、不要报 pending。
-- **2026-11-07 已把这两句并入 `DONE_PATTERNS`**（之前只写在文档里、代码没实现）：
-  `You can only check in once per day` / `Do not repeat check-in`。
-  起因：Aether API 点完签到后**按钮文案不变、仍显示 `Check in now`**，
-  只有服务端 toast 能证明已签 → 旧逻辑把它判成 pending，每轮都白点一次。
+- 2026-11-07 曾把 `You can only check in once per day` / `Do not repeat check-in` 并入 `DONE_PATTERNS`
+  （起因：Aether API 点完后按钮不翻转，曾靠此句判已签）。
+- **2026-11-12 重要修正（已从 `DONE_PATTERNS` 与 `_hard_done` 移除）**：
+  new-api 日历底部常驻静态规则 `You can only check in once per day`（未签时也在 DOM 中），
+  放进 `DONE_PATTERNS` 会击穿可点按钮优先规则导致漏签。现改回仅认按钮翻转、硬完成语或
+  点击后动态 toast（`Check-in successful`/`签到成功` 且待签到按钮不在场），详见 SKILL.md 坑 19。
 
 ### Aether API — https://api.abnt.it/profile
 - 2026-11-07 点 `Check in now` 成功后**按钮不翻转**（仍是 `Check in now`，不 disabled、文案不变），
@@ -138,7 +163,7 @@
 
 ### 皮皮智绘 — https://img.pipiwangcom.com/
 - 2026-11-07 新增书签。按钮 `签到 +100~200`，余额在 `当前余额`。
-  点完余额 370 → 490（本日 +120）。
+  点完余额 `$X → $Y`（本日 `+$Z`）。
 
 ### 每日签到 - lOXO — https://loxo.cc/check-in
 - 2026-11-04 独立签到页。字段齐全：`今日奖励 $X`、`可用余额 $X`、
@@ -184,14 +209,18 @@
 - **2026-11-05 实测通过（LinuxDO OAuth + 自动签到）**：
   未登录时会重定向到 `#/login?redirect=/profile`（登录页字符数较短，`open_station` 门禁已适配）。
   页面有「使用 LinuxDO 登录」按钮，点击并完成 `connect.linux.do` 授权后自动跳转回个人设置。
-  已登录页有「签到」按钮（若已签到显示「已签到」），奖励展示在相邻 `span`（如 `签到 19` 代表 +19 额度），
+  已登录页有「签到」按钮（若已签到显示「已签到」），奖励展示在相邻 `span`（如 `签到 N` 代表 `+N` 额度），
   余额展示为「可用额度 $X」。已签到直接判 `done`。
 - **2026-11-06 会话不持久**：00:07 用 OAuth 登录并签到成功后，隔一段时间再打开又回到
-  `#/login?redirect=/profile`。**但签到记录是保留的**（页面上仍显示 `签到 12 已签到`）。
+  `#/login?redirect=/profile`。**但签到记录是保留的**（页面上仍显示 `签到 N 已签到`）。
   所以「再次打开是登录页」不代表签到没成，重走一次 OAuth 即可确认，不要判失败。
 
 ### 子非鱼 status / CHY 状态页
 - 2026-11-04 uptime-kuma 状态页，不签到，已在 `SKIP_URL_FRAGMENTS` 排除。
+
+### CM-API-公益站 — https://cm-api.top/profile
+- 2026-11-12 React SPA 架构。初次加载虽然 readyState 已为 complete，但组件挂载存在数秒异步延迟。
+  若初次 probe 拿不到 hits 且分类为 unknown，额外等待 3 秒重探即可正常发现待签到按钮并完成签到闭环。详见 SKILL.md 坑 23。
 
 ## 下次开工先看
 
@@ -200,7 +229,7 @@
    Huan / 烁 / 魔方 / CM-API / Orbitix / 方舟）。00:05 跑签的是「上一个 08:00 窗口」，
    白天打开站点会重新显示「今日尚未签到」；08:05 跑则两种口径都在当日窗口内。
 
-1. `SKILL.md` 的「十四个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
+1. `SKILL.md` 的「二十五个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
    「读到上一个站点的页面」是危害最大的（数字看着对但全是错的）。
 2. 「站点形态」表 + 本文件的「站点笔记」，判断新站点归哪一形态。
 3. 新站点先 `--dry-run --url <地址> --name <名字>` 单站试，别直接全量点。
