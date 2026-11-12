@@ -19,12 +19,27 @@ import subprocess
 import sys
 import time
 
-PROFILE = os.path.expanduser("~/Library/Caches/ms-playwright/mcp-chrome-10b76e5")
+# 🔒 上传浏览器铁律（2026-11-12 用户明确指示）：
+#   五平台登录态长期驻留在**专用 profile** `ms-playwright-mcp/mcp-chrome-10b76e5`。
+#   以后每次上传都用它；**禁止**改用日常 Chrome 的 profile ——
+#   Chrome 157+ 对默认 data dir 直接拒绝开调试端口（坑 461），符号链接也绕不过。
+DEDICATED = os.path.expanduser("~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5")
+PROFILE = os.environ.get("UPLOAD_PROFILE") or DEDICATED
 if not os.path.isdir(PROFILE):
     cand = sorted(glob.glob(os.path.expanduser("~/Library/Caches/ms-playwright*/mcp-chrome-*")))
     if not cand:
         raise SystemExit("no mcp-chrome profile found")
     PROFILE = cand[0]
+
+DAILY_PROFILES = (
+    os.path.expanduser("~/Library/Application Support/Google/Chrome"),
+    os.path.expanduser("~/Library/Application Support/Chromium"),
+)
+for _bad in DAILY_PROFILES:
+    if os.path.realpath(PROFILE) == os.path.realpath(_bad):
+        raise SystemExit(
+            f"REFUSE: 禁止用日常浏览器 profile 跑自动化（Chrome 157+ 会拒绝调试端口，"
+            f"且会污染用户日常登录态）: {PROFILE}")
 
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 if not os.path.isfile(CHROME):

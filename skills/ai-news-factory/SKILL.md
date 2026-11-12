@@ -1,13 +1,73 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.90.0
+version: 3.94.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.90.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.94.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
+## 🔒 上传浏览器铁律（2026-11-12 用户明确指示，优先级高于下文一切「坑」描述）
+
+> 用户原话：「打开专用 profile 的浏览器，里面已经登录五个平台；**以后每次都用这个独立 profile**」
+
+1. **上传/草稿/核验一律只用专用 profile**：
+   `~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5`
+   五个平台（公众号 / 知乎 / B站 / 抖音 / 视频号）的登录态**长期驻留在该 profile**，扫码一次长期有效。
+2. **禁止**用 `~/Library/Application Support/Google/Chrome`（日常 Chrome）跑任何自动化：
+   Chrome 157+ 会直接拒绝 —— `DevTools remote debugging requires a non-default data directory`，
+   符号链接绕不过（安全策略按路径判定，坑 461）。也不要去改动/复制它。
+3. **启动方式固定**：`bash data/_restart_upload_daemon_<issue>.sh` 或 `python3 templates/browser_daemon.py`，
+   二者都落到同一 profile + CDP 9222。开工先 `curl -s -m 8 http://127.0.0.1:9222/json/version` 探活。
+4. **抓取阶段与上传阶段共用这个 profile**（坑 434）：抓取前 `reclaim_profile` 停 daemon，
+   上传前 `_restart_upload_daemon_<issue>.sh` 恢复。**不要**在抓取中途重启 daemon。
+5. **不要 kill 用户日常 Chrome**；**不要**清空该 profile 目录（等于让五个平台重新扫码）。
+6. 若某平台掉登录，只需在该 profile 的浏览器窗口里重新扫码，**不需要**重建 profile。
+
+> **🔴 v3.93.0 核心改进（2026-11-12 1112 期五平台草稿实跑：modal 拦截 / 验收时机 / 词表残留 / Chrome 157 禁调试端口，坑 458-462）**
+>
+> 五平台草稿全部落库：公众号 `MP_VERIFY_OK`（appmsgid 100002015 / bodyLen 1481 / placeholders 0 / 合集命中）/ 知乎 `ZHIHU_DRAFT_OK`（1794 字）/ B站 `BILI_DRAFT_OK`（分区人工智能，草稿箱标题命中）/ 视频号 `CH_VERIFY_OK`（草稿箱 9 条，当日 11:19）/ 抖音 `DY_E2E_OK`（resume 横幅 + vids=1 + 双封面槽位实测）。
+>
+> ① **坑 458：Playwright `locator.click()` 被浮层 modal 静默拦截 30s**。抖音「设置竖封面」按钮 `is_visible`/`is_enabled` 双真，但 `.dy-creator-content-modal-wrap`（AI 智能推荐浮层）拦截 pointer events → click 重试 56 次后 TimeoutError。**修法：先 `Escape` + 遍历关闭所有可见 modal，再退回 JS `el.click()`（不受 pointer-events 检查影响），最后才 fallback 到 Playwright click。** 这条与坑 302/438 同族，但触发点是**另一个按钮**——说明「凡 playwright click 超时且元素可见」都该套这套三级降级。
+> ② **坑 459：验收读数的时机错了，会把成功判成失败**。抖音第二次「暂存离开」后页面**退回上传区**（`uploadArea=True`、`vids=0`、`.coverControl-*` 全部卸载），而旧代码在 save#2 **之后**才读封面槽位 → 拿到空数组 → `covers_ok=False` → `DY_E2E_FAILED`；实际 save#1 阶段封面双真（1536×1151 / 1006×1343）。**铁律：任何「页面状态读数」必须在对应动作的窗口期内完成，动作改变页面形态后不得复用旧读数的位置。** 修法：把 `rb_slots()` 挪到 save#1 的 readback 之后、save#2 之前。
+> ③ **坑 460：事件词表第三次串期（坑 441 的第四份拷贝）**。`channels_upload_<issue>.py` 与 `_rawcdp.py` 的 stale 词表里**仍留着 `KYC`**——而 KYC 正是本期主线词 → 上传第一步就被自己的断言拦下（`AssertionError: stale issue word: KYC`）。根因：派生器的 stale 表替换是按**固定文本块**做的，这两个文件的块形状不同（少两行「十一月第十天」）→ 没被替换。**修法：stale 词表也要做「本期合法引用」交叉核对——凡本期 `MUST` 里的词，必须从所有 `STALE` 列表里移除；派生后逐文件 grep 校验。**
+> ④ **坑 461：Chrome 157 禁止对默认 profile 开调试端口**。`--remote-debugging-port=9222 --user-data-dir=~/Library/Application Support/Google/Chrome` 直接报 `DevTools remote debugging requires a non-default data directory`；用符号链接绕开同样被拒（安全策略按路径判定）。**所以「用日常 Chrome 的登录态跑自动化」在 Chrome 157+ 已不可行**，只能：(a) 在专用 profile 里重新登录，或 (b) 由用户明确授权后复制 cookie 到专用 profile。本期采用 (a)，并把 `_restart_upload_daemon_<issue>.sh` 固定为专用 profile。
+> ⑤ **坑 462：知乎正文缺强制 AI 声明会 reject**。`zhihu_upload_<issue>.py` 有 `assert AI_DISCLOSURE in _md`（坑 388），而派生出的 `zhihu-article-<DATE>.md` 是**新写的**，很容易漏掉那句固定说明。**写 article md 时就把声明句带上**（本文件顶部常量 `AI_DISCLOSURE` 可直接复制），不要等断言失败再补。
+>
+> **另记**：`_open_tabs_<issue>.py` 的 TARGETS 只有 4 个平台（mp/bili/channels/douyin），**缺知乎** —— 需要知乎登录时要单独开 `https://www.zhihu.com/signin`。
+>
+> **🔴 v3.92.0 核心改进（2026-11-12 1112 期看门狗/调度层对抗式审计：9 条判据缺陷，坑 448-457）**
+>
+> 本期对 L1/L2 调度层做了一次**独立对抗式审计**（4 个维度并行审 + 逐条反驳验证），确认 9 条真实缺陷。
+> 共同特征：**全是「判据层」缺陷，且全部是「看着在跑、其实永远跑不完」或「看着健康、其实误报」**——
+> 与 v3.90.0/v3.91.0 的结论第三次一致。抓取本身一次过（33 批 / 488 帖 / err=0），
+> 这些坑当晚都没触发，但每一条都是随时会咬人的隐患。
+>
+> ① **坑 448：`_watchdog_<issue>.sh` 的 GATE 判据统计「整晚累计」行数**（`grep -c '^GATE:'`）+ 只看日志 mtime。早先一次 proxy 抖动留下的 5 行 GATE 会**永久命中**，proxy 恢复后仍报 ALERT；而该分支在 READY 之前 `exit 0` → 会话永远收不到 `READY_FOR_SESSION`。**修法：判「当前是否正卡在 GATE」——`tail -1 "$LAUNCH_LOG" | grep -q '^GATE:'` 且日志新鲜。**
+> ② **坑 449：RECLAIM 判据 ① 数行不数事件**（一次 reclaim 写两行「被占用」+「已收回」，阈值 4 实际只等于 2 次事件）；**② 把 `launch attempt` 当「resume 连续失败」**，而该标记每轮都打、rc=0 的成功轮也算 → 2 次良性 reclaim + 4 次成功尝试就误报 ALERT，同样在 READY 之前 `exit 0`。**修法：只数 `^RECLAIM: profile 已收回`（一事件一行）+ 必须真有 `resume rc=[1-9]`。**
+> ③ **坑 450：L2 完全不认 L1 的 rc=2 / rc=3 停机契约**。`_launch_<issue>.sh` 对 rc=2（官方反自动化警告）/ rc=3（batch 无对应 queue）会 `exit 2/3` 刻意停机，但看门狗 5 分钟后照常 RESUME 重启，**把 L1 刻意停下的运行反复复活**（沙箱实测 attempt 1→2→3 无限增长）。**修法：新增 2a 段，`tail -40 launch.log` 命中 `OFFICIAL WARNING` / `REFUSE REBUILD` 就 ALERT 且不再重启。**
+> ④ **坑 451：通用「在跑但毫无进展」无人管**。既有判据只覆盖三种**特定形态**（GATE / RECLAIM / crawl stalled）。一个普通的 rc=1 重试循环（fetch 列表失败、鉴权失败、任何非 profile 类错误）会让 wrapper 一直活着、每 180s 打一行 attempt，而 daily 始终不存在 → 所有判据都不命中，**看门狗永远报 RUNNING，整夜无人知晓**。**修法：新增 2d 段——wrapper 活着 + daily 缺失 + 近 30 分钟 attempt ≥5 就 ALERT。**（时间戳必须用 `match($0, /[0-9]{4}-.../)` 抓，不能用 `index($0,"attempt")+8`，那会落在 attempt 序号上。）
+> ⑤ **坑 452：`_watchdog_<issue>_loop.sh` 的退出判据与单次判定不一致**。loop 只看 `state=='done'`，而单次判定要求 `state=done` **且**所有 stage 都是 done/skipped。只要有人把 state 置 done 而 upload 仍 pending，**loop 会静默退出**——而 loop 是唯一会重新唤起单次判定的东西（无 crontab / 无 launchd），该 stage 从此再无人看管。**修法：loop 用与单次判定完全相同的 stages_left 判据。**
+> ⑥ **坑 453：pidfile 防重入只看 `kill -0`，没有 cmdline 校验**（`_launch_<issue>.sh` / `_resume_<issue>.sh` / `_restart_upload_daemon_<issue>.sh` 三处）。pid 被系统回收后复用 → 陈旧 pidfile 指向无关进程 → wrapper 每次启动都判「已在运行」直接 `exit 0`，而看门狗 `alive()` 用的是 pid+cmdline 双校验、认为没在跑 → 两边永远对不上，整夜空转。**修法：三处 guard 全部补 `ps -p "$old" -o command= | grep -q <script>`，与 `alive()` 同一套判据。**
+> ⑦ **坑 454：EXIT trap 无条件 `rm -f "$PIDFILE"`**。被后继实例接管时（superseded 分支 exit），pidfile 里已经是**后继者**的 pid，trap 却把它删了 → 防重入被自己破坏，还可能让看门狗误判「没在跑」而再起一个。**修法：`trap '[ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] && rm -f "$PIDFILE"' EXIT`。**
+> ⑧ **坑 455：`superseded` 归属校验只写在「触发前的等待循环」里**。若建任务时已过触发时刻（本期就是：21:41 下达、22:56 开跑），while 条件首次求值即为假，**该行从未执行**；此后任何重启也走同一条跳过路径 → 归属校验形同虚设。**修法：把归属校验提到循环外，或至少在进入主循环前再校验一次。**
+> ⑨ **坑 456/457：验收脚本「只 print 不断言」+ 子串匹配脆弱**。`_verify_pdf_<issue>.py` 的关键词表是上期事件词（派生器只换日期不换内容，坑 441 同族），且只 print 不断言 → 假阴性不会让流水线失败，只误导会话；即便换对词，PDF 抽出的汉字可能是**康熙部首变体**（「十」→ U+2F17）导致子串匹配假阴性。**修法：NFKC 归一化 + 对结构词（概念候选/数据概览等）真断言。** 同理 `_merge_<issue>.py` 末尾补 `assert views == sorted(views, reverse=True)`，把坑 443 的排序 bug 钉死（它潜伏了三期，就是因为没有任何断言检查顺序）。
+>
+> **审计方法本身也值得沉淀**：4 个维度（日期/看门狗逻辑/管线接线/运行时安全）并行审 → 每条发现再派一个「反驳者」独立验证 → 只有反驳失败的才计入。20 个 agent、138 万 token，**确认 9 条、驳回 2 条**（驳回的 2 条正是我当晚已修的 dedup 与完判据）。驳回机制有效挡住了「看着像 bug 其实已修」的噪声。
+>
+> **🔴 v3.91.0 核心改进（2026-11-12 1112 期全链路实跑：merge 排序静默失效 / 看门狗心跳永不写 / 完判据可虚高 / 文章 md 不在派生范围 / 本机视频通道只剩 ffmpeg，坑 443-447）**
+>
+> 抓取 → 日报 → 新闻稿 → PDF → 视频 → 封面全链路一次过（33 批 / 488 帖 / err=0 → daily 477；audit 40/40 PASS；成片 176.12s / 1920×1080）。**五条坑里有四条是「产物看着对、判据也没报错」的静默失效**，与 v3.90.0 的结论完全一致：问题几乎总在判据层与派生层的边界上。
+>
+> ① **坑 443：`_merge_<issue>.py` 的 `sorted(filtered.values(), key=vn)` 把整个 dict 交给 `vn()`**。`vn` 里 `str(dict)` 会得到 `{'id': '3157296', ...}` 这种整串，正则从 `{` 开始不匹配 → 退到 `int(re.sub(r'\D','',s))`，把 id/created/views 里所有数字拼成一个巨型整数当排序键。**结果 daily 不再按浏览量降序**：本期实跑首元素 views=40，全表最大 7600 排在第 54 位。**正确写法 `key=lambda p: vn(p.get('views'))`**。这个 bug 在 1110/1111 已存在（派生继承），只是因为没人校验过 daily 的顺序而一直没暴露。**派生后必须加一条 `assert views == sorted(views, reverse=True)`**。
+> ② **坑 444：`_watchdog_<issue>.sh` 的 `emit()` 在比较之前就无条件重写 verdict 文件里的 `ts=`**，于是下一轮读到的 `last_ts` 永远是上一轮（≈180s 前），`age < DEDUP_WINDOW` 恒成立 → 同一条判定此后**永远被吞**，注释里承诺的「同串 30 分钟内不重复、但每 30 分钟留一行心跳」从未生效（1111 期 13 小时只有 15 行日志就是证据）。**修法：把 `ts=` 的写入挪到「决定要写日志」之后**，去重分支直接 `return 0` 不碰文件。
+> ③ **坑 445：`_resume_<issue>.sh` 的「抓取完成」判据按文件累加 `len(results)`**。两个问题叠加：`glob('data/batch_browser_*.json')` 也会命中 `batch_browser_retry0.json`（同一 id 被计两次），且 `crawlOne` 返回 error 时 `results` 长度仍等于 batchIds（error 也被算成已完成）。**有帖没抓到却 `have>=n` → 提前 merge，daily.total 偏小**。**正确判据：按 id 去重，只数 `r.get('title') and not r.get('error')` 的那批**。本期 err=0 未触发，但属随时会咬人的隐患。
+> ④ **坑 446：`zhihu-article-<DATE>.md` / `wechat-article-<DATE>.md` 不在 `_derive_video_<issue>.py` 的派生范围**——派生器只拷 `scripts/` 目录，而这两个文件在**日期目录根**。结果 `publish.json` 指向不存在的文章文件，知乎上传才会在 `ARTICLE` 一步炸 `FileNotFoundError`。**派生后必须核对日期目录根**（`review-checklist.md`、`publish.json`、两个 article md、`wechat-images/`、`zhihu-images/` 都在 scripts/ 之外）。补充：`wechat-images/` 与 `zhihu-images/` 也要从 `images/scene*.png` 现场转 JPEG（坑 331 同族）。
+> ⑤ **坑 447：本机视频通道只剩 ffmpeg 直合成，且三条判据都要先探**。`command -v typst` 为空（坑 435 沿用）；`ffmpeg -filters | grep -E 'ass|subtitles|drawtext'` 为 0（本机 9.0.2 没编这些滤镜）；`~/.cache/remotion` 不存在且 `npx remotion --version` **直接挂住不返回**（不是报错，是卡死——超时后必须当不可用处理）。**开工先跑这三条探针再选渲染路径**，否则会在 Remotion 上白等。本期走 `templates/ffmpeg-fallback-compose.md`：逐场景 `scale+pad` 到 1920×1080 → concat → PIL 渲字幕 PNG → `filter_complex` overlay，成片一次过，字幕回读 `median +0.334s / outlier 0 / 8 场景块 Δ≤1ms`。
+>
+> **另记两条调度层经验（不改判据但要写进派生器）**：① 「今天 10:35pm 执行」= 当晚 22:35 开跑、报告日期取**明天**；若建任务时已过点，wrapper 的墙钟门禁会自动追赶（本期 21:41 下达、22:56 实际开跑，抓取 39 分钟跑完），派生器里那条 `assert now < trigger_epoch` 必须降级为 WARN，否则建任务这一步自己就把流水线拦住。② 归档 1111 的 59 个中间态文件（batch/source/queue/batch_ids）必须先于 launch 执行，否则 `_resume` 的 `isComplete` 会把上期批次当成已完成直接跳过。
+>
 > **🔴 v3.90.0 核心改进（2026-11-11 1111 期上传链实跑：抖音暂存离开点不到 / 视频号 save 假成功 / 表单判据硬编码 / 事件词表第三次串期 / 交叉检查器自身两面性，坑 438-442）**
 >
 > 五平台上传全跑通：公众号 `MP_VERIFY_OK`（100002003）/ 知乎 `ZHIHU_DRAFT_OK`（p/2103788986774860805）/ B站 `BILI_DRAFT_OK` / 视频号 `CH_VERIFY_OK`（草稿箱 8→9）/ 抖音由用户手动上传。

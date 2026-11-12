@@ -487,3 +487,59 @@ python3 templates/revive_frozen_tabs.py                     # 末行 PLAYWRIGHT_
 1107 全程看门狗日志**只有 4 行**（start / GUARD / READY / DONE），而 1102 同期写了 51 KB。差异全部来自 `emit()` 的
 「同串 + `DEDUP_WINDOW` 内不重复」逻辑。派生时**不要**为了「看得到心跳」去掉去重——
 排查靠 `data/logs/<issue>-watchdog.verdict`（每次 tick 都覆写），不是靠日志行数。
+
+---
+
+## 13. 判据层九条缺陷（v3.92.0 / 2026-11-12 1112 期对抗式审计，坑 448-457）
+
+> 本期对 L1/L2 做了一次独立对抗式审计（4 维度并行审 + 逐条反驳验证），确认 9 条真实缺陷。
+> **全部在判据层**，且当晚都没触发——每一条都是随时会咬人的隐患。派生新一期时逐条对照。
+
+| # | 位置 | 缺陷 | 修法 |
+|---|---|---|---|
+| 448 | watchdog 2b | GATE 判据统计**整晚累计**行数 + 只看日志 mtime → 早先一次 proxy 抖动永久命中，proxy 恢复后仍 ALERT，且该分支在 READY 前 `exit 0`，会话永远收不到 READY | 判「当前是否正卡在 GATE」：`tail -1 "$LAUNCH_LOG" \| grep -q '^GATE:'` 且日志新鲜 |
+| 449 | watchdog 2b-2 | ① 数行不数事件（一次 reclaim 写两行，阈值 4 实际=2 次事件）；② 把 `launch attempt` 当「resume 连续失败」，rc=0 的成功轮也算 → 2 次良性 reclaim + 4 次成功就误报 ALERT | 只数 `^RECLAIM: profile 已收回` + 必须真有 `resume rc=[1-9]` |
+| 450 | watchdog 新增 2a | 完全不认 L1 的 rc=2/rc=3 停机契约 → 5 分钟后 RESUME 把刻意停下的运行反复复活 | `tail -40 launch.log` 命中 `OFFICIAL WARNING`/`REFUSE REBUILD` → ALERT 且不再重启 |
+| 451 | watchdog 新增 2d | 只覆盖 GATE/RECLAIM/crawl-stalled 三种**特定形态**；普通 rc=1 重试循环（fetch/鉴权失败）→ 永远 RUNNING | wrapper 活着 + daily 缺失 + 近 30 分钟 attempt ≥5 → ALERT（时间戳用 `match($0,/[0-9]{4}-.../)` 抓，别用 `index($0,"attempt")+8`） |
+| 452 | watchdog loop | loop 只看 `state=='done'`，单次判定要求 state=done **且** stages 全终态 → 有人置 done 而 upload pending 时 loop 静默退出，而 loop 是唯一唤起单次判定的东西 | loop 用与单次判定完全相同的 stages_left 判据 |
+| 453 | launch / resume / restart_daemon | pidfile 防重入只看 `kill -0`，无 cmdline 校验 → pid 复用后陈旧 pidfile 永久挡住重启，而看门狗 `alive()` 双校验认为没在跑，两边永远对不上 | 三处 guard 全补 `ps -p "$old" -o command= \| grep -q <script>` |
+| 454 | launch / resume | EXIT trap 无条件 `rm -f "$PIDFILE"` → 被后继接管时删掉**后继者**的 pidfile，防重入被自己破坏 | `trap '[ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] && rm -f "$PIDFILE"' EXIT` |
+| 455 | launch | `superseded` 归属校验只写在「触发前等待循环」里 → 已过触发时刻时该行从未执行（本期 21:41 下达、22:56 开跑，正是这条路径） | 归属校验提到循环外，或进主循环前再校验一次 |
+| 456/457 | verify_pdf / merge | 验收脚本「只 print 不断言」+ 子串匹配脆弱（PDF 抽出的汉字可能是康熙部首变体，如「十」→U+2F17）；merge 无顺序断言 → 坑443 排序 bug 潜伏三期 | NFKC 归一化 + 对结构词真断言；merge 末尾 `assert views == sorted(views, reverse=True)` |
+
+**审计方法（可复用）**：4 维度并行审 → 每条发现派一个「反驳者」独立验证 → 只有反驳失败的才计入。
+本期 20 agent / 138 万 token，**确认 9 条、驳回 2 条**（驳回的正是当晚已修的两条）。反驳机制有效挡住「看着像 bug 其实已修」的噪声。
+
+### 13b. 沙箱验证的致命前提：这些脚本**不是** cwd 隔离的
+
+`_launch_<issue>.sh` / `_resume_<issue>.sh` 内部都硬编码了 `cd /Users/<user>/Documents/youngs/learn-claude-code`，
+**只改 `REPO=` 变量不会改变它们的工作目录**。把脚本 `cp` 到 `/tmp/xxx/` 再跑，它照样在**真仓库**里
+写 `data/logs/<issue>-launch.log`、写 pidfile、调真的 `_resume_<issue>.sh`。
+
+1112 期实测踩到：沙箱里 `nohup bash /tmp/wd1112fix/data/_launch_1112.sh` 直接以真仓库为 cwd 启动，
+往真 `1112-launch.log` 追加了 start/target 两行。**这次没出事**（daily 已 total=477 ≥ 100，
+wrapper 立刻 `launch wrapper done` 退出，没触发抓取），但副作用是 launch.log mtime 变新 →
+看门狗在随后 5 分钟内报 `RUNNING (launch.log written <5min)` 而不是 `READY_FOR_SESSION`。
+
+**沙箱铁律**：
+1. 要跑 launch/resume 的沙箱副本，必须**同时**把脚本里的 `cd <repo>` 也 sed 掉（`s#^cd /Users/.*#cd $T#`），
+   否则它就是在真仓库里跑。
+2. 更稳的做法：**只沙箱测 `_watchdog_<issue>.sh`**（它用 `REPO=${WD_REPO:-...}` 且 `cd "$REPO"`，是真隔离的），
+   launch/resume 的 guard 逻辑用「同款判据片段」单独验证，不要整脚本跑。
+3. 沙箱跑完必须 `pkill -f "$T/..."` **并**检查真仓库的 `data/logs/<issue>-launch.log` 有没有被污染。
+
+## 14. 上传浏览器铁律（2026-11-12 用户明确指示）
+
+用户原话：「打开专用 profile 的浏览器，里面已经登录五个平台；**以后每次都用这个独立 profile**」
+
+| 项 | 规定 |
+|---|---|
+| 专用 profile | `~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5` |
+| 登录态 | 公众号 / 知乎 / B站 / 抖音 / 视频号 **长期驻留**，扫码一次长期有效 |
+| 启动 | `bash data/_restart_upload_daemon_<issue>.sh` 或 `python3 templates/browser_daemon.py` |
+| 探活 | `curl -s -m 8 http://127.0.0.1:9222/json/version` |
+| 禁用 | 日常 Chrome 的 `~/Library/Application Support/Google/Chrome`（Chrome 157+ 拒绝调试端口，坑 461） |
+| 禁止 | kill 用户日常 Chrome；清空该 profile 目录（等于让五平台重新扫码） |
+| 掉登录 | 只在该 profile 的窗口里重新扫码，**不要**重建 profile |
+
+`browser_daemon.py` 已在启动前做 `realpath` 比对，命中日常 profile 直接 `REFUSE` 退出。

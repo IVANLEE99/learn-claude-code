@@ -1,13 +1,33 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.4.0
+version: 16.6.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.4.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.6.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+## 🔒 浏览器 profile 约定（2026-11-12 用户明确指示）
+
+抓取与上传**共用同一个专用 profile**：`~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5`。
+
+- 该 profile 长期驻留五平台上传登录态（公众号/知乎/B站/抖音/视频号），**不要清空**。
+- **禁止**用日常 Chrome 的 `~/Library/Application Support/Google/Chrome` 跑自动化
+  （Chrome 157+ 拒绝默认 data dir 开调试端口，坑 461；也会污染用户日常登录态）。
+- 抓取阶段由 `_launch_<issue>.sh` 的 `reclaim_profile` 独占该 profile；抓取收工后
+  用 `bash data/_restart_upload_daemon_<issue>.sh` 恢复上传 daemon（CDP 9222）。
+- 抓取期间**不要**重启 daemon；上传期间**不要**再跑抓取。
+
+> **🔴 v16.5 核心改进（2026-11-12 1112 日报实跑：daily 排序静默失效 / 完判据虚高，坑 443·445）**
+>
+> 本期抓取 33 批 / 488 帖 / err=0，32h 窗口 488，二次过滤 477。链路上没报任何错，但**两处判据/排序在静默失效**：
+>
+> ① **坑 443：`_merge_<issue>.py` 的 `sorted(filtered.values(), key=vn, reverse=True)` 传错了 key**。`vn()` 期望一个 views 字符串，这里拿到的是整个 post dict；`str(dict)` 以 `{` 开头，正则 `re.match(r'([\d.]+)\s*([km万])?', s)` 不匹配 → 落到 `int(re.sub(r'\D','',s) or 0)`，把 `id`/`created`/`views` 里的所有数字拼成一个巨型整数。**排序因此退化为按 id 数字串排列，daily 不再是浏览量降序**：本期首元素 views=40，全表最大 7600 卡在第 54 位。**修法 `key=lambda p: vn(p.get('views'))`，并在 merge 末尾加 `assert views == sorted(views, reverse=True)` 把它钉死**。该 bug 至少从 1110 期就存在，是「派生只换日期」的典型副作用。
+> ② **坑 445：`_resume_<issue>.sh` 的「抓取完成」判据按文件累加 `len(results)`**。`glob('data/batch_browser_*.json')` 会命中 `batch_browser_retry0.json`（同 id 计两次），且 `crawlOne` 返回 error 时 `results` 长度仍等于 batchIds（error 也计入完成）。**有帖没抓到却判 complete → 提前 merge、daily.total 偏小**。**改为按 id 去重、只数 `r.get('title') and not r.get('error')`**。本期 err=0 未触发。
+>
+> 另：本期冷启动归档了 1111 期 59 个中间态文件（`batch_browser_*` / `source_a|b` / `crawl_queue` / `batch_ids_*`）后才开工，否则 `_resume` 的 `isComplete` 会把上期批次当成本期已完成直接跳过。
+>
 > **🔴 v16.4 核心改进（2026-11-10 1110 日报实跑·跨机迁移首日：linux.do 列表页 i18n 变中文导致 created 全空、32h 窗口过滤成 0；抓取链对本机环境的三处硬依赖）**
 >
 > 1110 期在新机器（macOS 14.6 / arm64，整目录从旧机迁移）跑通：双源 900 + 273 → 合并去重 1153 → 标题去重 917 →
