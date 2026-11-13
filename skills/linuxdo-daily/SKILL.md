@@ -1,24 +1,64 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.6.0
+version: 16.7.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.6.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.7.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
-## 🔒 浏览器 profile 约定（2026-11-12 用户明确指示）
+## 🔒 浏览器 profile 约定（2026-11-12 用户明确指示；2026-11-13 再次强调三遍）
+
+> 用户原话：「**记得保留这个 profile，现在每次都要登录好烦**」「打开专用 profile 的浏览器，里面已经登录五个平台；以后每次都用这个独立 profile」
+
+**这个 profile 是登录态的唯一载体。用户为它扫过至少两轮码，重建 = 让用户重扫五个平台，属于严重返工。**
 
 抓取与上传**共用同一个专用 profile**：`~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5`。
 
 - 该 profile 长期驻留五平台上传登录态（公众号/知乎/B站/抖音/视频号），**不要清空**。
+- **禁止**对该目录做任何破坏性操作：`rm -rf` / `mv` / 重命名 / 清空 `Default/` 或 `Cookies` / `Login Data`；
+  也不要用 `cp -r` 复制到别处再跑（Cookie 加密绑定会让复制品失效）。
+- 允许读 `Default/History`，但必须 `cp` 到 `/tmp` 再读（原库被 Chrome 锁住）。
+- 需要清理时先 `cp -a` 备份到 `~/Library/Caches/ms-playwright-mcp/.backup-<ts>/`。
 - **禁止**用日常 Chrome 的 `~/Library/Application Support/Google/Chrome` 跑自动化
   （Chrome 157+ 拒绝默认 data dir 开调试端口，坑 461；也会污染用户日常登录态）。
 - 抓取阶段由 `_launch_<issue>.sh` 的 `reclaim_profile` 独占该 profile；抓取收工后
   用 `bash data/_restart_upload_daemon_<issue>.sh` 恢复上传 daemon（CDP 9222）。
 - 抓取期间**不要**重启 daemon；上传期间**不要**再跑抓取。
 
+> **🔴 v16.7 核心改进（2026-11-13 1113 期实跑：触发时刻不是惯例值 / 派生器断言照抄上期 needle）**
+>
+> 本期抓取 35 批 / 521 队列 / 515 帖 / err=0（`no_created=0 parse_fail=0`），merge 后 ORDER CHECK OK。
+> 两条都是「建档阶段」的坑，没花钱但会直接卡住开工：
+>
+> ① **触发时刻由用户当晚指令决定，不是固定 22:35**。1113 期用户明确说「今天 **23:25pm** 执行」。
+> 派生器若把 `22:35` 当常量抄下来，`TRIGGER_EPOCH` 会算错一小时 → wrapper 要么提前一小时开抓（拿到不该抓的窗口），
+> 要么白等一小时。**纪律：每次从用户原话取触发时刻，派生器里把四种替换分开写并加断言**：
+> ```python
+> TRIG_OLD_DT, TRIG_NEW_DT = '2026-11-11 22:35', '2026-11-12 23:25'   # 整串
+> TRIG_OLD_HM, TRIG_NEW_HM = '22:35', '23:25'                          # 裸时刻
+> EPOCH_OLD,   EPOCH_NEW   = '1794407700', '1794497100'                # epoch 字面量
+> ```
+> 派生完再 `date -j -f '%Y-%m-%d %H:%M:%S' '<触发时刻>' '+%s'` 反算一遍，与 `EPOCH_NEW` 对齐。
+> **替换顺序**：先整串后裸时刻，且已含本期整串时不再替换（否则 watchdog 的 GUARD 文案会与 epoch 门禁矛盾，1112 踩过）。
+>
+> ② **派生器里的 `for needle in (...)` 断言块不能整段照抄上一期**。`_derive_1113.py` 抄了 1112 的
+> `'连续 GATE'`，而 `_watchdog_1112.sh` 里实际只有 `GATE 卡死`（注释标题）→ 派生第一步就
+> `AssertionError: 1113 watchdog lost inherited detector: '连续 GATE'`。
+> **纪律：每个 needle 先 `grep` 源文件确认存在**，再写进断言。
+>
+> 另：本期归档了 1112 期 70 个中间态文件（`data/archive/2026-11-13-prev-20261112_233619`），
+> 否则 `_resume` 的 `isComplete` 会把上期批次当成本期已完成直接跳过（与 1112 期同一条前置动作）。
+>
+> **🔴 v16.6 核心改进（2026-11-13 1113 期派生：历史注释泛化必须覆盖「本期发现」这类措辞）**
+>
+> 派生器的 `HIST_GENERALIZE` 表若只写 `1112 期实测` / `1112 期修正`，会漏掉源文件里的
+> `坑 443（本期发现，1110/1111 继承）`、`坑 444（本期发现）：` 这类**不带期号的「本期」**。
+> 它们描述的是上一实现周期发生的事，不泛化就会在下一期被读成「这期发现的坑」，是**对事实的错误陈述**。
+> **纪律：`HIST_GENERALIZE` 要同时覆盖「带期号」与「裸本期」两种形态**，并在派生末尾用
+> 反向断言（`assert not re.search(r'(?<!\d)1112(?!\d)', t)`）兜底。
+>
 > **🔴 v16.5 核心改进（2026-11-12 1112 日报实跑：daily 排序静默失效 / 完判据虚高，坑 443·445）**
 >
 > 本期抓取 33 批 / 488 帖 / err=0，32h 窗口 488，二次过滤 477。链路上没报任何错，但**两处判据/排序在静默失效**：
@@ -1569,6 +1609,22 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.7.0 (2026-11-13) — 1113 期：触发时刻不是惯例值 + 派生器断言照抄上期
+
+**版本**：16.6.0 → 16.7.0
+
+**实测数据（2026-11-13 期，DATE=2026-11-13）**
+- Source A 900 + Source B 280 → 合并去重 → 标题去重 995 → 公益站过滤 904 → 32h 窗口 **521**（`no_created=0 parse_fail=0 too_old=383`）
+- 35 批全 `valid=15 err=0` → merge 521→515（二次过滤去掉 6 条），`ORDER CHECK OK`（views 降序 top5=12400/9400/7200/4300/3300）
+- 触发时刻 **2026-11-12 23:25**（epoch 1794497100），**不是惯例的 22:35**
+
+**新坑（v16.7）**
+- **触发时刻由用户当晚指令决定，不是固定 22:35**。派生器把 `22:35` 当常量抄 → `TRIGGER_EPOCH` 错一小时。四种替换需分开写（整串 / 裸时刻 / epoch 字面量），派生完用 `date -j -f` 反算校验。
+- **派生器的 `for needle in (...)` 断言块不能整段照抄上一期**。1113 抄了 1112 的 `'连续 GATE'`，而源文件里只有 `GATE 卡死` → 派生第一步就 AssertionError。**每个 needle 先 `grep` 确认存在**。
+
+**新坑（v16.6）**
+- **`HIST_GENERALIZE` 必须覆盖「本期发现」这类不带期号的措辞**。`坑 443（本期发现，1110/1111 继承）` 描述的是上一实现周期的事，不泛化就会在下期被读成「这期发现的坑」，是对事实的错误陈述。末尾用反向断言兜底。
 
 ### v16.4.0 (2026-11-10) — 跨机迁移首日：列表页 i18n 变中文致 created 全空
 
