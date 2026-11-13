@@ -583,7 +583,7 @@ vertical-3-4.png
 
 定时任务
 今天10:35pm执行
-  执行 linuxdo 全量日报流水线（日期按明天：2026-11-12）。
+  执行 linuxdo 全量日报流水线（日期按明天：2026-11-13）。
   要求与「过滤后全部抓取完」一致：
   1) 用 linuxdo-daily：双源列表 → 合并去重/公益站过滤 → 32h 窗口 → 全量逐帖抓取正文（每批立即保存 batch_browser_N.json）→ 二次过滤 → 写 data/daily/YYYY-MM-DD.json、data/reports/YYYY-MM-DD.md、press、PDF。
   2) 然后用 ai-news-factory 生成当日日报视频：事件按推荐自动选定，不用再向我确认；权限给足直接跑；上传各平台一律存草稿。
@@ -595,7 +595,6 @@ vertical-3-4.png
 封面图记得按照要求生成
 封面图记得按照要求生成
 封面图记得按照要求生成
-记得添加双十一祝福
 
 生图优先先用 有25张额度
 "GEN_IMG_API_URL_003": "https://chatgpt.rainflow.foo/studio/v1",
@@ -793,9 +792,12 @@ to do
 
 
 根据今天的生成过程 更新优化skill
-系统skill记得和/Users/yihuan/Documents/youngs/learn-claude-code/skills 同步更新
-系统skill记得和/Users/yihuan/Documents/youngs/learn-claude-code/skills 同步更新
-系统skill记得和/Users/yihuan/Documents/youngs/learn-claude-code/skills 同步更新
-
-
+记得保留这个profile 现在每次都要登录好烦
 打开专用 profile 的浏览器，里面已经登录五个平台；以后每次都用这个独立 profile，
+微信公众号记得输入标题
+抖音描述记得添加对应标签#今日羊报AI
+
+系统skill记得和/Users/yihuan/Documents/youngs/learn-claude-code/skills 同步更新
+系统skill记得和/Users/yihuan/Documents/youngs/learn-claude-code/skills 同步更新
+系统skill记得和/Users/yihuan/Documents/youngs/learn-claude-code/skills 同步更新
+

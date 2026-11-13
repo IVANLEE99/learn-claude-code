@@ -74,7 +74,7 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 
 ---
 
-## 🚨 二十五个会静默失败的坑
+## 🚨 二十九个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
@@ -307,6 +307,44 @@ new-api 系日历组件底部常驻静态规则说明 `You can only check in onc
 
 - **修法**（2026-11-12 已在 `run_checkin.py` 落地）：
   在单站验证循环中，只要 Toast 容器捕获到明确的服务端回复（`Check-in successful` / `签到成功` / `You can only check in once per day` 等），即明确判定为 `done` 并提前退出循环，避免无谓等待。同时在 `classify()` 中保持严谨：仅当 Toast 容器匹配时豁免，页面普通静态正文中的规则说明仍不得击穿可点按钮。
+
+### 坑 26：LinuxDO OAuth 授权页 CF 质询耗尽单步超时 & 授权重定向保护
+
+自动化登录（如流光绘境）跳转至 `connect.linux.do` 授权页时，授权页自身常弹出 Cloudflare 5 秒盾或 Turnstile 质询。旧的 `handle_linuxdo_oauth_authorize` 仅设置固定 25 秒总超时，CF 轮询等待（15~20 秒）耗尽了整个授权处理窗口，导致抛出 `AUTH_TIMEOUT`，使得页面停滞在授权页，随后被域名一致性检查误判定为异常停止。
+
+- **修法**（2026-11-13 已在 `run_checkin.py` 落地）：
+  1. 授权等待超时基线延长至 45 秒；
+  2. 在 `handle_linuxdo_oauth_authorize` 中接入 `wait_cf_pass()`，一旦检测到 CF 质询并在通过后**重置超时 deadline**，确保授权按钮有完整的时间窗口被点击提交；
+  3. 点击授权后增加重定向等待缓冲（`wait_for` 35s），并调用 `wait_cf_pass()` 与 `settle()` 平滑过渡回原站。
+
+### 坑 27：非标准代币单位与无符号数值奖励提取（LDC / Payload / +N 额度）
+
+公益站生态日益多样化，签到奖励不再局限于 `$`/`¥`/`BTC`：
+- `hkai` 发放 `LDC 1` (Linux DO Credit)；
+- `Aether API` 发放 `Payload 86.27`；
+- `流光绘境` 发放 `+11` 或 `签到 11` 额度；
+- `[✅]Ark API[img]` / `Lanln[gpt]` 发放 `🍥X` / `¤X`。
+旧的 `_money()` 和奖励正则仅匹配固定货币符号，遇到以上非标代币时会将奖励解析为 `None` 或直接漏掉。
+
+- **修法**（2026-11-13 已在 `chrome_driver.py` 与 `run_checkin.py` 落地）：
+  1. `_money()` 正则扩展前导与后缀识别集合：新增 `LDC`、`Payload`、`🍥`、`¤` 及单纯前导正负号的数值提取（如 `+11`）；
+  2. `classify()` 与 Verification Loop 优先从 `.ant-message-notice` / `.semi-toast` 等 Toast 容器的回执文本（`Check-in successful! Received ...`）中提取准确的单次入账奖励数值，避免被页面历史累计总额干扰。
+
+### 坑 28：纯钱包/充值页（如 君の星辰）自适应归类为「未启用签到」
+
+部分站点（如 `君の星辰` `https://ai.centos.hk/wallet`）书签直达钱包页，页面只展示当前余额（`¥5`）和充值档位，后台完全未开放签到模块或组件。旧分类器在未见完成语且无动作按钮时，直接判定为 `⚠️ 状态未知`，导致严格门禁误拦截中断。
+
+- **修法**（2026-11-13 已在 `chrome_driver.py` 落地）：
+  当站点已正常登录、成功提取到有效账户余额（如 `Current Balance ¥5`），但整页既无签到动作候选、无签到日历与完成语、且 URL 为钱包/账单管理页（`/wallet`、`/recharge` 等）时，自动归类为 `ℹ️ 未启用签到`（`unsupported`），完整保留余额快照，不再误判为 `⚠️ 状态未知`。
+
+### 坑 29：断点恢复状态机（Resume）必须保留所有合法终态
+
+在严格门禁模式或中断恢复时，若上一站遇到合规的不可逆终态（例如重试 3 次均超时失联的 `unreachable` 站点 Orbitix，或 Cloudflare Tunnel Error 1033 宕机站点 PM-Plan，以及 `unsupported` 未启用签到站），朴素的 resume 逻辑如果执行 `results[-1]['state'] != 'done' -> results.pop()`，会导致已合规判定的失联站被反复出栈重跑，形成死循环卡点。
+
+- **修法**（2026-11-13 已在 `run_checkin.py` 落地）：
+  1. `run_checkin.py` 原生支持 `--resume` 参数；
+  2. 断点恢复状态机将合法终态集合扩大为 `('done', 'auto', 'unreachable', 'unsupported')`，只有真正未决的异常（如 `logged_out`、`blocked_captcha`、`unknown`）才在重跑时出栈重试；
+  3. 主循环每完成一个站点即实时保存 `last-run.json` 与 `last-run.md`，确保任意时刻中断均不丢失前面站点的签到成果。
 
 ---
 

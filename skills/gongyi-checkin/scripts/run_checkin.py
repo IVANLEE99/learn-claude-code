@@ -316,7 +316,7 @@ def linuxdo_login(tab=1):
     return "not_found"
 
 
-def handle_linuxdo_oauth_authorize(tab=1, timeout=25):
+def handle_linuxdo_oauth_authorize(tab=1, timeout=45):
     """Wait for and click the authorize button on connect.linux.do."""
     deadline = time.time() + timeout
     seen_oauth = False
@@ -332,10 +332,12 @@ def handle_linuxdo_oauth_authorize(tab=1, timeout=25):
             return "linuxdo_session_logged_out"
 
         if seen_oauth:
-            # 授权页也可能有 Cloudflare 验证
+            # 坑 26：授权页本身可能触发 Cloudflare 验证，等待通过后重置 deadline，防止耗尽授权窗口
             is_cf, _ = is_cf_challenge(tab=tab)
             if is_cf:
-                wait_cf_pass(tab=tab, timeout=30, poll=1.5, log_fn=log)
+                passed = wait_cf_pass(tab=tab, timeout=45, poll=1.5, log_fn=log)
+                if passed:
+                    deadline = time.time() + timeout
 
             auth_js = r"""
             (function(){
@@ -422,12 +424,12 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                 result["evidence"] += " | 登录点击=%s" % act
                 if act == "clicked":
                     time.sleep(3)
-                    auth_res = handle_linuxdo_oauth_authorize(tab=tab, timeout=25)
+                    auth_res = handle_linuxdo_oauth_authorize(tab=tab, timeout=45)
                     result["evidence"] += " 授权=%s" % auth_res
                     # 等待跳回原站
-                    wait_for(lambda: current_url(tab) if "connect.linux.do" not in current_url(tab) else "", timeout=25)
+                    wait_for(lambda: current_url(tab) if "connect.linux.do" not in current_url(tab) else "", timeout=35)
                     time.sleep(2)
-                    wait_cf_pass(tab=tab, timeout=30, poll=1.5, log_fn=log)
+                    wait_cf_pass(tab=tab, timeout=45, poll=1.5, log_fn=log)
                     settle(tab=tab, seconds=LOAD_SECONDS)
 
                     # 检查跳回后的 URL 是否偏离了目标签到页（例如 /sign-in -> /dashboard/overview，但签到页是 /profile）
@@ -512,7 +514,17 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                 # 必须明确翻转为 done/auto，或者命中明确的完成 toast（解决 Aether API 按钮不翻转但弹窗提示 once per day 的问题）
                 if state_v["state"] in ("done", "auto") or has_toast_done:
                     result["state"] = "done"
-                    result["reward"] = state_v["reward"] or result["reward"]
+                    # 坑 27：优先从 Toast 回执提取奖励金额（支持 LDC, Payload, 🍥, BTC 等非标币种）
+                    toast_rew = None
+                    if v_toasts:
+                        m_rew = re.search(
+                            r"(?:Received|获得|奖励)\s*([+-]?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥])?\s*\d[\d,]*(?:\.\d+)?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥元点额度])?)",
+                            v_toasts,
+                            re.I,
+                        )
+                        if m_rew:
+                            toast_rew = _money(m_rew.group(1))
+                    result["reward"] = state_v["reward"] or toast_rew or result["reward"]
                     result["balance"] = state_v["balance"] or result["balance"]
                     result["evidence"] += " | 明确确认成功=" + (state_v["evidence"] if state_v["state"] in ("done", "auto") else ("Toast提示←" + v_toasts[:34]))
                     result["final_url"] = current_url(tab)
@@ -792,6 +804,7 @@ def main():
     ap.add_argument("--name", default="", help="指定站点名（配合 --url）")
     ap.add_argument("--folder-id", default=DEFAULT_FOLDER_ID)
     ap.add_argument("--report-only", action="store_true")
+    ap.add_argument("--resume", action="store_true", help="从上次中断的断点继续运行（保留已确认为终态的站点）")
     ap.add_argument("--no-login", action="store_true", help="不尝试 LinuxDO 登录")
     ap.add_argument("--keep-tabs", type=int, default=1,
                     help="兼容参数：不再使用（脚本只关自己的临时标签，不动用户标签）")
@@ -839,12 +852,27 @@ def main():
     log("stations=%d" % len(stations))
 
     results = []
+    if args.resume and os.path.exists(json_path):
+        try:
+            with open(json_path, encoding="utf-8") as fh:
+                prev_data = json.load(fh)
+                prev_results = prev_data.get("results", [])
+                # 坑 29：断点恢复状态机必须保留所有合法终态（done, auto, unreachable, unsupported）
+                while prev_results and prev_results[-1].get("state") not in ("done", "auto", "unreachable", "unsupported"):
+                    prev_results.pop()
+                if [r.get("url") for r in prev_results] == [e.get("url") for e in stations[:len(prev_results)]]:
+                    results = prev_results
+                    log("断点恢复：已保留前 %d 站结果，从第 %d 站继续" % (len(results), len(results) + 1))
+        except Exception as e:
+            log("恢复断点失败，将重新从头开始: %s" % e)
+            results = []
+
     started = datetime.now()
     scratch = claim_scratch_tab()
     log("scratch tab=%d (user tabs untouched)" % scratch)
     try:
-        for idx, entry in enumerate(stations):
-            log("[%2d/%2d] %s" % (idx + 1, len(stations), entry["name"]))
+        for idx, entry in enumerate(stations[len(results):], start=len(results) + 1):
+            log("[%2d/%2d] %s" % (idx, len(stations), entry["name"]))
             res = process_station(entry, tab=scratch, dry_run=args.dry_run,
                                   do_login=not args.no_login)
             results.append(res)
@@ -852,6 +880,21 @@ def main():
                 % (res["state"], res["reward"], res["balance"],
                    (res.get("evidence") or "")[:100]))
             sys.stdout.flush()
+            # 实时保存中间进度
+            meta_mid = {
+                "date": started.strftime("%Y-%m-%d"),
+                "started_at": started.strftime("%Y-%m-%d %H:%M:%S"),
+                "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "folder_id": args.folder_id,
+                "total": len(stations),
+                "processed": len(results),
+                "unprocessed": max(0, len(stations) - len(results)),
+                "dry_run": args.dry_run,
+            }
+            with open(json_path, "w", encoding="utf-8") as fh:
+                json.dump({"meta": meta_mid, "results": results}, fh, ensure_ascii=False, indent=2)
+            with open(md_path, "w", encoding="utf-8") as fh:
+                fh.write(render_report(results, meta_mid))
     finally:
         release_scratch_tab(scratch)
 

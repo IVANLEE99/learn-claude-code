@@ -661,9 +661,9 @@ def _money(val):
     if not val:
         return None
     # 负余额是合法状态（2026-11-06 月城 当前余额 -$13.92），符号要紧贴货币符号
-    # 允许 BTC, 货币符号，千分位逗号与浮点数
+    # 坑 27：扩展货币与代币识别（支持 BTC, LDC, Payload, 🍥, ¤, 货币符号，千分位逗号与浮点数）
     m = re.search(
-        r"([+-])?\s*([$¥€￥]|BTC)?\s*(\d[\d,]*(?:\.\d+)?)\s*([$¥€￥]|BTC|元|额度|点|次|USD)?",
+        r"([+-])?\s*([$¥€￥¤🍥]|BTC|LDC|Payload)?\s*(\d[\d,]*(?:\.\d+)?)\s*([$¥€￥¤🍥]|BTC|LDC|Payload|元|额度|点|次|USD)?",
         val,
         re.I,
     )
@@ -684,7 +684,7 @@ def _find_money_after(body, labels):
     '可用余额' wins over '余额' and '总余额' over '余额'."""
     for label in labels:
         for m in re.finditer(
-            re.escape(label) + r"\s*[:：]?\s*([+-]?\s*(?:[$¥€￥]|BTC)?\s*\d[\d,]*(?:\.\d+)?\s*(?:[$¥€￥]|BTC|元|额度|点|次|USD)?)",
+            re.escape(label) + r"\s*[:：]?\s*([+-]?\s*(?:[$¥€￥¤🍥]|BTC|LDC|Payload)?\s*\d[\d,]*(?:\.\d+)?\s*(?:[$¥€￥¤🍥]|BTC|LDC|Payload|元|额度|点|次|USD)?)",
             body,
             re.I,
         ):
@@ -867,8 +867,21 @@ def classify(page):
         if m:
             rew, rew_raw = "+" + m.group(1), m.group(0)
     # Special archetype: Fengwind 类: "本次获得 $3.00"
+    # 坑 27：从正文与 Toast 中提取非标代币奖励（BTC, LDC, Payload, 🍥, ¤ 等）
     if not rew:
-        m = re.search(r"(?:本次获得|获得奖励|获得额度|Received)\s*([$¥€￥]\s*\d+(?:[.,]\d+)?)", body)
+        m = re.search(
+            r"(?:本次获得|获得奖励|获得额度|Received)\s*([+-]?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥])?\s*\d[\d,]*(?:\.\d+)?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥元点额度])?)",
+            body,
+            re.I,
+        )
+        if m:
+            rew, rew_raw = _money(m.group(1)), m.group(0)
+    if not rew and toast_text:
+        m = re.search(
+            r"(?:Received|获得|奖励)\s*([+-]?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥])?\s*\d[\d,]*(?:\.\d+)?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥元点额度])?)",
+            toast_text,
+            re.I,
+        )
         if m:
             rew, rew_raw = _money(m.group(1)), m.group(0)
     # Guard: a cumulative figure ("累计获得: N") is NOT today's reward.
@@ -882,9 +895,14 @@ def classify(page):
         out["evidence"] += "奖励←%s " % rew_raw[:34]
 
     # ---- check-in module not enabled? (preserve balance e.g. 君の星辰) ----
+    # 坑 28：站点后台未启用签到，或书签直达钱包/充值管理页无签到组件（自适应保留余额并归入 unsupported）
     if "签到功能未启用" in body or "未启用签到" in body:
         out["state"] = "unsupported"
         out["evidence"] += "站长后台未启用签到功能"
+        return out
+    if not hits and not login and bal and re.search(r"/wallet|/recharge|/billing|/finance", url, re.I):
+        out["state"] = "unsupported"
+        out["evidence"] += "纯钱包管理页未开放签到模块"
         return out
 
     # ---- captcha modal (graphical or slider)? (preserve balance e.g. 简直了 / PM-Plan) ----

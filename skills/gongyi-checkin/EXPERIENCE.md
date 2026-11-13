@@ -73,6 +73,15 @@
   `probe()` 自动识别弹窗归类 `blocked_captcha`，通过 `solve_react_captcha()` 借助 `HTMLInputElement.prototype.value` 原生 Setter 注入受控组件并派发 input/change 事件，点击 Confirm 实现全自动闭环。详见 SKILL.md 坑 9。
 - **2026-11-12 Tunnel Error 1033 与「签到功能未启用」分类归因**：
   Cloudflare Tunnel `Error 1033`（如 PM-Plan）属服务端隧道宕机，直接判 `unreachable`；接口返回 `{"message":"签到功能未启用","success":false}`（如 君の星辰）属站点关闭签到模块，归类为 `unsupported`（`ℹ️ 未启用签到`）并保留余额，均非脚本漏签。详见 SKILL.md 坑 22。
+- **2026-11-13 LinuxDO OAuth 授权页 CF 质询耗尽单步超时 & 授权重定向保护**：
+  流光绘境等站点通过 LinuxDO OAuth 登录时，`connect.linux.do` 授权页触发 CF 盾。旧 25 秒固定超时易耗尽导致 `AUTH_TIMEOUT`。
+  延长基线至 45 秒，CF 验证通过后重置 deadline，并确保 35 秒跳转缓冲与平滑重定向。详见 SKILL.md 坑 26。
+- **2026-11-13 非标准代币与无符号数值奖励提取（LDC / Payload / +N 额度）**：
+  扩展 `_money()` 与 Toast 回执正则，支持提取 `LDC`、`Payload`、`🍥`、`¤` 及单纯前导正号的额度增量（如 `+11`），消除奖励漏统与 `None` 误报。详见 SKILL.md 坑 27。
+- **2026-11-13 纯钱包/充值页（如 君の星辰）自适应归类为「未启用签到」**：
+  直达 `/wallet` 钱包页且整页无签到模块的站点，分类器自适应归类为 `unsupported`（`ℹ️ 未启用签到`）并完整保留余额快照，避免误报为 `⚠️ 状态未知`。详见 SKILL.md 坑 28。
+- **2026-11-13 断点恢复状态机（Resume）保留所有合法终态**：
+  恢复状态机放行 `('done', 'auto', 'unreachable', 'unsupported')` 四大终态，跳过已确认为合规失败的失联站（如 PM-Plan Error 1033），结合每站增量刷盘避免中断死循环。详见 SKILL.md 坑 29。
 
 ## 站点笔记
 
@@ -114,6 +123,11 @@
   脚本会误报「点了登录但 connect.linux.do 没有授权按钮」（`NO_AUTH_BUTTON`）。
   修法：点 OAuth 前先 `document.querySelector('input[type=checkbox]').click()`（该复选框被藏成 1×1）。
   勾选后正常跳 `connect.linux.do` →「允许」→ 回 `dashboard/overview`，再进 `/profile` 点 `Check in now`。
+
+### [api生图]流光绘境 — https://images.aihappy.indevs.in/#/profile
+- 2026-11-13 掉登录时重定向至 `#/login?redirect=/profile`，页面仅 51 字符，需点击 `使用 LinuxDO 登录`。
+- `connect.linux.do` 授权页常伴随 Cloudflare 验证，验证通过后点击「允许」授权，回调至 `#/profile`。
+- 签到卡片位于顶部 account tools（`user-quota-bar`），按钮文案 `签到`（class 含 `user-quota-checkin`），点击后入账额度 `+X`，按钮翻转为 `已签到`，不弹出全局 Toast。
 
 ### [50ldc]三水公益站 — https://api.3sbqs.xyz/profile
 - 2026-11-06 头部显示 `付费 $0 免费 $X`。**签到奖励进的是「免费」额度，付费余额真的是 $0**。
