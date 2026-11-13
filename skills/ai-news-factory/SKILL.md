@@ -65,6 +65,47 @@ version: 3.95.0
 > **纪律：`gen_publish` 里每个平台的 `description` 必须与该平台的 `issue_words` 逐词对齐后再生效**——改断言表时同步改文案，或反过来。**不要**为了跑通去删断言（那正是坑 441/460 的形态）；本期是往文案里补词（抖音补 `KYC`、视频号补 `GPT-6.2 灰度口碑分裂`）。
 > 另确认：抖音 `description` 必须以 `#今日羊报AI` 开头的 hashtag 行结尾（本期已有，`#今日羊报AI #AI日报 #Claude #KYC #Gemini4`），视频号同格式；这条 v3.82.0 已写，本期再次验证有效。
 >
+> **🔴 v3.95.0 核心改进（2026-11-13 登录态连续两夜失效根因查清 → 抓取/上传 profile 彻底隔离，坑 463）**
+>
+> **症状**：1112、1113 两期上传时五平台都要重新扫码，而 1111 期明明是好的。
+> 用户问「今天打开的浏览器上传的时候还需要登录，这是为什么」——查清后是**结构性**问题，不是偶发。
+>
+> **根因（坑 463）：抓取与上传共用同一个 profile 目录，但用的是两个不同版本的浏览器。**
+> - 上传 daemon：`/Applications/Google Chrome.app` = **Chrome 157**
+> - 抓取脚本 `_fetch_lists_*.mjs` / `_crawl_*.mjs` 的 `findChromium()`：扫 `~/Library/Caches/ms-playwright/chromium-*` = **Chrome for Testing 148**
+> - 两者 `PROFILE` 默认值都指向 `~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5`
+>
+> macOS 上 Cookie 的 `v10` 加密密钥来自 **Keychain 的 "Chrome Safe Storage"，跟着浏览器 App 走，不跟 profile 走**。
+> 所以：Chrome 157 扫码写入的 cookie，CFT 148 解不开；CFT 148 跑一遍又会用它自己的密钥改写，
+> 第二天 Chrome 157 再读也解不开 → **表现为「cookie 还在但平台要我重新登录」**。
+> 实测证据：cookie 表里有 143 条（抖音 32 / B站 15 / 公众号 13 / 知乎 9），全部 `v10` 前缀，
+> 数据没丢，只是密钥对不上。抓取一跑就坏，睡一觉就是一次抓取——正好对上「隔夜失效」的周期。
+>
+> **修法（B 方案：彻底隔离，已落地）**：
+> | | profile | 浏览器 |
+> |---|---|---|
+> | 抓取 | `ms-playwright-mcp/mcp-chrome-crawl` | Chrome for Testing 148 |
+> | 上传 | `ms-playwright-mcp/mcp-chrome-10b76e5` | 系统 Chrome 157 |
+>
+> 改动清单（已改 1113 期脚本，后续派生自动继承）：
+> - `_fetch_lists_<issue>.mjs` / `_crawl_<issue>.mjs` 的 `PROFILE` 默认值 → `mcp-chrome-crawl`
+> - `_launch_<issue>.sh` 的 `CRAWL_PROFILE` → `mcp-chrome-crawl`；
+>   **`reclaim_profile` 不再 `kill` `browser_daemon.py`**（那条 kill 是坑 434 时代为抢同一 profile 加的，
+>   现在两者不相干，继续杀只会白停上传 daemon 并留下 SUSPENDED 假标记）
+> - `_watchdog_<issue>.sh` 的 crawl-stalled 检测里 `CHROME_HIST` → `mcp-chrome-crawl/Default/History`
+>   （不改就会读不到文件 → 该检测永远静默跳过，等于失效）
+>
+> **顺带解决**：抓取不再需要「先踢掉上传 daemon」，坑 434 那套抢占逻辑从**必须**退化成**兜底**；
+> 两个浏览器可以并存，互不干扰。
+>
+> **风险提示（另一个方向 A，未采用）**：把抓取也改成系统 Chrome 157
+> （`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`，一行环境变量）
+> 也能让密钥一致，但一旦 Chrome 自动升级、或抓取时 Chrome 正在被用户使用，行为不可控；
+> 且 Playwright 1.60 驱动 157 的抓取全流程未实测。**隔离 profile 更稳，故取 B。**
+>
+> **运维提示**：隔离后抓取 profile 是干净的，第一次过 Cloudflare 会走正常挑战（实测一次即过，
+> `TITLE: LINUX DO - 新的理想型社区`，列表 DOM 正常），linux.do 抓取不需要登录。
+
 > **🔴 v3.94.0 核心改进（2026-11-12 1113 期建档：派生器断言照抄上期 needle，触发 AssertionError）**
 >
 > 派生器里的 `for needle in (...)` 断言块是从上一期派生器**整段抄**的，但被断言的文件内容可能已经变了。本期 `_derive_1113.py` 照抄了 1112 的 `'连续 GATE'`，而 `_watchdog_1112.sh` 里实际只有 `GATE 卡死`（注释标题）→ 派生第一步就 `AssertionError: 1113 watchdog lost inherited detector: '连续 GATE'`。

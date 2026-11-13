@@ -70,7 +70,8 @@ done
 echo "===== target reached $(date '+%Y-%m-%d %H:%M:%S') ====="
 
 proxy_ok() { nc -z -w2 127.0.0.1 7897 >/dev/null 2>&1; }
-profile_unlocked() { [ ! -e "$HOME/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5/SingletonLock" ]; }
+# ⚠️ 坑 463 之后：抓取 profile 已与上传 profile 隔离，路径是 mcp-chrome-crawl
+profile_unlocked() { [ ! -e "$HOME/Library/Caches/ms-playwright-mcp/mcp-chrome-crawl/SingletonLock" ]; }
 
 attempt=0
 while true; do
@@ -379,7 +380,8 @@ if [ -f "$LAUNCH_LOG" ] && [ -n "$(find "$LAUNCH_LOG" -mmin -6 2>/dev/null)" ] \
 fi
 ```
 
-**人工解封**：确认没有抓取进程在跑后，`rm` 掉 `~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5/SingletonLock`（**先 `ps aux | grep mcp-chrome-10b76e5` 确认无进程持有**）。注意这是**抓取 profile**，不是上传 daemon 的 `ms-playwright/mcp-chrome-10b76e5`——两者差一个 `-mcp`，别搞错。
+**人工解封**：确认没有抓取进程在跑后，`rm` 掉 `~/Library/Caches/ms-playwright-mcp/mcp-chrome-crawl/SingletonLock`（**先 `ps aux | grep mcp-chrome-crawl` 确认无进程持有**）。
+**坑 463（2026-11-13）之后两者已彻底分开**：抓取 = `mcp-chrome-crawl`，上传 = `mcp-chrome-10b76e5`，**互不相干**，解封抓取锁**绝不能**碰上传目录。
 
 ---
 
@@ -392,7 +394,7 @@ fi
 ```bash
 # 3b. ★ crawl stalled：crawl pid 活着，但 30 分钟没有新行 + Chrome 没有新导航
 if alive "$CRAWL_PIDFILE" _resume_<issue>.sh; then
-  CHROME_HIST="$HOME/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5/Default/History"
+  CHROME_HIST="$HOME/Library/Caches/ms-playwright-mcp/mcp-chrome-crawl/Default/History"
   HIST_TS=""
   if [ -f "$CHROME_HIST" ]; then
     cp "$CHROME_HIST" /tmp/h_<issue>.db 2>/dev/null      # 原库被 Chrome 锁住，必须复制
@@ -412,7 +414,7 @@ fi
 **Chrome History 查询法**（SQLite 的修饰符必须带引号，裸写 `unixepoch` 会报 `no such column: unixepoch`）：
 
 ```bash
-cp ~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5/Default/History /tmp/h.db
+cp ~/Library/Caches/ms-playwright-mcp/mcp-chrome-crawl/Default/History /tmp/h.db
 sqlite3 /tmp/h.db "select datetime(max(last_visit_time)/1000000-11644473600,'unixepoch','localtime') from urls"
 ```
 
@@ -420,7 +422,7 @@ sqlite3 /tmp/h.db "select datetime(max(last_visit_time)/1000000-11644473600,'uni
 
 1. 先归档该窗口内 node 抢写的全 error batch——1106 在浏览器被 kill 后，node 迅速写出 `batch14/15` 两条 15/15 err 的假批；若不归档，`_resume` 的 `isComplete()` 会把它们当成「已完成」跳过（归档到 `data/archive/`）。
 2. `kill -TERM <node_pid>`；1106 实测 TERM 被忽略，必须补 `kill -KILL`。
-3. kill 抓取 Chrome 进程树：`pkill -f 'ms-playwright-mcp/mcp-chrome-10b76e5'`（**带 `-mcp` 的那个 profile**；上传 daemon 是 `ms-playwright/mcp-chrome-10b76e5`，别误杀）。
+3. kill 抓取 Chrome 进程树：`pkill -f 'ms-playwright-mcp/mcp-chrome-crawl'`（**只匹配抓取 profile**；上传 daemon 用 `mcp-chrome-10b76e5`，坑 463 之后不会被这条命令命中）。
 4. 让 `_resume_<issue>.sh` 从当前批重抓：1106 的 batch13 在 kill 前已落盘 `n=15 valid=14 err=1`，`_resume` 按 `isComplete` 跳过 0-12、重抓 batch13，新 node 26500 + 新 Chrome（12 进程）恢复。
 
 **沙箱用例（§6 表第 11 行）**：把 `crawl.log` 的 mtime 改成 31 分钟前、`CRAWL_PIDFILE` 指向一个 `sleep 300` 伪进程、Chrome History 用一份 31 分钟前的副本 → 期望唯一输出 `ALERT "crawl stalled..."`。门限是 `-mmin +30`，31 分钟才命中；30 分钟内仍应走 `RUNNING`。
@@ -534,7 +536,9 @@ wrapper 立刻 `launch wrapper done` 退出，没触发抓取），但副作用�
 
 | 项 | 规定 |
 |---|---|
-| 专用 profile | `~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5` |
+| 上传 profile | `~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5`（系统 Chrome 157） |
+| 抓取 profile | `~/Library/Caches/ms-playwright-mcp/mcp-chrome-crawl`（Chrome for Testing 148）
+  —— **必须分开**：v10 cookie 密钥跟着浏览器 App 走，共用会让上传登录态每次抓取后失效（坑 463） |
 | 登录态 | 公众号 / 知乎 / B站 / 抖音 / 视频号 **长期驻留**，扫码一次长期有效 |
 | 启动 | `bash data/_restart_upload_daemon_<issue>.sh` 或 `python3 templates/browser_daemon.py` |
 | 探活 | `curl -s -m 8 http://127.0.0.1:9222/json/version` |

@@ -8,6 +8,25 @@ version: 16.7.0
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
+## 🔒 抓取 profile 必须与上传 profile 分开（2026-11-13 根因查清，坑 463）
+
+**抓取**：`~/Library/Caches/ms-playwright-mcp/mcp-chrome-crawl`（Chrome for Testing 148）
+**上传**：`~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5`（系统 Chrome 157）
+
+**为什么必须分开**：macOS 的 v10 cookie 密钥来自 Keychain 的 "Chrome Safe Storage"，
+**跟着浏览器 App 走、不跟 profile 走**。共用同一目录而两边浏览器版本不同（CFT 148 vs Chrome 157）时，
+一方写入的 cookie 另一方解不开，还会用错密钥改写 → 表现为「cookie 条数还在，但平台要求重新登录」。
+1112、1113 两期上传各扫码一次，就是这个原因（每次抓取跑一遍就坏一次）。
+
+具体改动：
+- `_fetch_lists_<issue>.mjs` / `_crawl_<issue>.mjs`：`PROFILE` → `mcp-chrome-crawl`
+- `_launch_<issue>.sh`：`CRAWL_PROFILE` → `mcp-chrome-crawl`，
+  且 `reclaim_profile` / `alive_crawl` **不再 kill `browser_daemon.py`**（上传侧与本 profile 无关）
+- `_watchdog_<issue>.sh`：crawl-stalled 的 `CHROME_HIST` → `mcp-chrome-crawl/Default/History`
+  （不改则读不到文件，detector 静默失效）
+
+抓取 profile 是干净的、无需登录，首次过 Cloudflare 实测一次即过。
+
 ## 🔒 浏览器 profile 约定（2026-11-12 用户明确指示；2026-11-13 再次强调三遍）
 
 > 用户原话：「**记得保留这个 profile，现在每次都要登录好烦**」「打开专用 profile 的浏览器，里面已经登录五个平台；以后每次都用这个独立 profile」
