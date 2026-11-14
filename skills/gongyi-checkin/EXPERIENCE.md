@@ -195,10 +195,22 @@
      修法：兄弟节点必须是**整段就是金额**（`^[$¥€￥]?\d[\d,.]*$` 之类），并跳过 待领取/未领取/暂无。
 
   真正的完成标记是 `今日已签到 · 明天 00:00 再来`。
+- **2026-11-14 登录按钮带点与 SSO 判定**：未登录重定向至 `/login`，第三方登录按钮为 `Continue with Linux.do`（带点 `.`），需使用 `/linux[\s._-]*do/i` 正则识别。若 Linux DO 会话需重新鉴权，正确归入 `logged_out`。
 
 ### 简直了 / 魔方 / Ark API 等 Semi-UI 系 — `*.vip/console/personal`
 - 2026-11-04 卡片文案 `Daily Check-in` + `Checked in today, total check-ins NN day`，
   余额 `Current balance`（或 `当前余额`）。奖励写在按钮里 `Today +$X`。
+- **2026-11-14 图形验证码弹窗与 React 受控组件（简直了）**：
+  点击签到后弹出验证码模态窗（含有 Base64 验证码图片与 input 输入框）。
+  1. 直接使用 `input.value = code` 会被 React 受控组件丢弃；必须通过 `HTMLInputElement.prototype.value` 原生 Setter 并 dispatch `input` + `change` 事件（见 `solve_react_captcha()`）。
+  2. 弹窗提交按钮为 `Confirm`，全局查找会被页面侧边栏 `Token Management`（含 `token`）误伤，必须限制在 `.semi-modal, .ant-modal, [role=dialog]` 内部并使用 `\bOK\b`。
+  3. 侧边栏包含 `Linux.DO Credit redemption`，探针扫描必须排除 `redemption|credit` 等兑换项，避免已登录状态被误判为未登录。
+
+### PM-Plan · Token Plan 分发平台 — https://pmplan.net/profile
+- **2026-11-14 行为轨迹滑块风控**：点击「今日签到」后弹出行为轨迹滑块验证码。
+  前端采集高频鼠标移动轨迹数组 `track: [{x, y, t}]` 提交服务端模型校验。
+  任何脚本模拟事件会被判 `bot_behavior`（提示“这次操作轨迹未通过风控，请再自然一点重试”）。
+  此类验证码明确归类为 `blocked_captcha`（`🔒 需人工验证`），由人工在 Chrome 前台手动滑动 1 秒完成。
 
 ### 月城公益站 — https://52ccl.net/profile
 - 2026-11-04 用 `group/card` 形态：按钮文案 `每日签到已签到今天 +$X`，
@@ -243,7 +255,7 @@
    Huan / 烁 / 魔方 / CM-API / Orbitix / 方舟）。00:05 跑签的是「上一个 08:00 窗口」，
    白天打开站点会重新显示「今日尚未签到」；08:05 跑则两种口径都在当日窗口内。
 
-1. `SKILL.md` 的「二十五个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
+1. `SKILL.md` 的「三十三个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
    「读到上一个站点的页面」是危害最大的（数字看着对但全是错的）。
 2. 「站点形态」表 + 本文件的「站点笔记」，判断新站点归哪一形态。
 3. 新站点先 `--dry-run --url <地址> --name <名字>` 单站试，别直接全量点。

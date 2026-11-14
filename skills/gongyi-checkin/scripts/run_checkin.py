@@ -29,9 +29,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from chrome_driver import (  # noqa: E402
     ChromeError, activate_tab, classify, click_checkin, close_extra_tabs,
-    count_tabs, current_url, is_cf_challenge, js, js_retry, navigate,
-    new_tab, osa, probe, solve_react_captcha, tab_count, wait_cf_pass,
-    wait_for,
+    count_tabs, current_url, get_captcha_image_base64, is_cf_challenge, js,
+    js_retry, navigate, new_tab, osa, probe, save_captcha_image,
+    solve_react_captcha, tab_count, wait_cf_pass, wait_for,
 )
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -286,7 +286,7 @@ def linuxdo_login(tab=1):
       var cand=all.filter(function(e){
         var tx=(e.textContent||'').trim();
         if(!tx||tx.length>40) return false;
-        if(!/linux\s*do|linuxdo/i.test(tx)) return false;
+        if(!/linux[\s._-]*do/i.test(tx)) return false;
         if(/已绑定|管理|解除/i.test(tx)) return false;
         if(!vis(e)) return false;
         return true;
@@ -317,14 +317,14 @@ def linuxdo_login(tab=1):
 
 
 def handle_linuxdo_oauth_authorize(tab=1, timeout=45):
-    """Wait for and click the authorize button on connect.linux.do."""
+    """Wait for and click the authorize button on connect.linux.do or linux.do."""
     deadline = time.time() + timeout
     seen_oauth = False
     while time.time() < deadline:
         u = current_url(tab)
-        if "connect.linux.do" in u:
+        if "connect.linux.do" in u or "linux.do/session" in u:
             seen_oauth = True
-        elif seen_oauth and "connect.linux.do" not in u:
+        elif seen_oauth and "connect.linux.do" not in u and "linux.do/session" not in u:
             # 已经授权并跳回原站
             return "redirected_away"
         elif "linux.do/login" in u:
@@ -426,29 +426,34 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                     time.sleep(3)
                     auth_res = handle_linuxdo_oauth_authorize(tab=tab, timeout=45)
                     result["evidence"] += " 授权=%s" % auth_res
-                    # 等待跳回原站
-                    wait_for(lambda: current_url(tab) if "connect.linux.do" not in current_url(tab) else "", timeout=35)
-                    time.sleep(2)
-                    wait_cf_pass(tab=tab, timeout=45, poll=1.5, log_fn=log)
-                    settle(tab=tab, seconds=LOAD_SECONDS)
-
-                    # 检查跳回后的 URL 是否偏离了目标签到页（例如 /sign-in -> /dashboard/overview，但签到页是 /profile）
-                    curr_u = current_url(tab)
-                    target_path = urlparse(url).path
-                    if target_path and target_path not in curr_u:
-                        log("     [OAuth后重定向] 当前在 %s，导航回目标签到页 %s ..." % (curr_u, url))
-                        navigate(url, tab=tab)
+                    if auth_res in ("linuxdo_session_logged_out", "AUTH_TIMEOUT"):
+                        result["state"] = "logged_out"
+                        result["evidence"] += " | LinuxDO授权未完成(%s)" % auth_res
+                        log("     🔴 [需登录] LinuxDO 授权未完成: %s" % auth_res)
+                    else:
+                        # 等待跳回原站（排除 connect.linux.do 以及 linux.do/session 授权中途页面）
+                        wait_for(lambda: current_url(tab) if ("connect.linux.do" not in current_url(tab) and "linux.do/session" not in current_url(tab)) else "", timeout=35)
                         time.sleep(2)
-                        wait_cf_pass(tab=tab, timeout=30, poll=1.5, log_fn=log)
+                        wait_cf_pass(tab=tab, timeout=45, poll=1.5, log_fn=log)
                         settle(tab=tab, seconds=LOAD_SECONDS)
 
-                    page2 = probe(tab=tab)
-                    state2 = classify(page2)
-                    result["state"] = state2["state"]
-                    result["reward"] = state2["reward"]
-                    result["balance"] = state2["balance"]
-                    result["evidence"] += " | 登录后=" + state2["evidence"]
-                    result["final_url"] = current_url(tab)
+                        # 检查跳回后的 URL 是否偏离了目标签到页（例如 /sign-in -> /dashboard/overview，但签到页是 /profile）
+                        curr_u = current_url(tab)
+                        target_path = urlparse(url).path
+                        if target_path and target_path not in curr_u and "linux.do" not in curr_u:
+                            log("     [OAuth后重定向] 当前在 %s，导航回目标签到页 %s ..." % (curr_u, url))
+                            navigate(url, tab=tab)
+                            time.sleep(2)
+                            wait_cf_pass(tab=tab, timeout=30, poll=1.5, log_fn=log)
+                            settle(tab=tab, seconds=LOAD_SECONDS)
+
+                        page2 = probe(tab=tab)
+                        state2 = classify(page2)
+                        result["state"] = state2["state"]
+                        result["reward"] = state2["reward"]
+                        result["balance"] = state2["balance"]
+                        result["evidence"] += " | 登录后=" + state2["evidence"]
+                        result["final_url"] = current_url(tab)
 
         host = (urlparse(url).hostname or "").lower()
 
@@ -535,10 +540,13 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                     result["state"] = "blocked_captcha"
                     result["reward"] = state_v["reward"] or result["reward"]
                     result["balance"] = state_v["balance"] or result["balance"]
-                    result["evidence"] += " | 弹出图形验证码"
+                    result["evidence"] += " | " + state_v["evidence"]
                     result["final_url"] = current_url(tab)
+                    if save_captcha_image(tab=tab):
+                        result["evidence"] += " (已提取验证码至 /tmp/gongyi_captcha.png)"
+                        log("     📸 [验证码已保存] 验证码已提取并保存至 /tmp/gongyi_captcha.png")
                     verified = True
-                    log("     🔒 [图形验证码] 检测到图形验证码弹窗，需识别输入！")
+                    log("     🔒 [需人工验证] %s" % state_v["evidence"])
                     break
                 elif v_round == 8 and state_v["state"] == "pending":
                     # 仅在确认无 CF Turnstile 质询或验证码弹窗时才重试点击，避免重置 Turnstile
@@ -842,6 +850,25 @@ def main():
     if n_tabs.startswith("__") or "error" in n_tabs.lower():
         raise SystemExit("cannot talk to Chrome (tabs=%s). Is Chrome running?" % n_tabs)
     log("Chrome tabs=%s" % n_tabs)
+
+    # 坑 17 / 坑 33：多 Chrome 实例启动竞争检测与诊断提示
+    try:
+        ps_out = subprocess.check_output(
+            "ps -Ao pid,command | grep -E 'MacOS/Google Chrome( |$)' | grep -v Helper",
+            shell=True, stderr=subprocess.DEVNULL
+        ).decode("utf-8", "ignore").strip().splitlines()
+        if len(ps_out) > 1:
+            log("⚠️ [多实例警告] 检测到 %d 个 Chrome 进程同时运行！" % len(ps_out))
+            try:
+                win_name = osa('tell application "Google Chrome" to get name of window 1', timeout=5).strip()
+                log("   当前 AppleScript 绑定窗口 1: %s" % win_name)
+                if any(w in win_name for w in ("微信", "视频号", "抖音", "创作者", "Bilibili", "New Tab", "chrome://")):
+                    log("   🚨 警告：当前绑定的疑似为后台流水线 Chrome (mcp-chrome)！")
+                    log("   建议先终止 browser_daemon.py 与流水线 Chrome，释放 AppleScript 绑定给用户日常 Chrome。")
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     if args.url:
         stations = [{"name": args.name or urlparse(args.url).hostname, "url": args.url}]

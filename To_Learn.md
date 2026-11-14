@@ -583,7 +583,7 @@ vertical-3-4.png
 
 定时任务
 今天10:35pm执行
-  执行 linuxdo 全量日报流水线（日期按明天：2026-11-13）。
+  执行 linuxdo 全量日报流水线（日期按明天：2026-11-14）。
   要求与「过滤后全部抓取完」一致：
   1) 用 linuxdo-daily：双源列表 → 合并去重/公益站过滤 → 32h 窗口 → 全量逐帖抓取正文（每批立即保存 batch_browser_N.json）→ 二次过滤 → 写 data/daily/YYYY-MM-DD.json、data/reports/YYYY-MM-DD.md、press、PDF。
   2) 然后用 ai-news-factory 生成当日日报视频：事件按推荐自动选定，不用再向我确认；权限给足直接跑；上传各平台一律存草稿。
@@ -791,7 +791,13 @@ to do
 后续可以把目标网址的cf验证转发到本地服务获取cf_clearance;然后可以用 curl_cffi 的 impersonate="chrome{ver}" 复刻对应 Chrome 版本的 TLS/HTTP2 指纹，把 UA、Sec-Ch-Ua、平台头、cf_clearance cookie 全部配齐
 
 
-根据今天的生成过程 更新优化skill
+- [x] 根据今天的生成过程 更新优化skill（2026-11-14 已完成，32站成功30站，新增坑30-33与验证码自动落盘）：
+  - 坑30: LinuxDO OAuth 带点识别 `Continue with Linux.do` (`/linux[\s._-]*do/i`) 与 `linux.do/session` SSO 流程中转及终态锁定
+  - 坑31: React 受控验证码原生 Setter 注入与 `\bOK\b` 边界防误伤 `Token Management` 导航链接
+  - 坑32: 过滤 `Linux.DO Credit redemption` 等非登录兑换链接，避免已登录状态误判为 `logged_out`
+  - 坑33: 多 Chrome 实例（`mcp-chrome-10b76e5` vs 日常默认 profile）竞争预检与 AppleScript 窗口绑定诊断防护
+  - 图形验证码自动落盘：新增 `get_captcha_image_base64()` / `save_captcha_image()` 自动落盘 `/tmp/gongyi_captcha.png`
+  - 双份拷贝同步：系统 `~/.claude/skills/gongyi-checkin/` 与工作区 `skills/gongyi-checkin/` 100% 校验一致
 记得保留这个profile 现在每次都要登录好烦
 打开专用 profile 的浏览器，里面已经登录五个平台；以后每次都用这个独立 profile，
 微信公众号记得输入标题

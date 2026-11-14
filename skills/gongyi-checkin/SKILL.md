@@ -74,7 +74,7 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 
 ---
 
-## 🚨 二十九个会静默失败的坑
+## 🚨 三十三个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
@@ -345,6 +345,32 @@ new-api 系日历组件底部常驻静态规则说明 `You can only check in onc
   1. `run_checkin.py` 原生支持 `--resume` 参数；
   2. 断点恢复状态机将合法终态集合扩大为 `('done', 'auto', 'unreachable', 'unsupported')`，只有真正未决的异常（如 `logged_out`、`blocked_captcha`、`unknown`）才在重跑时出栈重试；
   3. 主循环每完成一个站点即实时保存 `last-run.json` 与 `last-run.md`，确保任意时刻中断均不丢失前面站点的签到成果。
+
+### 坑 30：LinuxDO 登录按钮文本带点与 Discourse SSO 流程中转（`linux.do/session`）
+
+1. **按钮文本正则防漏**：`lOXO` 等站点第三方登录按钮文案为 `Continue with Linux.do`（带点 `.`）。旧正则 `/linux\s*do|linuxdo/i` 只匹配空格与无空格写法，导致漏认登录按钮，误判为状态未知。
+   - **修法**（2026-11-14 落地）：统一升级为 `/linux[\s._-]*do/i`，覆盖 `Linux.do`、`Linux-DO`、`Linux DO` 等各类写法。
+2. **Discourse SSO 授权中转与终态锁定**：`connect.linux.do` 进行鉴权时常中转至 `linux.do/session/sso_provider`。若脚本只监控 `connect.linux.do`，会误将中转页判定为跳出授权并提前重定向，破坏授权流。此外，当授权未完成（如 `linuxdo_session_logged_out`）时，若继续 probe `linux.do/login` 页面会被误判为 `unknown`（提示 `Skip to main`）。
+   - **修法**（2026-11-14 落地）：将 `linux.do/session` 纳入 OAuth 授权监控范围；授权失败（`linuxdo_session_logged_out` / `AUTH_TIMEOUT`）时明确锁定 `logged_out`（`🔴 需登录`），避免覆盖为状态未知。
+
+### 坑 31：React 验证码提交按钮误伤 Token 词根与限定弹窗容器（`\bOK\b`）
+
+1. **确定按钮误伤导航链接**：旧正则 `/确定|确认|Confirm|Submit|OK/i` 中的 `OK` 会无前缀匹配 `Token Management` 中的 `token`（含 `ok` 子串），导致将验证码提交误点成页面侧边栏导航链接。
+   - **修法**（2026-11-14 落地）：必须使用 `\bOK\b` 严格整词匹配，并优先限定在 `.semi-modal, .ant-modal, [role=dialog]` 容器内部寻找提交按钮。
+2. **图形验证码自动提取落盘**：引入 `get_captcha_image_base64()` 与 `save_captcha_image()`，当检测到图形验证码弹窗时自动将完整 Base64 图片还原保存至 `/tmp/gongyi_captcha.png`，便于人工速览或后续接入自动化 OCR。
+
+### 坑 32：积分兑换/账号绑定链接混淆为第三方登录按钮（`Credit redemption` / `Bind`）
+
+侧边栏与设置页中的 `Linux.DO Credit redemption` / `LinuxDO Bind` 等积分兑换或账号绑定链接会被 `login` 规则误收录（文本包含 `linux.do`），导致已处于登录状态的站点（如 `简直了`）被张冠李戴误判为未登录（`logged_out`）。
+- **修法**（2026-11-14 落地）：在 `PROBE_JS` 与 `linuxdo_login()` 中增加排除词过滤：`/已绑定|管理|解除|redemption|credit|兑换|充值|bind/i`，彻底隔离正常业务链接。
+
+### 坑 33：多 Chrome 实例启动竞争与 AppleScript 窗口绑定诊断防护
+
+当系统后台运行 AI 新闻流水线守护进程（`browser_daemon.py` 起的 `--user-data-dir=.../mcp-chrome-10b76e5`）时，`tell application "Google Chrome"` 默认会被系统解析至最后注册或激活的实例。若脚本静默附着到 `mcp-chrome`，由于其完全不具备日常 Chrome 的 28+ 站点 Cookie，会导致大面积出现 `logged_out` 或「暂时失联」。
+- **修法**（2026-11-14 落地）：
+  1. 启动时自检 Chrome 进程数：`ps -Ao pid,command | grep ...`；
+  2. 若大于 1 个实例，通过 `tell application "Google Chrome" to get name of window 1` 探测当前绑定的窗口标题；
+  3. 若命中微信公众号/视频号/抖音/B站/创作者平台等流水线特征，立即在日志中输出高危告警提示用户或安全抢占，防止 0 登录态误跑。
 
 ---
 

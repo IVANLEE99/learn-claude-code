@@ -412,8 +412,8 @@ PROBE_JS = r"""
   for(var i=0;i<all.length;i++){
     var e=all[i], tx=(e.textContent||'').trim();
     if(!tx || tx.length>30) continue;
-    if(!/linux\s*do|linuxdo/i.test(tx)) continue;
-    if(/已绑定|管理|解除/i.test(tx)) continue;
+    if(!/linux[\s._-]*do/i.test(tx)) continue;
+    if(/已绑定|管理|解除|redemption|credit|兑换|充值|bind/i.test(tx)) continue;
     if(!vis(e)) continue;
     var r=e.getBoundingClientRect();
     lg.push({tag:e.tagName, txt:tx, vis:true,
@@ -604,14 +604,16 @@ def solve_react_captcha(tab=DEFAULT_TAB, code=""):
     """Inject graphical captcha code into React controlled input via native property setter and submit."""
     js_expr = r"""
     (function(){
-      var input = document.querySelector('input[placeholder*="验证码"], input[placeholder*="code"], input[name*="captcha"]');
+      var modal = document.querySelector('.semi-modal, .ant-modal, [role=dialog]');
+      var root = modal || document;
+      var input = root.querySelector('input[placeholder*="验证码"], input[placeholder*="code"], input[name*="captcha"]');
       if (!input) return 'NO_INPUT';
       var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
       setter.call(input, %s);
       input.dispatchEvent(new Event('input', {bubbles: true}));
       input.dispatchEvent(new Event('change', {bubbles: true}));
-      var btn = Array.from(document.querySelectorAll('button, a, .ant-btn'))
-        .filter(function(e){ return /确定|确认|Confirm|Submit|OK/i.test((e.textContent||'').trim()) && e.offsetWidth > 0; });
+      var btn = Array.from(root.querySelectorAll('button, a, .ant-btn, .semi-button'))
+        .filter(function(e){ return /确定|确认|Confirm|Submit|\bOK\b/i.test((e.textContent||'').trim()) && e.offsetWidth > 0; });
       if (btn.length > 0) {
         btn[0].click();
         return 'SUBMITTED';
@@ -620,6 +622,49 @@ def solve_react_captcha(tab=DEFAULT_TAB, code=""):
     })()
     """ % json.dumps(code)
     return js(js_expr, tab=tab)
+
+
+def get_captcha_image_base64(tab=DEFAULT_TAB):
+    """Retrieve the full base64 data URL or src of the active captcha image."""
+    js_expr = r"""
+    (function(){
+      var modal = document.querySelector('.semi-modal, .ant-modal, [role=dialog]');
+      var root = modal || document;
+      var img = root.querySelector('img[src^="data:image"], img[src*="captcha"]');
+      if (!img) return '';
+      if (img.src && img.src.indexOf('data:image') === 0) {
+        return img.src;
+      }
+      try {
+        var canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width || 120;
+        canvas.height = img.naturalHeight || img.height || 40;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        return canvas.toDataURL('image/png');
+      } catch(e) {
+        return img.src || '';
+      }
+    })()
+    """
+    return js(js_expr, tab=tab)
+
+
+def save_captcha_image(tab=DEFAULT_TAB, out_path="/tmp/gongyi_captcha.png"):
+    """Extract and save the active captcha image to disk."""
+    import base64
+    raw = get_captcha_image_base64(tab=tab)
+    if not raw or not isinstance(raw, str):
+        return False
+    if "base64," in raw:
+        b64_data = raw.split("base64,", 1)[1]
+        try:
+            with open(out_path, "wb") as f:
+                f.write(base64.b64decode(b64_data))
+            return True
+        except Exception:
+            return False
+    return False
 
 
 # ---------------------------------------------------------------------------
