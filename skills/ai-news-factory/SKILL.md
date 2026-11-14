@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.95.0
+version: 3.96.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.95.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.96.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -36,6 +36,77 @@ version: 3.95.0
 5. **不要 kill 用户日常 Chrome**；**不要**清空该 profile 目录（等于让五个平台重新扫码）。
 6. 若某平台掉登录，只需在该 profile 的浏览器窗口里重新扫码，**不需要**重建 profile。
 
+> **🔴 v3.96.0 核心改进（2026-11-14 1114 期实跑：披露段前缀子串放行 / 租约 adoption 与 fd 悬挂 / 收工后改产物导致粘性 blocked，坑 467-468、471-474）**
+>
+> 1114 期：抓取 583 帖 / 正文覆盖 622/623（`permanent_gone=1`），五平台草稿全落库。
+> 本期最贵的几条都不是「跑挂了」，而是**判据放行 / 状态自锁**：自拟披露句靠前缀混过断言、
+> 租约元数据说活着而内核锁已释放、DONE 之后改了一句披露就让整条链变成粘性 blocked。
+>
+> ① **坑 467：固定句断言必须整句全等，`assert FIXED in text` 会放行「固定句 + 后缀」的自拟版本**
+> 本期披露段被写成「固定句 + 一句来源说明（事实性内容以某社区原帖为准…）」——固定句恰好是它的**前缀**，
+> 于是 `assert AI_DISCLOSURE in _md` 恒真，来源平台名一路进正文。**正确写法两道一起上**：
+> ```python
+> assert norm(text).count(FIXED_WHOLE) == 1
+> assert not re.search(r'linux\.do|linuxdo|linux do', text, re.I)
+> ```
+> `FIXED_WHOLE` 必须从 `templates/platform-zhihu.md §1.4` **逐字拷贝**，禁止从上期脚本或上期稿件拷（坑 395 同族）。
+>
+> **坑 467 附条：文章层不在 `check-derived-content.py` 的扫描范围，`ai_disclosure` 是自报。**
+> `templates/check-derived-content.py` 只收 `script` / `voiceover` / `prompts` / `sections` 四层，
+> **文章 md（`wechat-article-*.md` / `zhihu-article-*.md`）根本不在扫描范围**；articles 阶段的 `ai_disclosure: true`
+> 是 worker 自报，不是校验结果。要么把两份 article 加进 `layers`（禁词 + 日期形态 + 串期三查），
+> 要么在 `Validator.validate('articles')` 里硬断言上述两条 + 公众号稿 0 处来源平台名。
+> **「checker PASS」不等于「文章合规」。**
+>
+> ② **坑 468：租约继承只比 pid + `same_process()`，且父进程必须立刻关掉自己那份 fd**
+> 症状：`crawl-supervisor.log` 首行 `{"rc": 3, "reason": "exact inherited job lease adoption refused"}`，
+> 此后 tick 一直 SKIP、整夜空转。两个独立缺陷叠加：
+> - **A（整 dict 比较）**：旧代码 `record.get('child') != identity`，而 `ps` 两次取样的 `stat` / `command`
+>   字符串可能不等 → 子进程 adoption 被拒。**只比 `pid` + `same_process()`**。
+> - **B（元数据悬挂）**：`job.detach()` 后直接 `return`，子进程在 adoption 前死掉时，sidecar 仍写着
+>   `owner=L1 父进程`（活），而内核 flock 已随子进程消失 → `lease_status.busy` 恒真 → tick 永久 SKIP。
+>   **gate 放行后立刻 `os.close(job.fd)` 并置 `fd=None`（只关自己那份，不 `LOCK_UN`）**，
+>   再等 ≤2s 观察子进程是否早退；早退则**只清自己 token 的元数据**并 `raise Refusal(1, ...)`（可重试错误）。
+> 判据：子进程身份校验失败要能重试；父进程留下的「元数据说活着、内核锁已释放」必须被识别为死锁而不是忙碌。
+>
+> ③ **坑 471：DONE 是「产物哈希快照」，不是「历史结论」**
+> 收工后为改一句披露重写了知乎稿 → `evidence/articles.json` 记的 `sha256` 与现文件不符 →
+> `status` / `tick` 直接 `rc=3 duplicate or altered artifact`，`tick` 还会把它写成**粘性 blocked**（`automatic_retry: false`）。
+> 同一次整稿重写还把 H1 改成了另一个标题，与 `publish.json`、页面回读三方不一致。
+> **纪律**：① 收工后只改「未纳入 evidence 的副本」，要改正文就**同步重算 evidence 并重新 checkpoint**；
+> ② 局部修复用精确替换（Range / 字符串锚点），**禁止整稿重写**；③ 改完回读三方身份：
+> 稿件首行 == `publish.json` 该平台 `title` == 页面回读 `title`。
+>
+> ④ **坑 472：知乎 `pic-private` 图「加载失败」多数是签名 URL 过期，不是上传失败**
+> 图 URL 带 `expiration` / `auth_key`，长时间停留的标签页里签名过期后渲染成「加载失败」且 `naturalWidth=0`，
+> 但服务端图片是好的。**判定顺序**：① 先看 `img.src` 的 `expiration` 是否已过；② `page.reload()` + 从头逐屏滚到底
+> （触发懒加载）后再测；③ 仍为 0 才按「删块原位重插」修复。
+> **`complete === true` 不能证明图片有效**（本期 4 张坏图全是 `complete: true`）；唯一有效判据是 `naturalWidth > 0`。
+> **先复核再重跑**（坑 424 同族，这是第 4 次复现）。
+>
+> ⑤ **坑 473：无头 worker 的可用调用式（本期实测 71 分钟 / 304 轮）**
+> ```bash
+> claude --print "$PROMPT" --output-format stream-json --verbose \
+>   --permission-mode acceptEdits \
+>   --allowedTools 'Bash,Read,Write,Edit,Glob,Grep,Skill,WebFetch,WebSearch' \
+>   --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-chrome
+> ```
+> 首轮 `--session-id <uuid>`、续跑 `--resume <uuid>`。**不要加「关闭审批」类参数**（如 `--permission-prompts none`）——
+> 那是把审批拿掉，与「显式白名单 + acceptEdits」是两种不同姿势，不要用；**不要指定/迁移模型**，用当前配置模型。
+> `env` 里只清 `CLAUDECODE`，其余凭据/配置原样继承。
+> 流式日志用 `system/init` 的 `session_id` 做身份校验；`result/is_error` 里出现 auth/login 字样就 `Refusal(4)` 停手，
+> **不要无人值守重试**。（注：本期只起过一次 worker，`--resume` 路径未被实际执行。）
+>
+> ⑥ **坑 474：平台非持久化字段再收紧两条**
+> - **合集名按码点核，别按肉眼**：视频号 / 抖音的合集名实际是「今日羊报**Al**」——末两位是 ASCII `A` + 小写 `l`，
+>   不是 `AI`。断言用码点或 `unicodedata` 比对，**不要**用 `'今日羊报AI' in album`。
+> - **抖音封面槽位只断言宽高比（±2%）**：平台会重编码，本期实测 `1536×1151` / `1006×1343`，
+>   不是 1536×1152 / 1152×1536。
+>
+> 其余非持久化字段继续按「如实披露、不伪报 PASS」处理：知乎创作声明、视频号视频标注、抖音合集（软字段）+ 无草稿 ID（只能靠恢复横幅）。
+>
+> **另记（本期未证实，不写成规则）**：`--permission-prompts none` 被安全策略拒绝只有代码注释与设计推演、**没有**一次真实拒绝记录，所以只写「不要用」；抓取卡死回收（`STALL_SECONDS`）与 `--resume` 续跑本期均未触发，不作验证结论。
+>
 > **🔴 v3.95.0 核心改进（2026-11-13 1113 期全链实跑：摘哨兵却不换内容 / 断言吞异常假绿 / int-str 键混用，坑 463-466）**
 >
 > 本期抓取 35 批 / 521 队列 / 515 帖 / err=0，PDF 1.20MB / 9 页，视频 185.85s / 15.6MB / 1920×1080，锚点 `account_risk` **0.7116**，字幕 lead 中位 +0.175s / 离群 0 / 8 场景块 Δ≤1ms，五平台草稿全落库。**但上传阶段差点把 1112 期的正文发进 1113 的公众号稿**——这是本期最贵的一条。
@@ -1059,6 +1130,10 @@ $PY ~/.claude/skills/ai-news-factory/templates/check-derived-content.py --date <
 - **锚点**必须 `ready` + `narrator` + `reviewed` + `script_15s` 逐字嵌入
 
 > 这里只列「必须记住的四条」+ 上述两条命令。
+>
+> **⚠️ 范围提醒（v3.96.0，坑 467）**：`check-derived-content.py` 只扫 `script` / `voiceover` / `prompts` / `sections` 四层，
+> **`zhihu-article-*.md` / `wechat-article-*.md` 不在扫描范围**；articles 阶段的 `ai_disclosure: true` 是 worker 自报。
+> 两份 article 的合规必须单独断言：固定句**整句**恰 1 次（`count()==1`，不是 `in`）+ 全文 0 处来源平台名。
 
 **① 派生源只从 `templates/` 拷，不从上一期脚本拷。**
 `cdp_helper.py` / `issue_guard.py` / `gen_captions.py` / `revive_frozen_tabs.py` 属于「随 skill 演进」的部分，上一期脚本是「那天正确的快照」（坑 395）。
@@ -7376,6 +7451,58 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.96.0（2026-11-14 1114 期实跑：披露段前缀子串放行 / 租约 adoption 与 fd 悬挂 / 收工后改产物导致粘性 blocked，坑 467-468、471-474）
+
+1114 期：daily **583 帖**（正文覆盖 **622/623**，`permanent_gone=1` / `missing=0`）→ 报告 + press + PDF → 视频 → 封面 →
+五平台草稿全落库（公众号 / 知乎 / B站 / 抖音 / 视频号）。
+本期没有一条是「跑挂了」，全是**判据放行或状态自锁**：自拟披露句靠前缀混过断言、租约元数据说活着而内核锁已释放、
+DONE 之后改一句披露就把整条链变成粘性 blocked。与 v3.90/v3.91/v3.92 的结论第四次一致——问题几乎总在判据层。
+
+#### 坑 467：固定句断言必须整句全等，`assert FIXED in text` 会放行「固定句 + 后缀」的自拟版本
+
+- **症状**：知乎正文进了 1 处 `linux.do`，而上传脚本 `assert AI_DISCLOSURE in _md` 一路通过。
+- **根因**：自拟句恰好以固定句为**前缀**（固定句末尾之后再接一句来源说明），`in` 恒真。
+- **修法**：`norm(text).count(FIXED_WHOLE) == 1` **且** `assert not re.search(r'linux\.do|linuxdo|linux do', text, re.I)`；
+  `FIXED_WHOLE` 从 `templates/platform-zhihu.md §1.4` 逐字拷贝。
+- **附条**：`templates/check-derived-content.py` 只收 `script` / `voiceover` / `prompts` / `sections` 四层，
+  **文章 md 不在扫描范围**；`articles` 阶段的 `ai_disclosure: true` 是 worker 自报。
+  把两份 article 加进 `layers`，或在 `Validator.validate('articles')` 里硬断言。**「checker PASS」≠「文章合规」。**
+
+#### 坑 468：租约继承只比 pid + `same_process()`，且父进程必须立刻关掉自己那份 fd
+
+- **症状**：`crawl-supervisor.log` 首行 `{"rc": 3, "reason": "exact inherited job lease adoption refused"}`，此后 tick 永久 SKIP。
+- **根因 A**：`record.get('child') != identity` 整 dict 比较，`ps` 两次取样的 `stat`/`command` 可能不等 → adoption 被拒。
+- **根因 B**：`job.detach()` 后直接 `return`；子进程在 adoption 前死掉时 sidecar 仍写 `owner=L1 父进程`（活），
+  而内核 flock 已随子进程消失 → `lease_status.busy` 恒真。
+- **修法**：只比 `pid` + `same_process()`；gate 放行后立刻 `os.close(job.fd)` 并置 `fd=None`（不 `LOCK_UN`），
+  等 ≤2s 确认 adoption，早退则只清自己 token 的元数据并 `raise Refusal(1, ...)`。
+
+#### 坑 471：DONE 是「产物哈希快照」，不是「历史结论」
+
+收工后为改一句披露整稿重写知乎稿 → `evidence/articles.json` 的 `sha256` 失配 → `status`/`tick` `rc=3 duplicate or altered artifact`，
+`tick` 还会写成**粘性 blocked**（`automatic_retry: false`）。同一次重写把 H1 改成另一个标题，三方不一致。
+**纪律**：收工后只改未纳入 evidence 的副本；要改正文就重算 evidence 并重新 checkpoint；局部修复用精确替换，**禁止整稿重写**；
+改完回读「稿件首行 == `publish.json` title == 页面回读 title」。
+
+#### 坑 472：知乎 `pic-private` 图「加载失败」多数是签名 URL 过期
+
+URL 带 `expiration` / `auth_key`，过期后 `naturalWidth=0` 但服务端图片是好的。判定顺序：看 `expiration` → `reload()` + 逐屏滚到底 → 仍为 0 才删块重插。
+**`complete === true` 不能证明图片有效**（本期 4 张坏图全是 `complete: true`），唯一判据是 `naturalWidth > 0`；先复核再重跑（坑 424 同族，第 4 次复现）。
+
+#### 坑 473：无头 worker 的可用调用式
+
+`claude --print "$PROMPT" --output-format stream-json --verbose --permission-mode acceptEdits --allowedTools 'Bash,Read,Write,Edit,Glob,Grep,Skill,WebFetch,WebSearch' --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-chrome`
+（首轮 `--session-id <uuid>`、续跑 `--resume <uuid>`）。本期实测 71 分钟 / 304 轮 / 无权限拒绝。
+**不要用「关闭审批」类参数**；**不要指定/迁移模型**；`env` 只清 `CLAUDECODE`。
+流式日志用 `system/init.session_id` 校验身份，`result/is_error` 含 auth/login 就 `Refusal(4)`，不无人值守重试。
+
+#### 坑 474：平台非持久化字段再收紧两条
+
+- 合集名按**码点**核：视频号/抖音实际是「今日羊报**Al**」（ASCII `A` + 小写 `l`），不是 `AI`；不要用 `'今日羊报AI' in album`。
+- 抖音封面槽位只断言**宽高比 ±2%**：本期实测 `1536×1151` / `1006×1343`，平台会重编码。
+
+**未证实、不写成规则**：`--permission-prompts none` 被拒只有注释与推演、无真实拒绝记录；抓取卡死回收与 `--resume` 续跑本期均未触发。
 
 ### v3.95.0（2026-11-13 1113 期全链实跑：摘哨兵不换内容 / 断言吞异常假绿 / int-str 键混用，坑 463-466）
 

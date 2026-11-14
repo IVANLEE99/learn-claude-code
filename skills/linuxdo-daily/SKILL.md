@@ -1,10 +1,10 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.7.0
+version: 16.8.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.7.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.8.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
@@ -69,6 +69,41 @@ version: 16.7.0
 >
 > 另：本期归档了 1112 期 70 个中间态文件（`data/archive/2026-11-13-prev-20261112_233619`），
 > 否则 `_resume` 的 `isComplete` 会把上期批次当成本期已完成直接跳过（与 1112 期同一条前置动作）。
+>
+> **🔴 v16.8 核心改进（2026-11-14 1114 期实跑：列表页永不收敛 / 永久消失帖把整条链卡成死循环，坑 469-470）**
+>
+> 本期 1114：Source A 列表滚到 2903 行仍在涨，加近期窗口上限后在 2218 行收口（Source B 2220 行）；
+> 正文 `BODY COVERAGE 622/623 errors=1 permanent_gone=1 missing=0`，daily `posts=583 covered=622/623 excluded=40`。
+> 两条主干坑都在抓取侧（另带一条 `coverage` 附条），且都不是「抓不到」，而是**判据永不为真 / 硬门禁永不通过**。
+>
+> ① **坑 469：板块列表是无界增长的，别等「稳定平台」**。`_fetch_lists_<issue>.mjs` 的终止条件要求
+> 「连续 3 次计数相等」，但 1114 实测每 1–2 次滚动就 +30 行（`scroll 180` 时已 2903 行仍在涨），
+> 单次重复从不连续 3 次 → 三次 resume 各跑满 180 次滚动后 `rc=1 Source A failed after 3 attempts`。
+> **修法：滚动循环必须有「近期窗口行数上限」**——
+> ```js
+> if (count >= CAP && i >= 20) { console.log(`recent-window cap reached at ${count} rows`); return count; }
+> ```
+> CAP 按「32h 窗口所需行数 × 2」现场推导，**不要照抄 2200**（1114 的 2200 只对当期板块活跃度成立；
+> 本期窗口内最后一行索引 A=1328 / B=35，A 仍有约 870 行余量）。
+> 同时保留 11 分钟硬超时与「仍在增长 / 未穷尽」的显式错误，别让「到达上限」伪装成「已抓完」。
+> **校验方式**：抓完用 `created` 反算「窗口内最后一行的索引」，必须 `< CAP × 0.7`。
+>
+> ② **坑 470：全队列「每个 ID 必须有正文」是死门禁，遇到已删/私有帖会无限重试**。
+> 1114 有 1 个 id 连续 7 次 `rc=1 incomplete bodies`，重试 8 次（`batch_browser_4` + `retry0..6`）都返回
+> `empty_deleted_private_or_unloaded`。**删掉的帖子重跑一万次也不会回来，第 3 次失败就该出清单。**
+> **修法：允许「证据背书的排除清单」**——`data/<issue>-permanent-gone.json` 每条含
+> `id / reason / attempts / attempt_files`；加载时**逐份 checkpoint 反查**：
+> 文件存在、该 id 恰好一行、无标题、`error` 与 `reason` 完全一致、`attempts == len(attempt_files)` 且 `>= 6`，
+> 任一不符即 `Refusal(3)`。**禁止伪造标题/正文凑覆盖率**。
+>
+> **附条（坑 470）：`coverage` 必须写 provenance，不能只写一个比值**。旧日志只打
+> `BODY COVERAGE 622/623 errors=1`，看不出分母怎么来的、那 1 个去哪了。**修法：coverage 同时写
+> `valid_total` 与 `gone_ids`，`validate_daily` 断言 `set(good) | set(gone) == set(ids)`；
+> 日志固定打 `errors=… permanent_gone=… missing=…` 三个计数。** 这样「覆盖率」才是可复核的等式，
+> 而不是 worker 自报的分子分母。
+>
+> 另：本期 L1/L2 的唯一中断是 `controller interrupted; exact-owner lease cleanup`（调度层租约问题记在
+> ai-news-factory v3.96.0 坑 468）。`STALL_SECONDS` 的卡死回收本期**未触发**，不作结论。
 >
 > **🔴 v16.6 核心改进（2026-11-13 1113 期派生：历史注释泛化必须覆盖「本期发现」这类措辞）**
 >
@@ -426,6 +461,8 @@ async (page) => {
 ```
 
 **终止条件**：每轮滚动后检查数量，如果 < 400 则追加一轮。通常 35 次滚动（3 轮）可加载 1000+ 帖，足够日报使用。
+
+> **🔴 v16.8 追加（坑 469）**：板块列表是**无界增长**的，「连续 3 次计数相等」的稳定平台判据在活跃板块上不可达（1114 实测 180 次滚动仍在 +30 行/次）。滚动循环必须同时有**近期窗口行数上限**：`if (count >= CAP && i >= 20) { console.log(`recent-window cap reached at ${count} rows`); return count; }`，CAP = 32h 窗口所需行数 × 2，**现场推导、不照抄 2200**；到达上限与「仍在增长」必须是两种不同的退出信号。
 
 ### 1.3 提取帖子列表（含时间戳）并保存
 
@@ -1628,6 +1665,20 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.8.0 (2026-11-14) — 1114 期：板块列表无界增长 + 永久消失帖把整条链钉死
+
+**版本**：16.7.0 → 16.8.0
+
+**实测数据（2026-11-14 期，DATE=2026-11-14）**
+- Source A 列表滚动到 **2903 行仍在增长**，加近期窗口上限后 `recent-window cap reached at 2218 rows`（Source B 2220 行）
+- 正文 `BODY COVERAGE 622/623 errors=1 permanent_gone=1 missing=0` → daily `posts=583 covered=622/623 excluded=40`
+- 期间 `_resume` 连续 7 次 `rc=1 incomplete bodies`（同一个已删帖），第 3 次 resume 才靠排除清单收工
+
+**新坑（v16.8）**
+- **坑 469：列表页是无界增长的，「连续 N 次计数相等」的稳定平台判据永远不可达**。实测每 1–2 次滚动 +30 行，180 次滚动跑满也不收敛 → 三次 resume 全 `rc=1 Source A failed after 3 attempts`。**必须加「近期窗口行数上限」**（`count >= CAP && i >= 20` 即返回并打印 `recent-window cap reached at N rows`），CAP = 32h 窗口所需行数 × 2 现场推导，不照抄 2200；抓完用 `created` 反算窗口内最后一行索引，须 `< CAP × 0.7`。
+- **坑 470：全队列「每个 ID 必须有正文」是死门禁**，已删/私有帖会无限重试（本期同一 id 8 次尝试，reason 恒为 `empty_deleted_private_or_unloaded`）。改用 `data/<issue>-permanent-gone.json` 证据清单：逐份 checkpoint 反查（文件存在 / 该 id 恰一行 / 无标题 / error == reason / attempts == len(files) 且 ≥ 6），任一不符即 `Refusal(3)`；**禁止伪造标题正文凑覆盖率**。
+- **附条（坑 470）：`coverage` 必须写 provenance**。同时写 `valid_total` 与 `gone_ids`，`validate_daily` 断言 `set(good) | set(gone) == set(ids)`，日志固定打 `errors / permanent_gone / missing` 三个计数，覆盖率才是可复核的等式而非自报比值。
 
 ### v16.7.0 (2026-11-13) — 1113 期：触发时刻不是惯例值 + 派生器断言照抄上期
 

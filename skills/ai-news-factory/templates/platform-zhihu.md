@@ -107,6 +107,22 @@
 > ```
 > **适用范围不止知乎**：公众号图文、视频口播、字幕、B站/抖音/视频号简介、封面大字，全部禁止出现来源平台名（skill 主文档 v3.17.0 已有此规则，本期再次踩到说明它只写在「注意事项」里、没写进派生器自检）。**派生后对全部产出物跑一遍禁词 grep，不要只查知乎稿。**
 
+> **🔴 v3.96.0 补强（2026-11-14 1114 期复发，坑 467）：只断言「固定句存在」不够，必须「整句全等 + 全文禁平台名」两道。**
+> 1114 期把披露段写成「固定句 + 一句来源说明」，而脚本判据是 `assert AI_DISCLOSURE in _md`——
+> 自拟句恰好以固定句为**前缀**，`in` 恒真，带来源平台名的版本一路进草稿，人工复核才发现。
+> **固定句是「整句」，不是「开头」**：
+> ```python
+> import re
+> norm = lambda s: re.sub(r'\s+', '', s)
+> assert norm(text).count(norm(FIXED_WHOLE)) == 1, '披露段必须是固定句且只出现一次'
+> assert not re.search(r'linux\.do|linuxdo|linux do', text, re.I), '正文出现来源平台名'
+> ```
+> `FIXED_WHOLE` 从本节固定句**逐字拷贝**（含标点与全/半角），禁止从上期脚本或上期稿件拷。
+> 另：`templates/check-derived-content.py` 只扫 `script` / `voiceover` / `prompts` / `sections` 四层，
+> **不扫 `zhihu-article-*.md` / `wechat-article-*.md`**；`articles` 阶段的 `ai_disclosure: true` 是 worker **自报**。
+> **「checker PASS」不等于「文章合规」**——要么把两份 article 加进 `layers`，要么在 `Validator.validate('articles')`
+> 里硬断言「固定句恰 1 次 + 全文 0 处来源平台名」。
+
 ### 1.5 标题规则
 
 - 上限 **100 字**（编辑器 placeholder 明示「最多 100 个字」）
