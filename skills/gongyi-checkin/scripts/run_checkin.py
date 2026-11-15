@@ -11,6 +11,10 @@ Usage:
   python3 run_checkin.py --limit 5       # first N stations
   python3 run_checkin.py --url https://x/profile --name X   # single site
   python3 run_checkin.py --report-only   # re-render the last report
+  python3 run_checkin.py --prepare-captcha URL --name X
+                                         # open+click, leave verification tab in front
+  python3 run_checkin.py --submit-captcha CODE --host HOST
+                                         # fill a graphic captcha into that live tab
 
 Outputs:
   <skill>/data/last-run.json   machine-readable results
@@ -545,13 +549,17 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                     if save_captcha_image(tab=tab):
                         result["evidence"] += " (已提取验证码至 /tmp/gongyi_captcha.png)"
                         log("     📸 [验证码已保存] 验证码已提取并保存至 /tmp/gongyi_captcha.png")
+                    else:
+                        log("     🔒 [需人工验证] 非图形码验证（滑块/图片点选），需前台人工完成")
                     verified = True
                     log("     🔒 [需人工验证] %s" % state_v["evidence"])
                     break
                 elif v_round == 8 and state_v["state"] == "pending":
                     # 仅在确认无 CF Turnstile 质询或验证码弹窗时才重试点击，避免重置 Turnstile
                     cf_active, _ = is_cf_challenge(tab=tab)
-                    has_captcha = bool((page_v.get("captcha") or {}).get("hasModal"))
+                    c_info = page_v.get("captcha") or {}
+                    has_captcha = bool(c_info.get("hasModal") or c_info.get("hasSlider")
+                                       or c_info.get("hasVerify") or c_info.get("blocking"))
                     if not cf_active and not has_captcha:
                         log("     [重试] 按钮仍未翻转且无验证弹窗，再次点击...")
                         click_checkin(tab=tab)
@@ -804,6 +812,141 @@ def release_scratch_tab(index):
         pass
 
 
+# ---------------------------------------------------------------------------
+# Manual-captcha workflow (2026-11-15)
+# ---------------------------------------------------------------------------
+# The full run reuses ONE scratch tab, so a captcha modal cannot survive to the
+# next station. These two commands formalise what was previously ad-hoc:
+#   1) --prepare-captcha URL  : open + click, leave the verification tab IN PLACE
+#   2) --submit-captcha CODE  : fill the graphic code into that live tab
+# Image-grid / slider verifications are never solved by the script; the tab is
+# simply left in front so a human can finish it.
+
+def find_tab_by_host(host):
+    """Return the last front-window tab index whose URL contains host (0 if none)."""
+    safe = (host or "").replace('"', "")
+    raw = osa(
+        'tell application "Google Chrome"\n'
+        '  set out to ""\n'
+        "  set n to count of tabs of front window\n"
+        "  repeat with i from 1 to n\n"
+        '    if (URL of tab i of front window) contains "%s" then\n'
+        '      set out to (out & i & ",")\n'
+        "    end if\n"
+        "  end repeat\n"
+        "  return out\n"
+        "end tell\n" % safe,
+        timeout=30,
+    )
+    idx = [int(x) for x in re.split(r"[, ]+", (raw or "").strip()) if x.isdigit()]
+    return idx[-1] if idx else 0
+
+
+def prepare_captcha(url, name="", close_if_done=True):
+    """Open one station, trigger check-in, and leave the verification UI open.
+
+    Returns a dict (printed as JSON by main). For graphic captchas the image is
+    saved to data/captcha.png so the agent can read it and call submit_captcha.
+    """
+    tab = claim_scratch_tab()
+    info = {"tab": tab, "url": url, "name": name, "kind": "", "prompt": "",
+            "page": "", "image": "", "state": "", "evidence": "", "left_open": True}
+    try:
+        final, ok = open_station(url, tab=tab, retries=2)
+        info["final_url"] = final
+        if not ok:
+            info["state"] = "unreachable"
+            info["evidence"] = "open failed: %s" % final
+            return info
+        settle(tab=tab, seconds=LOAD_SECONDS)
+        page = probe(tab=tab)
+        state = classify(page)
+        info["state"] = state["state"]
+        info["evidence"] = state["evidence"]
+
+        # 已有验证弹窗时绝不再点（会重置验证）；只有真正可点的待签到页才触发。
+        c0 = page.get("captcha") or {}
+        if (state["state"] not in ("done", "auto", "unsupported", "blocked_captcha")
+                and not c0.get("blocking")):
+            info["action"] = click_checkin(tab=tab)
+            deadline = time.time() + 15
+            while time.time() < deadline:
+                time.sleep(1.5)
+                page = probe(tab=tab)
+                state = classify(page)
+                c = page.get("captcha") or {}
+                if (c.get("hasModal") or c.get("hasSlider")
+                        or c.get("hasVerify") or c.get("blocking")):
+                    break
+                if state["state"] in ("done", "auto"):
+                    break
+            state = classify(page)
+            info["state"] = state["state"]
+            info["evidence"] = state["evidence"]
+
+        c = page.get("captcha") or {}
+        if c.get("hasModal"):
+            info["kind"] = "graphic"
+        elif c.get("hasVerify"):
+            info["kind"] = "verify"
+        elif c.get("hasSlider"):
+            info["kind"] = "slider"
+        info["prompt"] = c.get("prompt") or ""
+        info["page"] = c.get("page") or ""
+        if info["kind"] == "graphic":
+            os.makedirs(DATA_DIR, exist_ok=True)
+            out_path = os.path.join(DATA_DIR, "captcha.png")
+            if save_captcha_image(tab=tab, out_path=out_path):
+                info["image"] = out_path
+        if state["state"] in ("done", "auto", "unsupported") and close_if_done:
+            release_scratch_tab(tab)
+            info["left_open"] = False
+        return info
+    except Exception as exc:  # noqa: BLE001
+        info["error"] = "%s: %s" % (type(exc).__name__, exc)
+        return info
+
+
+def submit_captcha(host, code, close_tab=False):
+    """Fill a graphic captcha code into the tab left open by prepare_captcha."""
+    tab = find_tab_by_host(host)
+    info = {"host": host, "tab": tab, "submitted": False, "state": "",
+            "evidence": "", "reward": None, "balance": None}
+    if not tab:
+        info["error"] = "no open tab for host %s (先跑 --prepare-captcha)" % host
+        return info
+    url = current_url(tab)
+    if host.lower() not in (url or "").lower():
+        info["error"] = "tab %d is not the target host (url=%s)" % (tab, url)
+        return info
+    info["submit"] = solve_react_captcha(tab=tab, code=code)
+    info["submitted"] = True
+
+    state = None
+    deadline = time.time() + 40
+    while time.time() < deadline:
+        time.sleep(2.5)
+        page = probe(tab=tab)
+        state = classify(page)
+        info["state"] = state["state"]
+        info["reward"] = state["reward"]
+        info["balance"] = state["balance"]
+        info["evidence"] = state["evidence"]
+        if state["state"] in ("done", "auto"):
+            break
+        c = page.get("captcha") or {}
+        if c.get("hasModal"):
+            out_path = os.path.join(DATA_DIR, "captcha-next.png")
+            if save_captcha_image(tab=tab, out_path=out_path):
+                info["next_image"] = out_path
+            break
+
+    if close_tab and state and state["state"] in ("done", "auto"):
+        release_scratch_tab(tab)
+        info["closed"] = True
+    return info
+
+
 def main():
     ap = argparse.ArgumentParser(description="公益站每日签到")
     ap.add_argument("--dry-run", action="store_true", help="只探测不点击")
@@ -814,6 +957,13 @@ def main():
     ap.add_argument("--report-only", action="store_true")
     ap.add_argument("--resume", action="store_true", help="从上次中断的断点继续运行（保留已确认为终态的站点）")
     ap.add_argument("--no-login", action="store_true", help="不尝试 LinuxDO 登录")
+    ap.add_argument("--prepare-captcha", metavar="URL", default="",
+                    help="打开站点并触发签到，把验证弹窗留在前台（人工或 agent 继续）")
+    ap.add_argument("--submit-captcha", metavar="CODE", default="",
+                    help="向 --prepare-captcha 留下的图形验证码标签页提交识别结果")
+    ap.add_argument("--host", default="", help="配合 --submit-captcha：目标站点域名")
+    ap.add_argument("--close-tab", action="store_true",
+                    help="配合 --submit-captcha：成功后关闭该标签页（默认保留）")
     ap.add_argument("--keep-tabs", type=int, default=1,
                     help="兼容参数：不再使用（脚本只关自己的临时标签，不动用户标签）")
     args = ap.parse_args()
@@ -869,6 +1019,43 @@ def main():
                 pass
     except Exception:
         pass
+
+    # ---- 人工验证码两段式模式（不进入全量站点循环）----
+    if args.prepare_captcha:
+        info = prepare_captcha(args.prepare_captcha, name=args.name)
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        return 0 if not info.get("error") else 1
+
+    if args.submit_captcha:
+        host = args.host or (urlparse(args.url).hostname if args.url else "")
+        if not host:
+            raise SystemExit("--submit-captcha 需要 --host（或配合 --url）指定站点域名")
+        info = submit_captcha(host, args.submit_captcha, close_tab=args.close_tab)
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        if info.get("state") in ("done", "auto") and os.path.exists(json_path):
+            try:
+                with open(json_path, encoding="utf-8") as fh:
+                    payload = json.load(fh)
+                for r in payload.get("results", []):
+                    if host.lower() in (r.get("url") or "").lower():
+                        r["state"] = "done"
+                        r["reward"] = info.get("reward") or r.get("reward")
+                        r["balance"] = info.get("balance") or r.get("balance")
+                        r["evidence"] = (r.get("evidence") or "") + \
+                            " | 人工验证码提交成功=" + (info.get("evidence") or "")[:80]
+                        if info.get("tab") and not info.get("closed"):
+                            try:
+                                r["final_url"] = current_url(info["tab"])
+                            except Exception:  # noqa: BLE001
+                                pass
+                with open(json_path, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh, ensure_ascii=False, indent=2)
+                with open(md_path, "w", encoding="utf-8") as fh:
+                    fh.write(render_report(payload["results"], payload.get("meta", {})))
+                log("updated archive for %s" % host)
+            except Exception as exc:  # noqa: BLE001
+                log("archive update failed: %s" % exc)
+        return 0 if info.get("state") in ("done", "auto") else 1
 
     if args.url:
         stations = [{"name": args.name or urlparse(args.url).hostname, "url": args.url}]

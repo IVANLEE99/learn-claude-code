@@ -74,7 +74,7 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 
 ---
 
-## 🚨 三十三个会静默失败的坑
+## 🚨 三十五个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
@@ -374,6 +374,41 @@ new-api 系日历组件底部常驻静态规则说明 `You can only check in onc
   2. 若大于 1 个实例，通过 `tell application "Google Chrome" to get name of window 1` 探测当前绑定的窗口标题；
   3. 若命中微信公众号/视频号/抖音/B站/创作者平台等流水线特征，立即在日志中输出高危告警提示用户或安全抢占，防止 0 登录态误跑。
 
+### 坑 34：未签到页面上的「奖励」可能是日历历史，不能当真
+
+2026-11-15 简直了：页面尚未签到、按钮仍是 `Check in now`，但日历里留着前一天的
+`Received ¥10.00`，旧分类器把它当今日奖励写进报告（当天金额碰巧相同，掩盖了问题）。
+同理 `Total received ¥X` 的 `received` 也会命中奖励正则，而累计守卫只看匹配到的
+`Received ¥X` 本身，看不到前面的 `Total`。
+
+- **修法**（2026-11-15 落地）：
+  1. `classify()` 变为外层包装：只有 `done` / `auto` 才保留 `reward` 并计入合计；
+     `pending` / `blocked_captcha` / `unknown` 等未确认状态下的金额降级为证据文本
+     「页面显示奖励 $X，本次未确认，不计入合计」，`reward` 置空。
+  2. `Received` 正则改为逐条 `finditer`，检查匹配前 14 字符，命中
+     `累计|总共|共获得|历史|total` 就跳过，`Total received` 不再劫持今日奖励。
+  3. 证据与事实必须同源：报告里的奖励只能来自「已确认签到」页面或成功 Toast。
+
+### 坑 35：图片点选人机验证弹窗完全漏检（PM-Plan 2026-11-15 形态变更）
+
+PM-Plan 的验证从行为滑块换成了**图片点选**：`.modal-backdrop.open` 内放
+`.modal[role=dialog][aria-modal=true]`，九宫格图片 `src=/api/selfcheck/img/img-*`，
+提示「找出所有通常趁热食用的食物」，共 2 页。旧探针只认
+`img[src^=data:image] + 验证码输入框`（图形码）和滑块文案，对这种弹窗
+`hasModal=false / hasSlider=false` → 分类仍是 `pending`；验证循环第 8 轮还可能
+再点一次按钮，重置验证。
+
+- **修法**（2026-11-15 落地，`chrome_driver.py` / `run_checkin.py`）：
+  1. `PROBE_JS` 新增 `hasVerify`（`.selfcheck-grid` 或弹窗内含
+     人机验证/请选出所有符合要求的图片/安全验证/验证码等语义）和
+     `blocking`（任意 `.modal-backdrop.open` 或 `[role=dialog][aria-modal=true]` 可见弹窗），
+     并采集 `prompt` / `page`（如「找出所有通常趁热食用的食物」「第 1 页，共 2 页」）。
+  2. `classify()` 把 `hasVerify` 也归入 `blocked_captcha`，证据里带上验证提示与页码。
+  3. 验证循环的重复点击守卫扩展为
+     `hasModal or hasSlider or hasVerify or blocking`——**任何弹窗打开时都不再补点**。
+  4. 图片点选/滑块**不自动求解**：新增两段式命令（见「用法」），
+     `--prepare-captcha` 把验证弹窗留在前台，人工完成后 `--submit-captcha` 只用于图形码。
+
 ---
 
 ## ⚠️ 不要动用户的标签页
@@ -456,6 +491,14 @@ python3 run_checkin.py --limit 5          # 只跑前 5 个
 python3 run_checkin.py --url https://x/profile --name X   # 单站
 python3 run_checkin.py --report-only      # 重新渲染上次报告
 python3 run_checkin.py --no-login         # 不尝试 OAuth 登录
+
+# 两段式人工验证：全量跑报 blocked_captcha 后使用（坑 35）
+python3 run_checkin.py --prepare-captcha https://plan.pmcat.top/ --name PM-Plan
+#   返回 JSON: tab / kind(graphic|verify|slider) / prompt / page / image
+#   图形码 → 图片存到 data/captcha.png，人工或 agent 识图后提交：
+python3 run_checkin.py --submit-captcha BDMM8 --host jianzhile.vip
+#   图片点选/滑块 → 标签页已留在前台，人工完成即可（脚本绝不代选/代滑）
+#   默认成功后保留标签页；加 --close-tab 才会关闭
 ```
 
 产物（每次运行覆盖）：

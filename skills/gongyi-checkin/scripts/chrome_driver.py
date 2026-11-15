@@ -496,10 +496,13 @@ PROBE_JS = r"""
       if(got) labeled.push({label:FIELD_LABELS[i], value:got.value, raw:got.raw});
     }
   }catch(e){}
+  // --- 人机验证（CAPTCHA）识别：三种形态 ---
+  // 类型 1：图形验证码（base64 图片 + 输入框）
   var captchaImg = document.querySelector('img[src^="data:image"], img[src*="captcha"]');
   var captchaInput = document.querySelector('input[placeholder*="验证码"], input[placeholder*="code"], input[name*="captcha"]');
   var hasCaptchaModal = !!(captchaImg && captchaInput && vis(captchaImg) && vis(captchaInput));
   var captchaSrc = (hasCaptchaModal && captchaImg) ? captchaImg.src : '';
+  // 类型 2：行为轨迹滑块（文本标记）
   var hasSlider = false;
   var sliderTexts = ['拖动滑块', '拼合缺口', '向右滑动', 'Slide to verify', 'drag the slider', '完成拼图'];
   for(var i=0; i<all.length; i++){
@@ -511,6 +514,29 @@ PROBE_JS = r"""
       if(hasSlider) break;
     }
   }
+  // 类型 3：图片点选 / 通用人机验证弹窗
+  // 2026-11-15 PM-Plan：弹窗是 .modal-backdrop.open 里的 .modal[role=dialog][aria-modal=true]，
+  // 图片 src 为 /api/selfcheck/img/*，既不是 data:image 也不含 captcha 字样，旧规则全部漏检，
+  // 于是验证进行中被误判 pending，可能重复点击并重置验证。
+  var verifyEl = document.querySelector('.selfcheck-grid, .modal-backdrop.open [role=dialog][aria-modal="true"], .modal[role=dialog][aria-modal="true"]');
+  var hasVerify = false, verifyPrompt = '', verifyPage = '';
+  if (verifyEl && vis(verifyEl)) {
+    var vt = (verifyEl.textContent||'').replace(/\s+/g,' ').trim();
+    if (document.querySelector('.selfcheck-grid')
+        || /人机验证|请选出所有符合要求的图片|安全验证|Security (?:Check|Verification)|验证码|拖动滑块|滑动|拼合/i.test(vt)) {
+      hasVerify = true;
+    }
+    var pe = verifyEl.querySelector('.selfcheck-prompt');
+    var pg = verifyEl.querySelector('.selfcheck-page');
+    verifyPrompt = pe ? (pe.textContent||'').trim().slice(0,80) : '';
+    verifyPage = pg ? (pg.textContent||'').trim().slice(0,30) : '';
+  }
+  // 任意打开的模态弹窗：验证期间禁止重复点击（宁可不点，不可重置验证）
+  var hasBlockingModal = false;
+  try {
+    var bm = document.querySelector('.modal-backdrop.open, [role=dialog][aria-modal="true"]');
+    hasBlockingModal = !!(bm && vis(bm));
+  } catch(e){}
   var toastEls = document.querySelectorAll('.ant-message-notice, .ant-notification-notice, .semi-toast, .Toastify__toast, [data-sonner-toast], .el-message, .v-toast');
   var toasts = Array.from(toastEls).filter(vis).map(function(e){ return (e.textContent||'').trim(); }).filter(Boolean).join(' ');
   return JSON.stringify({
@@ -518,7 +544,9 @@ PROBE_JS = r"""
     hits:hits.slice(0,16), login:lg.slice(0,8),
     apiHits:apiHits.slice(0,6),
     labeled:labeled.slice(0,20),
-    captcha:{hasModal:hasCaptchaModal, src:captchaSrc.slice(0,400), hasSlider:hasSlider},
+    captcha:{hasModal:hasCaptchaModal, src:captchaSrc.slice(0,400), hasSlider:hasSlider,
+             hasVerify:hasVerify, blocking:hasBlockingModal,
+             prompt:verifyPrompt, page:verifyPage},
     toasts:toasts.slice(0,400),
     bodyLen:body.length,
     body:body.replace(/\s+/g,' ').slice(0,6000)
@@ -835,7 +863,7 @@ def _find_gift_quota(body):
     return None, None
 
 
-def classify(page):
+def _classify(page):
     """Classify a probed page into a check-in state.
 
     Returns dict: state / reward / balance / evidence.
@@ -914,13 +942,19 @@ def classify(page):
     # Special archetype: Fengwind 类: "本次获得 $3.00"
     # 坑 27：从正文与 Toast 中提取非标代币奖励（BTC, LDC, Payload, 🍥, ¤ 等）
     if not rew:
-        m = re.search(
+        # 坑 34：`Total received ¥X` 里的 "received" 也会命中本正则；旧代码只看
+        # 匹配到的 "Received ¥X" 本身，累计守卫看不到前面的 "Total"。
+        # 这里逐条匹配并检查前文 14 字符，命中累计词就跳过。
+        for m in re.finditer(
             r"(?:本次获得|获得奖励|获得额度|Received)\s*([+-]?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥])?\s*\d[\d,]*(?:\.\d+)?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥元点额度])?)",
             body,
             re.I,
-        )
-        if m:
+        ):
+            lead = body[max(0, m.start() - 14):m.start()]
+            if re.search(r"累计|总共|共获得|历史|total", lead, re.I):
+                continue
             rew, rew_raw = _money(m.group(1)), m.group(0)
+            break
     if not rew and toast_text:
         m = re.search(
             r"(?:Received|获得|奖励)\s*([+-]?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥])?\s*\d[\d,]*(?:\.\d+)?\s*(?:BTC|LDC|Payload|[$¥€￥¤🍥元点额度])?)",
@@ -950,11 +984,22 @@ def classify(page):
         out["evidence"] += "纯钱包管理页未开放签到模块"
         return out
 
-    # ---- captcha modal (graphical or slider)? (preserve balance e.g. 简直了 / PM-Plan) ----
+    # ---- captcha / human verification modal? ----
+    # 2026-11-15 PM-Plan 改为图片点选（.selfcheck-grid），旧规则只看 data:image+
+    # 输入框与滑块文案，完全漏检，导致「点了签到但一直 pending」。
     c_info = page.get("captcha") or {}
-    if c_info.get("hasModal") or c_info.get("hasSlider"):
+    if c_info.get("hasModal") or c_info.get("hasSlider") or c_info.get("hasVerify"):
         out["state"] = "blocked_captcha"
-        out["evidence"] += "弹出滑块验证码" if c_info.get("hasSlider") else "弹出图形验证码"
+        if c_info.get("hasVerify"):
+            detail = "人机验证弹窗←"
+            detail += (c_info.get("prompt") or "图片点选/安全验证")[:44]
+            if c_info.get("page"):
+                detail += "（%s）" % str(c_info.get("page"))[:18]
+            out["evidence"] += detail
+        elif c_info.get("hasSlider"):
+            out["evidence"] += "弹出滑块验证码"
+        else:
+            out["evidence"] += "弹出图形验证码"
         return out
 
     # ---- done-ness ----
@@ -1042,6 +1087,21 @@ def classify(page):
 
     if not out["evidence"]:
         out["evidence"] = _clean(body[:110])
+    return out
+
+
+def classify(page):
+    """Classify a probed page into a check-in state.
+
+    坑 34：只有「确认已完成」的页面才把奖励计入合计。2026-11-15 简直了未签到时，
+    页面日历里残留上一天的 `Received ¥10.00`，旧逻辑把它当成今日奖励写进报告；
+    虽然当天金额碰巧相同，但这属于证据与事实不同源。现在 pending / blocked_captcha
+    等未确认状态下的金额一律降级为证据文本，`reward` 置空。
+    """
+    out = _classify(page)
+    if out.get("reward") and out.get("state") not in ("done", "auto"):
+        out["evidence"] += "（页面显示奖励 %s，本次未确认，不计入合计）" % out["reward"]
+        out["reward"] = None
     return out
 
 

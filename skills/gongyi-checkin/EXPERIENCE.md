@@ -82,6 +82,13 @@
   直达 `/wallet` 钱包页且整页无签到模块的站点，分类器自适应归类为 `unsupported`（`ℹ️ 未启用签到`）并完整保留余额快照，避免误报为 `⚠️ 状态未知`。详见 SKILL.md 坑 28。
 - **2026-11-13 断点恢复状态机（Resume）保留所有合法终态**：
   恢复状态机放行 `('done', 'auto', 'unreachable', 'unsupported')` 四大终态，跳过已确认为合规失败的失联站（如 PM-Plan Error 1033），结合每站增量刷盘避免中断死循环。详见 SKILL.md 坑 29。
+- **2026-11-15 未确认签到时奖励不可信 & 图片点选验证漏检**：
+  ① 简直了未签到却报 `Received ¥X`，实为日历里前一天的历史奖励；`Total received` 的
+  `received` 也会命中奖励正则且累计守卫看不到前文。现在只有 `done`/`auto` 才保留奖励并计入合计，
+  `Received` 匹配逐条检查前文累计词。② PM-Plan 验证改为两页图片点选（`.selfcheck-*`），
+  旧探针完全漏检并在验证期间可能重复点击；现在 `hasVerify`/`blocking` 会归入 `blocked_captcha`
+  并禁止补点。人工验证改用两段式 `--prepare-captcha` / `--submit-captcha`，绝不代选图片或滑块。
+  详见 SKILL.md 坑 34、坑 35。
 
 ## 站点笔记
 
