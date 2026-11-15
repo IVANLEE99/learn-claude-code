@@ -147,9 +147,12 @@
   前端收集 `track: [{x, y, t}]` 高频轨迹数组送审，模拟拖动会被报 `vr.reason === 'bot_behavior'` 拦截。
   **处置策略**：脚本开标签页置顶并唤起弹窗，**需人工在浏览器中拖动滑块 1 秒完成**。
   2026-11-09 遇 Cloudflare Tunnel Error 1033 隧道宕机。
+  **2026-11-15 形态变更**：滑块换成了**图片点选验证**（`.modal-backdrop.open .selfcheck-*`，提示「找出所有通常趁热食用的食物」，第 1 页共 2 页，`/api/selfcheck/img/img-*`）。
+  按钮在验证期间为 `disabled`，通过后自动继续签到。此类验证仍**归 `blocked_captcha`、必须人工完成**，不要脚本点选图片。
 - **简直了**（`https://jianzhile.vip/console/personal`）：点 `Check in now` 弹
   「Security verification / Refresh captcha」5位彩色英数字图形验证码。
   **处置策略**：提取 `<img src="data:image/png;base64,...">` 进行 OCR 识别，通过 React 状态绑定或置顶标签页人工输入 5 位验证码完成签到。
+  **2026-11-15 自动化闭环验证通过**：`save_captcha_image()` 落盘 → 识图得 5 位码 → `solve_react_captcha()` 原生 setter 提交 → 按钮翻转为 `Checked in`，奖励 +¥X 次日历可见、余额同步增加。注意签到前页面里的 `Received ¥X` 可能是**昨日日历残留**，不能当作今日已签的依据。
 
 ### dicksuck / 多数 new-api 站：重复点会被拒
 - 2026-11-07 曾把 `You can only check in once per day` / `Do not repeat check-in` 并入 `DONE_PATTERNS`
@@ -211,6 +214,10 @@
   前端采集高频鼠标移动轨迹数组 `track: [{x, y, t}]` 提交服务端模型校验。
   任何脚本模拟事件会被判 `bot_behavior`（提示“这次操作轨迹未通过风控，请再自然一点重试”）。
   此类验证码明确归类为 `blocked_captcha`（`🔒 需人工验证`），由人工在 Chrome 前台手动滑动 1 秒完成。
+- **2026-11-15 验证形态改为图片点选**：点击「今日签到」后弹「签到人机验证」宽弹窗（`.modal-backdrop.open`），
+  提示「找出所有符合要求的图片」，实际为 9 宫格食物图片、共 2 页（`.selfcheck-grid` / `.selfcheck-page`）。
+  验证期间签到按钮 `disabled`，通过后自动继续。脚本探针的 `.ant-modal/.semi-modal/[role=dialog]` 弹窗识别覆盖到了该弹窗，
+  但仍**必须人工点选**——不要脚本代选，也不要直接调签到接口绕过。
 
 ### 月城公益站 — https://52ccl.net/profile
 - 2026-11-04 用 `group/card` 形态：按钮文案 `每日签到已签到今天 +$X`，
