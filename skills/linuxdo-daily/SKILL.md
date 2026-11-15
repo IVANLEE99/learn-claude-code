@@ -4,7 +4,7 @@ description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Cr
 version: 16.9.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.8.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.10.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
@@ -1242,6 +1242,12 @@ typst compile data/reports/{date}.typ data/reports/{date}.pdf
 
 ## 周报模式（v14 新增完整流程）
 
+> **🔴 v16.10.0 平台发布字段（坑 482，2026-11-15 W45 实跑）**：周报交给 ai-news-factory 时，`publish.json` 的
+> `platform.bilibili.collection` / `douyin.collection` / `channels.collection` / `wechat.collection` /
+> `zhihu.column` **全部必须是「羊报AI周刊」**，不能沿用日更的「今日羊报 AI」/「今日羊报Al」。
+> 月报同理，全部为「羊报AI月报」。只改日期不改这五个字段 = 五平台合集/专栏全选错，而且点击全部成功、零报错。
+> 详见 ai-news-factory 的「模式参数映射表」与「平台合集/专栏矩阵」。
+
 周报**聚合当周已抓取的日报数据**，不重复抓取。基于 `data/daily/{YYYY-MM-DD}.json` 和 `data/reports/{YYYY-MM-DD}.json` 生成。
 
 ### 周报数据聚合
@@ -1394,6 +1400,9 @@ print(f'week={week_id} days={covered_days} total={len(week_posts)}')
 ---
 
 ## 月报模式（v13 新增）
+
+> **🔴 v16.10.0 平台发布字段（坑 482）**：月报的 B站/抖音/视频号/公众号合集与知乎专栏全部为「羊报AI月报」；
+> 交付 ai-news-factory 时必须覆盖 `publish.json` 的五个 collection/column 字段，不能沿用日更或周报值。
 
 月报**不重复抓取**，而是基于当月已抓取的日报数据（`data/daily/{YYYY-MM-DD}.json`）与已生成的日报 Markdown（`data/reports/{YYYY-MM-DD}.md`）聚合生成。若某日数据缺失，月报会标注缺失天数并继续生成。
 
@@ -1704,6 +1713,21 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.10.0 (2026-11-15) — W45 周报：平台合集/专栏必须按模式取值
+
+**版本**：16.9.0 → 16.10.0
+
+**W45 周报实测（2026-11-09 ~ 11-15）**
+- 每日 279 / 393 / 392 / 477 / 515 / 583 / 344；周内去重 2979 → 过滤后 2911 帖
+- 周报 md / press / PDF（831 KB）落盘后开视频链；成片 189.49s / 1920×1080 / 15.74 MB
+- 五平台草稿落库，但用户指出三处平台字段选错：B站合集、抖音合集、知乎专栏都沿用了日更名称
+
+**新坑（v16.10.0）**
+- **坑 482：周报/月报的平台合集与专栏不能沿用日更硬编码。** B站/抖音/视频号/公众号合集与知乎专栏必须按模式取值：
+  日报「今日羊报 AI」或「今日羊报Al」，**周报「羊报AI周刊」，月报「羊报AI月报」**。
+  修法：`publish.json` 增加 `platform.<p>.collection` 与 `platform.zhihu.column`；脚本只读字段并回读断言。
+- **附带两条交付要求**：公众号「摘要/卡片描述」选填但必须写全（`platform.wechat.digest`）；抖音竖封面默认不拖缩放滑块，按原图 3:4 提交。
 
 ### v16.9.0 (2026-11-15) — 1115 期：跨期锁元数据把冷启动打成粘性 blocked + CAP 仍是字面量
 

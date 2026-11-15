@@ -658,3 +658,26 @@ touch data/logs/<issue>-DONE
 | 405 | 抖音假阴性 | 上传验收 | 误报失败、重复上传 |
 | 406 | wrapper 空转 | 抓取阶段 | 看门狗永久 RUNNING，整夜无人知晓 |
 | 407 | 看门狗噪声 | 全程 | 51 KB 日志淹没状态切换 |
+
+---
+
+## §13 平台合集 / 专栏 / 摘要（v3.98.0 强制，坑 482-484）
+
+派生完成、上传之前，逐项过这张表。**全部从 `publish.json` 读，禁止脚本硬编码。**
+
+| # | 检查项 | 通过判据 |
+|---|---|---|
+| 1 | `publish.json platform.bilibili.collection` | 日报 `今日羊报 AI` / 周报 `羊报AI周刊` / 月报 `羊报AI月报` |
+| 2 | `publish.json platform.douyin.collection` | 日报 `今日羊报Al` / 周报 `羊报AI周刊` / 月报 `羊报AI月报` |
+| 3 | `publish.json platform.channels.collection` | 同上 |
+| 4 | `publish.json platform.wechat.collection` | 日报 `今日羊报 AI` / 周报 `羊报AI周刊` / 月报 `羊报AI月报` |
+| 5 | `publish.json platform.zhihu.column` | 同上（周报/月报不要沿用日更专栏） |
+| 6 | `publish.json platform.wechat.digest` | 非空、≤120 字、内容完整（不是截断） |
+| 7 | B站脚本 | 目标名读字段；保存后回读当前合集文本 == 目标 |
+| 8 | 抖音脚本 | 目标名读字段；回读「添加合集」段 == 目标；**竖封面默认不拖缩放滑块** |
+| 9 | 视频号脚本 | 目标名读字段；回读 `.post-album-display` == 目标 |
+| 10 | 公众号脚本 | 目标名读字段；回读 `.js_article_tags_content` == 目标；digest 步回读 `value === digest` |
+| 11 | 知乎脚本 | 目标名读字段；回读 radio `checked` + combo 文本双证 |
+| 12 | 派生断言 | 描述长度/正文长度/时长一律按本期文案推导，禁止沿用上期字面量（坑 485） |
+
+**一句话记忆**：**「只改日期不改合集」= 五平台全选错，而且点击全部成功、零报错。**

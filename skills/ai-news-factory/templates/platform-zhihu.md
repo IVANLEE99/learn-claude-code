@@ -17,7 +17,7 @@
 | 落盘 | `news-pipeline/<DATE>/zhihu-article-<DATE>.md` |
 | 上传 | **只存草稿**。`发布` 按钮**永不进入脚本逻辑** |
 | 创作声明 | **必须**设为「包含 AI 辅助创作 作者对内容负责」 |
-| 专栏 | 发布到专栏「今日羊报 AI」 |
+| 专栏 | 发布到 `publish.json → platform.zhihu.column`：日报「今日羊报 AI」/ **周报「羊报AI周刊」/ 月报「羊报AI月报」**（坑 482） |
 | 审核 | 生成后必须过 §2 审核清单并落盘 `review-checklist.md`，未过不得上传 |
 
 ---
@@ -274,7 +274,7 @@ page.goto('https://zhuanlan.zhihu.com/write', wait_until='domcontentloaded')
 | 封面 | `input[type=file][accept=".jpeg, .jpg, .png"]`（class `UploadPicture-input`） |
 | 创作声明 | `div.css-be2u3` 中 `label` 文本 == `创作声明` → 其 `button[role=combobox]` |
 | 创作声明选项 | `.Select-option`，目标文本 `包含 AI 辅助创作 作者对内容负责` |
-| 专栏收录 | `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 **`checked` 属性**；真实专栏名 `「今日羊报 AI」`（中间是半角空格 U+20，末位是大写 I） |
+| 专栏收录 | `.ColumnSetting-ColumnSelector` 内 `input[type=radio]` 的 **`checked`** + combo 文本**双证**；目标名取自 `publish.json → platform.zhihu.column`（日报 `今日羊报 AI` 含半角空格 U+20、末位大写 I；**周报 `羊报AI周刊`；月报 `羊报AI月报`**）。比较前剥 `「」` 与空白，**禁止硬编码日更专栏**（v3.98.0 坑 482） |
 | **话题 chips** | **`.css-1d3pntc`**（v3.82.0 / 2026-11-05 实测）：chip 的 `textContent` 即话题名；「添加话题」入口是 `button` 文案精确为该四字（class `css-1gtqxw0`），点开出现 `input[placeholder="搜索话题..."]`，候选项为 BUTTON，**选完即生效无确认按钮** |
 | 保存状态 | 底部 `刚刚 · 草稿` / `N 分钟前 · 草稿`（**自动保存，无「保存草稿」按钮**） |
 | 危险按钮 | `发布`（`Button--pri`）、`预览`（安全但无用） |
@@ -910,7 +910,7 @@ body_imgs = page.evaluate("""(id) => [...document.querySelectorAll('div.public-D
 | 文体 | 图文推送，可带 CTA | 文章，禁止导流 CTA |
 | 保存 | 显式「保存为草稿」按钮 | **自动保存** |
 | AI 声明 | 不设（草稿阶段） | **必须设**「包含 AI 辅助创作 作者对内容负责」 |
-| 合集/专栏 | 合集「今日羊报 AI」 | 专栏「今日羊报 AI」（同名，含半角空格） |
+| 合集/专栏 | 合集「今日羊报 AI」 | 专栏「今日羊报 AI」（日报同名；**周报用「羊报AI周刊」、月报用「羊报AI月报」**，见映射表） |
 | 图片 | `wechat-images/scene*.png` | 同目录 `*.jpg` |
 | **视频** | 需先上传素材库再插入 | **支持直接内嵌**，插在光标块位置；本期要求放在正文之前 |
 | 编辑器 | ProseMirror 系 | **Draft.js**（选区/退格行为差异大，见坑 338–342） |

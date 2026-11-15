@@ -4,7 +4,7 @@ description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短�
 version: 3.97.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.96.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.98.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -36,6 +36,32 @@ version: 3.97.0
 5. **不要 kill 用户日常 Chrome**；**不要**清空该 profile 目录（等于让五个平台重新扫码）。
 6. 若某平台掉登录，只需在该 profile 的浏览器窗口里重新扫码，**不需要**重建 profile。
 
+> **🔴 v3.98.0 核心改进（2026-11-15 W45 周报实跑：平台合集/专栏按模式取值 / 抖音竖封面不缩放 / 公众号摘要必填，坑 482-486）**
+>
+> W45 周报：daily 7 天 2911 帖 → PDF 831KB → 视频 189.49s / 15.74MB / 1920×1080 → 五平台草稿全部落库
+> （公众号 `100002075` / 知乎 `p/2105272783513052626` / B站 `draftId=4122831` / 抖音 `DY_E2E_OK` / 视频号草稿箱 (9)）。
+> 本期最贵的一条不是抓取或渲染，而是**平台的「合集/专栏」在周报里沿用了日更名称**：点击全部成功、日志全绿，用户一眼看出选错。
+>
+> ① **坑 482：周报/月报的 B站合集、抖音合集、视频号合集、知乎专栏必须按模式取值，不能沿用日更硬编码。**
+> W45 实测：B站选了「今日羊报 AI」、抖音选了「今日羊报Al」、知乎专栏选了「今日羊报 AI」；三处都没有报错。
+> **修法**：`publish.json` 增加 `platform.<p>.collection`，知乎用 `platform.zhihu.column`；脚本只读字段，不写字面量。
+> **验收**：每个平台都要回读当前选中文本并断言等于目标——点击回执不算。
+>
+> ② **坑 483：抖音竖封面默认不要拖缩放滑块。** v3.67.0 坑 320 的「拖到最小档」只适用于平台已经报「封面存在文字展示不全」的场景；
+> 2026-11-15 用户明确要求「3:4 不用放大，按原来比例」。**默认：直接 `set_input_files(1152×1536)`，不动 `.semi-slider-handle`；**
+> 只有平台弹出文字裁切告警时才拖，且拖完回读槽位实图比例。
+>
+> ③ **坑 484：公众号「摘要 / 卡片描述」是选填，但必须写全。** 不写会默认抓取正文前 54 字，分享卡片文案不完整。
+> `publish.json` 增加 `platform.wechat.digest`（≤120 字），上传流程新增 `digest` 步：写原生 setter + `input` 事件，
+> 回读 `textarea.value === digest`。
+>
+> ④ **坑 485：派生断言要按本期文案长度推导，不能沿用日更阈值。** 视频号描述硬编码 `descLen > 100`，把本期 88 字的正确周报描述判死；
+> 正确写法 `EXP = len(DESC.replace('\n',''))`，再 `assert descLen >= EXP - 5`。同类：正文长度、视频时长、卡片数。
+>
+> ⑤ **坑 486：视频号草稿卡展示的是描述与发布日期，不是短标题。** 只比 `11月9日` 会假阴性；
+> 正解 = 描述首句签名 + 完整日期双判（W45 首条 `官方降价两成…` + `2026年11月15日 12:47`）。
+> 另：`wechat_upload` 的 verify 读视频哈希时，`publish.json.video` 是相对名，必须拼 `video/` 目录。
+>
 > **🔴 v3.97.0 核心改进（2026-11-15 1115 期实跑：上传阶段的时间结构 / 知乎单图补位顺序 / 抖音与视频号的回执形态，坑 478-481）**
 >
 > 1115 期：daily 344 帖 → PDF 4 页 → 视频 185.7s / 18.4MB / 1920×1080 → 五平台草稿全部落库
@@ -890,7 +916,11 @@ CDP 调用返回 `{}`（看起来成功）但 `input.files.length` **恒为 0**�
 | 封面日期字段 | `{YYYY-MM-DD}` | `{YYYY-MM-DD} ~ {YYYY-MM-DD}` | `{YYYY-MM}` |
 | 视频渲染文件名 | `【{YYYY-MM-DD}】{核心标题}… \| 今日羊报AI.mp4` | `【{MM-DD~MM-DD}】{核心标题}… \| 羊报AI周刊.mp4` | `【{YYYY-MM}】{核心标题}… \| 羊报AI月报.mp4` |
 | B站合集名 | `「今日羊报 AI」` | `「羊报AI周刊」` | `「羊报AI月报」` |
+| 抖音合集名 | `「今日羊报Al」` | `「羊报AI周刊」` | `「羊报AI月报」` |
+| 视频号合集名 | `「今日羊报Al」` | `「羊报AI周刊」` | `「羊报AI月报」` |
 | 公众号合集名 | 同 B站 | 同 B站 | 同 B站 |
+| 合集/专栏唯一事实源 | `publish.json` → `platform.<platform>.collection` / `.column` | 同左 | 同左 |
+| 公众号摘要（卡片描述） | 必填：`platform.wechat.digest`（≤120 字，写全，不要留空） | 同左 | 同左 |
 | 公众号作者 | `今日羊报AI`（≤8字） | `羊报AI周刊`（≤8字） | `羊报AI月报`（≤8字） |
 | 公众号署名 | `今日羊报 AI · YYYY-MM-DD` | `羊报AI周刊 · MM-DD~MM-DD` | `羊报AI月报 · YYYY-MM` |
 | 公众号结尾 CTA | `每天 9 点带你速览 AI 圈最热的 5 条新闻` | `每周带你盘点 AI 圈一周大事` | `每月带你回顾 AI 圈整月风向` |
@@ -904,6 +934,20 @@ CDP 调用返回 `{}`（看起来成功）但 `input.files.length` **恒为 0**�
 | **知乎专栏** | `今日羊报 AI`（中间半角空格 U+20，末位**大写 I** U+49；2026-10-30 页面码点实测，旧文案「小写 l」是错的） | 同左（实跑确认是否有独立周刊专栏） | 同左（实跑确认） |
 | **知乎文章文件** | `zhihu-article-YYYY-MM-DD.md` | `zhihu-article-<range>.md` | `zhihu-article-YYYY-MM.md` |
 | **知乎封面** | `horizontal-4-3.png` → `zhihu-images/cover.jpg` | 同左 | 同左 |
+
+> **🔴 v3.98.0 硬规则：平台合集/专栏必须按模式取值，并且必须回读断言（坑 482）。**
+> 2026-11-15 W45 周报实测：B站把合集选成了日更「今日羊报 AI」、抖音选成「今日羊报Al」、知乎把专栏选成日更「今日羊报 AI」——三处脚本都**调用成功、零报错**，因为它们沿用日更硬编码。
+> **脚本一律从 `publish.json` 读目标名，禁止硬编码。** 矩阵：
+>
+> | 平台 | 日报 | 周报 | 月报 |
+> |---|---|---|---|
+> | B站合集 | `今日羊报 AI` | `羊报AI周刊` | `羊报AI月报` |
+> | 抖音合集 | `今日羊报Al` | `羊报AI周刊` | `羊报AI月报` |
+> | 视频号合集 | `今日羊报Al` | `羊报AI周刊` | `羊报AI月报` |
+> | 公众号合集 | `今日羊报 AI` | `羊报AI周刊` | `羊报AI月报` |
+> | 知乎专栏 | `今日羊报 AI` | `羊报AI周刊` | `羊报AI月报` |
+>
+> **验收判据（缺一不算通过）**：B站回读当前合集文本 == 目标；抖音回读「添加合集」段 == 目标；视频号回读 `.post-album-display` == 目标；知乎回读 combo 文本 == 目标；公众号回读 `.js_article_tags_content` == 目标。**只信点击回执 = 一定会选错。**
 
 **模式判定规则**（Phase 0 自动）：
 - `REPORT_PATH` 含 `data/monthly/`，或触发词含"月报/monthly" → `REPORT_MODE=monthly`，`MONTH_LABEL=YYYY-MM`
@@ -2571,21 +2615,26 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
     "bilibili": {
       "title": "【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI",
       "partition": "人工智能",
+      "collection": "今日羊报 AI",
       "tags": ["今日羊报AI", "AI日报", "..."],
       "description": "B站简介，含 hashtag\n\n🔴 注意：简介中数字不能太多（会被检测为违规推广），版本号简化，数字用中文替代"
     },
     "douyin": {
       "title": "今日羊报AI YYYY-MM-DD",
+      "collection": "今日羊报Al",
       "tags": ["AI日报", "..."],
       "description": "抖音简介，含 hashtag"
     },
     "channels": {
       "title": "今日羊报AI M月D日",
+      "collection": "今日羊报Al",
       "tags": ["AI日报", "..."],
       "description": "视频号简介正文\n#今日羊报AI #AI日报 ...   ← 🔴 v3.82.0：必须与 douyin.description 一样以 hashtag 行结尾"
     },
     "wechat": {
       "title": "【YYYY-MM-DD】{核心标题}… | 今日羊报AI",
+      "collection": "今日羊报 AI",
+      "digest": "公众号摘要 / 卡片描述，≤120 字，必须写全（v3.98.0 坑 484）；不写会默认抓取正文前 54 字",
       "article": "wechat-article-YYYY-MM-DD.md",
       "images": "wechat-images/"
     },
@@ -2612,6 +2661,7 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 - `bilibili.description`：**强制全数字中文化**（见 B站简介数字中文化章节）
 - `wechat.article`：`wechat-article-YYYY-MM.md`
 - `zhihu.title`：`【YYYY年M月】{信息型判断句}`（≤40 字）；`zhihu.article`：`zhihu-article-YYYY-MM.md`
+- **合集/专栏覆盖（周报/月报必改，坑 482）**：`bilibili.collection` / `douyin.collection` / `channels.collection` / `wechat.collection` / `zhihu.column` 全部改成 `羊报AI周刊`（周报）或 `羊报AI月报`（月报）。**只改日期不改这几个字段 = 五平台全选错，且点击全部成功、零报错。**
 
 **标题规则（v3.17：日期在前、报刊名在后）**:
 - 日报 B站：`【YYYY-MM-DD】{核心标题}｜{N}条重磅AI新闻一次看完 | 今日羊报AI`（🔴 v3.29.0：publish.json bilibili 段固定 `"partition": "人工智能"`，Phase 11.4 按此字段选择分区）
@@ -3058,7 +3108,7 @@ browser_click(target=e525)  // "请选择合集"
 browser_evaluate("""() => {
   const options = document.querySelectorAll('li, div, span, p');
   // 合集名按模式参数映射表：daily 「今日羊报 AI」/ weekly 「羊报AI周刊」/ monthly 「羊报AI月报」
-  const targetName = '「今日羊报 AI」';
+  const targetName = '「羊报AI周刊」';  // 按 publish.json platform.bilibili.collection 注入，禁止硬编码（坑 482）
   for (const opt of options) {
     if (opt.textContent.trim() === targetName) {
       opt.click();
@@ -3152,7 +3202,8 @@ if ('新的创作' not in home) and ('New creation' not in home):
 9. 设置原创声明
 10. 设置赞赏
 11. 选择合集
-12. 保存草稿
+12. 填写摘要（卡片描述，必填：原生 setter 写入 `#js_description` / `textarea[placeholder*="摘要"]`，回读 `value === digest`）
+13. 保存草稿
 ```
 
 #### 12.1 打开公众号后台
@@ -3893,6 +3944,28 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll     
 # 不等于合集未选中**。而 `li.select-opt-li` 只在用户手动展开时才出现。
 # 🔴 v3.66.0 坑 310 补充：它也不等于「已选中」——判据只认 `.js_article_tags_content`。
 
+#### 12.10b 填写摘要（卡片描述，必填 — v3.98.0 坑 484）
+
+公众号的「摘要」是选填项，但不填会默认抓取正文前 54 字，分享卡片文案不完整。2026-11-15 用户明确要求「选填的卡片描述记得写全」。
+**单一事实源**：`publish.json` → `platform.wechat.digest`（≤120 字，由 `gen_publish` 写入完整版描述，不是截断版）。
+
+```javascript
+// 候选选择器：先 #js_description，再 textarea[placeholder*="摘要"]；
+// 都找不到时遍历发布设置区，按 label 文本「摘要」定位同容器 textarea。
+const digest = "……";   // publish.json platform.wechat.digest
+const ta = document.querySelector('#js_description')
+        || document.querySelector('textarea[placeholder*="摘要"]');
+if (ta) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, digest);
+  ta.dispatchEvent(new Event('input',  { bubbles: true }));
+  ta.dispatchEvent(new Event('change', { bubbles: true }));
+}
+// 回读断言：ta.value === digest；长度 ≤ 120
+```
+
+**注意**：摘要不随「保存草稿」以外的动作持久化；写完先 save 再 verify，verify 里回读 `#js_description.value`。
+
 #### 12.11 保存草稿
 
 **🔴 保存前必须处理弹窗（v3.3.0 更新）**：封面图上传后会弹出「图片上传中，请稍后」弹窗，阻挡保存按钮。必须先等待上传完成、关闭弹窗，再保存。
@@ -4289,7 +4362,7 @@ browser_wait_for(time=15)
 
 #### 13.5 选择合集
 
-按 13.1 shadow 协议：点 `.post-album-display` 展开 → 等 `.post-album-wrap .option-item` 渲染 → 取目标项 `getBoundingClientRect` 中心 `page.mouse.click(x,y)`。**JS `el.click()` 对这层 Vue 组件不生效（返回成功但 display 文案不变，v3.61.0 坑 293）**。选项文案形如「今日羊报Al」+「共N个内容」（1023 是「作品」，1025 实测是「内容」，**正则两者都容**）；**注意小写 `l` 不是大写 `I`**。回读以 `.post-album-display` 文本为准。仅旧 iframe 结构时才用坐标估算兜底。
+按 13.1 shadow 协议：点 `.post-album-display` 展开 → 等 `.post-album-wrap .option-item` 渲染 → 取目标项 `getBoundingClientRect` 中心 `page.mouse.click(x,y)`。**JS `el.click()` 对这层 Vue 组件不生效（返回成功但 display 文案不变，v3.61.0 坑 293）**。**目标合集名必须来自 `publish.json` 的 `platform.channels.collection`**（日报「今日羊报Al」/ 周报「羊报AI周刊」/ 月报「羊报AI月报」；日更名末位是小写 `l`，周报/月报是中文「周刊/月报」）。选项文案形如「{合集名}」+「共N个内容」（1023 是「作品」，1025 实测是「内容」，**正则两者都容**）。**回读 `.post-album-display` 后必须 `assert display.strip('「」') == 目标`；只点不读 = 一定会选错（坑 482）。**仅旧 iframe 结构时才用坐标估算兜底。
 
 > **🔴 点选项前同样要确认 rect 在视口内（坑 303 同根）**：展开下拉后先读每个 option 的 `getBoundingClientRect().top`，超出 `window.innerHeight` 的要先 `scrollIntoView({block:'center'})` 再重取坐标——否则 `mouse.click` 静默失效。
 
@@ -4547,17 +4620,10 @@ news-pipeline/
 - 实测：wujie shadowRoot 内的视频 input 与封面 input 都**一次成功**
 - 旧文「`DOM.getDocument{depth:-1,pierce:true}` → 手工 walk `children`+`shadowRoots`」降级为**备选**；`DOM.performSearch`→`backendNodeId` 那条**本期未复测**，保留但标注未复测
 
-**坑 320：抖音竖封面弹窗默认带裁切缩放，切掉海报文字**
-- 直接喂 1152×1536 后平台判「封面存在文字展示不全问题 / 封面不佳」——海报两端的「别」「一」被裁掉
-- 修法：把 `.semi-slider-handle`（在 `.semi-slider-rail` 内，实测 x 区间 778.5–831.5、y≈550）拖到**最小档**
-  ```python
-  mouse.move(handle_x, handle_y); mouse.down()
-  for i in range(1, 11):
-      mouse.move(handle_x + (min_x - handle_x) * i / 10, handle_y, steps=1)
-  mouse.up()
-  ```
-- **点击与方向键都无效**（本期试过，无任何反应）
-- 拖到最小后海报完整带边距显示 →「封面效果检测通过」+ 发文助手「无建议」
+**坑 320：抖音竖封面弹窗的裁切缩放（v3.98.0 收窄适用范围，坑 483）**
+- **默认不缩放**：直接喂 1152×1536，保持弹窗原始比例与 100% 缩放；**不要**主动拖 `.semi-slider-handle`。2026-11-15 用户明确要求「3:4 不用放大，按原来比例」。
+- **只有平台明确提示**「封面存在文字展示不全问题 / 封面不佳」时，才把 `.semi-slider-handle`（`.semi-slider-rail` 内）拖到能完整显示的最小档：`mouse.move → down → 分 10 步 move → up`；点击与方向键无效。
+- 拖完必须回读槽位 `img.naturalWidth/naturalHeight` 比例（横 4:3 / 竖 3:4），不能只看「封面效果检测通过」。
 - 另：抖音「编辑封面」的叶子节点搜索**必须限定在竖槽位 `.coverControl-CjlzqC`[1] 的 rect 内**——全局搜「编辑封面」会命中横向槽位的浮层，打开错误弹窗，上传后仍判「竖封面缺失」
 
 
@@ -5789,11 +5855,10 @@ browser_run_code_unsafe("""async (page) => {
   try {
     await cover.waitFor({ state: 'attached', timeout: 8000 });
     await cover.setInputFiles(path);
-    // 🔴 v3.67.0 坑 320：喂图后弹窗默认带裁切缩放，会切掉 3:4 海报两端的字，
-    //    平台随后判「封面存在文字展示不全问题 / 封面不佳」。
-    //    必须把缩放滑块拖到最小档（点击与方向键都无效）：
-    //      mouse.move → down → 分 10 步 move → up
-    //    实测 rail x 区间 778.5–831.5、y≈550（视口 1440×769）
+    // 🔴 v3.98.0 坑 483：默认不拖缩放滑块，直接按原图 3:4 提交。
+    //    只有平台提示「封面存在文字展示不全」时才执行下面的最小档拖动。
+    //    v3.67.0 坑 320 的拖动代码保留为告警分支：
+    //      mouse.move → down → 分 10 步 move → up（rail x 778.5–831.5、y≈550）
     const sl = page.locator('.semi-slider-rail').first();
     const hb = page.locator('.semi-slider-handle').first();
     if (await hb.count()) {
@@ -5896,7 +5961,7 @@ browser_run_code_unsafe("""async (page) => {
 8. 若 URL 已在 `enter_from=draft` 且横封面已有，可 **只补竖封面**（今天 2026-07-17 场景）
 
 
-#### 14.7 添加合集「今日羊报AI」
+#### 14.7 添加合集（目标名按模式读取，坑 482）
 
 **🔴 抖音合集选择器使用 listbox 组件，可以用 ref 精确点击：**
 
@@ -5938,7 +6003,10 @@ const picked = page.evaluate(() => {
   for (const o of document.querySelectorAll('li, div, span, p, [class*=option], [class*=item]')) {
     const t = (o.textContent || '').trim();
     if (!o.offsetParent) continue;
-    if (!/^「?今日羊报/.test(t)) continue;
+    // 目标合集名来自 publish.json platform.douyin.collection
+    // 日报「今日羊报Al」/ 周报「羊报AI周刊」/ 月报「羊报AI月报」
+    const ALBUM_WANT = '羊报AI周刊';
+    if (!t.startsWith(ALBUM_WANT) && !t.startsWith('「' + ALBUM_WANT)) continue;
     if (!/共\s*\d+\s*个(?:作品|内容)/.test(t)) continue;   // 1025 实测文案是「共N个内容」
     if (t.length > 40) continue;                    // ① 排除整块容器
     const r = o.getBoundingClientRect();
@@ -6208,7 +6276,7 @@ browser_handle_dialog(accept=true)
 2. **删导流再上传**：公众号 CTA（点个赞/转发/关注「今日羊报 AI」/评论区聊聊）整段删除；标题去品牌后缀。规范§四禁止在标题/封面加营销推广信息、禁止诱导至第三方平台关注。
 3. **只到存草稿**：「发布」按钮不进脚本候选集（坑 317 四步自证仍适用于「保存草稿」，它与相邻按钮可能只差十几像素）；发布由用户手动完成。
 4. **视频要内嵌且排正文之前**：知乎支持内嵌视频。光标置文档开头 → `button[aria-label="视频"]` → `input.VideoUploadButton-fileInput` 传文件 → 等 `data-video-playable === 'true'`（约 10–15 s）。落位是 block 0 自动空文本 + block 1 VIDEO，即在正文之前。
-5. **知乎专栏名与抖音/视频号合集名不同**：知乎是 `今日羊报 AI`（**含半角空格 U+20，末位大写 I U+49**），抖音/视频号是 `今日羊报Al`（无空格，末位**小写 l** U+6C）。两者肉眼几乎无法分辨，2026-10-30 已分别按页面码点实测确认。比较一律先两边去空白，**禁硬编码精确串**；回读不到就停，不静默跳过（坑 312）。判别以 `.ColumnSetting-ColumnSelector` 里 radio 的 `checked` 为准，不许 grep 页面文本（坑 343）。
+5. **知乎专栏必须先按模式取值，再按码点核名（坑 482）**：目标来自 `publish.json` 的 `platform.zhihu.column`——日报 `今日羊报 AI`（半角空格 U+20 + 大写 I U+49）、**周报 `羊报AI周刊`、月报 `羊报AI月报`**。2026-11-15 W45 周报实测：脚本沿用日更 `今日羊报 AI`，点击成功、radio 也勾上了，但专栏名是错的。比较一律先两边去空白、剥书名号，**禁硬编码精确串**；回读 combo 文本 == 目标，回读不到就停，不静默跳过（坑 312）。判别以 `.ColumnSetting-ColumnSelector` 里 radio 的 `checked` + combo 文本双证为准，不许 grep 页面文本（坑 343）。
 
 **⚠️ 2026-10-30 实测已回填（v3.71.0）**：下列选择器与行为均已在本机登录态下实测确认，模块文档 §3 即为实跑结果，**不再是 TODO-PROBE**：
 
