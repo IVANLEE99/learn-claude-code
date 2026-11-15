@@ -1,7 +1,7 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.8.0
+version: 16.9.0
 ---
 
 # linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.8.0）
@@ -70,6 +70,44 @@ version: 16.8.0
 > 另：本期归档了 1112 期 70 个中间态文件（`data/archive/2026-11-13-prev-20261112_233619`），
 > 否则 `_resume` 的 `isComplete` 会把上期批次当成本期已完成直接跳过（与 1112 期同一条前置动作）。
 >
+> **🔴 v16.9 核心改进（2026-11-15 1115 期实跑：跨期锁元数据把冷启动打成粘性 blocked / CAP 仍是字面量 / adoption 窗口良性竞态，坑 475-477）**
+>
+> 1115 期：Source A 2219 行、Source B 2220 行均触发近期窗口上限；合并 2763 → 历史去重 2719 →
+> 标题去重 1506 → 公益/交易 1348 → 32h 窗口 **378 队列**；正文覆盖 377/378（1 条已删帖按排除清单出局），
+> daily **posts=344**；22:35 触发、00:09:56 DONE，全程 1 小时 35 分。
+> 本期最贵的一条不是抓取逻辑，而是**上一期留下的锁 sidecar 把本期冷启动直接打成粘性 blocked**——
+> L1/L2 都活着、job 也不忙，但 22:35→22:41 这 6 分钟里 tick 恒返回 BLOCKED，且 `automatic_retry: false`
+> 意味着不人工介入就会一直卡下去。
+>
+> ① **坑 475：`data/logs/crawl-resource.lock.owner.json` 是跨期共享的租约 sidecar，上一期跑完会留下 `date=<上期>` 的已释放记录；本期 `Mutex.__enter__` 要求 `record['date'] == DATE`，于是冷启动归档第一步就 `rc=3 LOCK metadata identity refusal: crawl-resource.lock`，并被写成 `automatic_retry: false` 的粘性 blocked。**
+> **症状**：`_archive_<issue>.py` 日志只有一行 `rc=3 LOCK metadata identity refusal: crawl-resource.lock`；
+> `status` 里 `blocked.kind=identity`，L1/L2 lease 都 healthy、job 不 busy，但 tick 恒返回 BLOCKED。
+> **排查三步**：① `lsof data/logs/crawl-resource.lock` 确认无 flock 持有者；② `ps` 确认无
+> `_fetch_lists_* / _crawl_* / _resume_*` 活跃进程；③ 读 sidecar，确认 `owner: null` 且有 `released_at`
+> （= 上一期已释放，不是活锁）。
+> **处置（可逆，别直接 rm）**：把 sidecar 移进 `data/logs/repair-<issue>/` 备份 → 清 state 里的 `blocked`
+> （置 null，`status` 回 `waiting`）→ 下一轮 tick 自动重新归档（1115 期成功移入 95 个中间态文件到
+> `data/archive/2026-11-15-prev-20261114_224100-*`）。
+> **预防**：新期号 arm 之前先清上一期遗留的 `crawl-resource.lock.owner.json`，并顺带确认 `1114-*.owner.json`
+> 这类上期锁 sidecar 不会被本期误读。
+>
+> ② **坑 476：CAP 写死 2200 与「现场推导」的规则互相矛盾，派生器会把字面量逐期复制。**
+> v16.8 已写「CAP = 32h 窗口所需行数 × 2，现场推导」，但 1115 期 `_fetch_lists_1115.mjs` 里仍是
+> `count >= 2200` 字面量——派生时没人真去算。
+> **本期侥幸没截断**：Source A 的 2219 行 `created` 一直回溯到 **2024-11-25**，远早于 cutoff，窗口被完整覆盖。
+> **纪律**：派生器必须把 CAP 作为参数算出来并打印（含来源行数与窗口内最后一行索引），派生断言里禁止出现
+> 历史期的硬编码值；抓完用 `created` 反算「窗口内最后一行索引 < CAP × 0.7」才是硬证据，
+> 不能只看「行数够 2200」就放心。
+>
+> ③ **坑 477：crawl 阶段在 adoption 观察窗口（≤2s）内跑完，tick 会返回 `RETRY_LATER supervisor exited before adoption rc=0`，这是良性竞态，不是失败。**
+> 1115 期 23:21 手动 tick 时 daily 已就绪，`_run crawl` 只做校验即退出，父进程看到子进程先退就按
+> 「未接管成功」报 `Refusal(1)`。**处置**：看到这条先 `status`——若已是 `ready_downstream`、或后续 tick
+> 返回 SKIP（job 已被 L1/L2 接管），说明工作已完成，**不要重置 state、不要重复起 worker**；
+> 真正的接管失败会同时伴随 daily/checkpoint 缺失。
+>
+> 另：本期 32h 窗口是 `2026-11-13 16:05 → 2026-11-15 00:05`，`too_old=970 future=0 parse_fail=0`；
+> 标题去重一次砍 1213 条（近 3 天覆盖度高）属正常，别为了「多抓」放宽去重。
+>
 > **🔴 v16.8 核心改进（2026-11-14 1114 期实跑：列表页永不收敛 / 永久消失帖把整条链卡成死循环，坑 469-470）**
 >
 > 本期 1114：Source A 列表滚到 2903 行仍在涨，加近期窗口上限后在 2218 行收口（Source B 2220 行）；
@@ -90,7 +128,7 @@ version: 16.8.0
 >
 > ② **坑 470：全队列「每个 ID 必须有正文」是死门禁，遇到已删/私有帖会无限重试**。
 > 1114 有 1 个 id 连续 7 次 `rc=1 incomplete bodies`，重试 8 次（`batch_browser_4` + `retry0..6`）都返回
-> `empty_deleted_private_or_unloaded`。**删掉的帖子重跑一万次也不会回来，第 3 次失败就该出清单。**
+> `empty_deleted_private_or_unloaded`。**删掉的帖子重跑一万次也不会回来，攒够证据就该出清单——但注意校验器要求 `attempt_files` ≥ 6（`batch_browser_N.json` + `retry0..k` 合计），所以实际要等到第 6 份证据；只写 3 份会被 `Refusal(3)` 打回（1115 期实测：`batch_browser_16.json` + `retry0..5` 共 7 份才落库）。**
 > **修法：允许「证据背书的排除清单」**——`data/<issue>-permanent-gone.json` 每条含
 > `id / reason / attempts / attempt_files`；加载时**逐份 checkpoint 反查**：
 > 文件存在、该 id 恰好一行、无标题、`error` 与 `reason` 完全一致、`attempts == len(attempt_files)` 且 `>= 6`，
@@ -254,6 +292,7 @@ cd /Users/youngsdream/Documents/learn-claude-code
 ### 推荐 Todo 清单（全量日）
 
 ```
+0. 清上一期跨期锁 sidecar：`data/logs/crawl-resource.lock.owner.json` 若仍是上期的 date（先 lsof+ps 确认无活跃），备份后移出，否则冷启动归档会 rc=3 粘性 blocked（坑 475）
 1. 清理旧 batch + 浏览器预授权（固定 cwd）
 2. Source A/B 列表 + 合并去重/公益站/32h → crawl_queue + batch_ids
 3. 全量逐帖抓取正文（每批立即保存）
@@ -1665,6 +1704,23 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.9.0 (2026-11-15) — 1115 期：跨期锁元数据把冷启动打成粘性 blocked + CAP 仍是字面量
+
+**版本**：16.8.0 → 16.9.0
+
+**实测数据（2026-11-15 期，DATE=2026-11-15）**
+- Source A 2219 / Source B 2220 行均触发 `recent-window cap`；A 的 `created` 回溯到 2024-11-25，证明窗口未被截断
+- 合并去重 2763 → 历史 ID 去重 2719 → 标题去重 1506（-1213）→ 公益/交易 1348（-158）→ 32h 窗口 **378**
+- 正文 `BODY COVERAGE 377/378 errors=1 permanent_gone=1 missing=0` → daily **posts=344 excluded=34**
+- 时间线：22:35 触发 →（修锁）22:41 归档 95 文件 → 22:47 建队 → 23:19 抓完 → 23:24 报告/PDF（4 页 593KB）
+  → 23:28 内容/审核/封面 → 23:39 成片 → 23:43 文章/publish → 23:51 微信 → 23:59 知乎 → 00:02 B站
+  → 00:05 抖音 → 00:08 视频号 → **00:09:56 DONE（1h35m）**
+
+**新坑（v16.9）**
+- **坑 475：跨期共享锁 sidecar 会把新期号冷启动打成粘性 blocked**。上一期留下的 `data/logs/crawl-resource.lock.owner.json`（`date=2026-11-14`、`owner:null`、`released_at` 有值）让本期 `Mutex.__enter__` 的 `record['date'] == DATE` 判定失败 → 归档 `rc=3 LOCK metadata identity refusal` → `blocked.automatic_retry=false`。**处置顺序**：`lsof` 无持有者 + `ps` 无活跃爬虫 → 备份并移出 sidecar（禁止直接 rm）→ 清 state 的 `blocked` → 下一轮 tick 自动归档。**预防**：arm 新期号前先清上一期 sidecar。
+- **坑 476：CAP 的「现场推导」只写在文档里，派生器照抄 2200 字面量**。1115 期 `_fetch_lists_1115.mjs` 仍是 `count >= 2200`；本期靠 A 列表 `created` 回溯到 2024-11-25 才确认没截断。派生器必须输出 CAP 推导过程，断言里禁止历史硬编码值；验收用 `created` 反算窗口内最后一行索引 `< CAP × 0.7`，而不是「行数到了」。
+- **坑 477：`RETRY_LATER supervisor exited before adoption rc=0` 是良性竞态**。daily 已就绪时 `_run crawl` 只做校验、2s 内退出，父进程按「未接管」报可重试错误。**先 `status` 再决定**：`ready_downstream` 或后续 tick 返回 SKIP 即已成功，不要重置 state 或重复起 worker。
 
 ### v16.8.0 (2026-11-14) — 1114 期：板块列表无界增长 + 永久消失帖把整条链钉死
 
