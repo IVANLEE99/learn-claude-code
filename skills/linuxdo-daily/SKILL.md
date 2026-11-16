@@ -1,10 +1,10 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.9.0
+version: 16.11.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.10.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.11.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
@@ -107,6 +107,35 @@ version: 16.9.0
 >
 > 另：本期 32h 窗口是 `2026-11-13 16:05 → 2026-11-15 00:05`，`too_old=970 future=0 parse_fail=0`；
 > 标题去重一次砍 1213 条（近 3 天覆盖度高）属正常，别为了「多抓」放宽去重。
+>
+> **🔴 v16.11.0 核心改进（2026-11-16 1116 期实跑：触发时刻串被日期替换二次位移 / worker 首尝试静默退出后自动续跑，坑 487-488）**
+>
+> 1116 期：Source A 2216 行、Source B 605 行 → 队列 321 → daily **294 帖**（二次过滤排除 27，22 批 err=0）。
+> 22:35 触发 → 23:08 冷启动归档一次通过 → 23:15 crawl+merge VALIDATED → 23:39 report / 23:41 press / 23:43 PDF；
+> downstream 首尝试 23:08–01:48 无新 checkpoint 退出（rc=1），L2 02:07 自动 `--resume` 续跑，10:35:18 DONE，
+> 全程 **12 小时**。本期抓取链很干净，时间全在 downstream 与抖音上传。
+>
+> ① **坑 487：派生器的日期四形态替换会把「触发时刻串」二次位移，必须占位保护 + 全量审计。**
+> 1115 源码的 GUARD 文案/`trigger_at` 写着 `2026-11-15 22:35`，而 `TRIGGER_EPOCH=1794666900`
+> （= `2026-11-14 22:35`）——这是 1114→1115 派生时通用 `2026-11-14`→`2026-11-15` 替换把刚改好的触发串又推了一天的残留
+> （纯文案错位，epoch 门禁本身正确）。1116 派生改用**占位符保护**：先把 `2026-11-15T22:35:00+08:00` /
+> `2026-11-15 22:35:00` 换成 `\x00TRIG_ISO\x00`/`\x00TRIG_SP\x00` → 跑完全部日期/期号替换 → 原样放回；
+> 触发断言 tuple `2026, 11, 14, 22, 35,` 单独 +1 天改写。
+> **纪律**：替换列表第一行写 `(X, X)` 这种 no-op「guard」没有任何保护作用（1115 的假 guard 什么都没挡住）；
+> 派生器末尾必须断言：派生文件不含上期号、不含旧 epoch、剩余旧报告日期只允许紧跟 `T22:35`/` 22:35`、
+> 旧 cutoff 形态不得残留。1116 派生一次通过（18 文件 + prompts + state），GUARD 文案与 epoch 首次对齐。
+>
+> ② **坑 488：downstream worker 首个尝试会在长生成阶段静默退出（rc=1），L2 自动 `--resume` 续跑是设计内路径，别当故障。**
+> 1116 实测：attempt 1 23:08 启动、01:48 无新 checkpoint 退出（2h40m）；L2 02:07:22 以同一会话 `--resume` +
+> 磁盘 checkpoint 起 attempt 2，随后 content 03:26 → audit 03:50 → covers 04:00 → video 06:11 → articles 06:48
+> → publish 06:50 → 五平台上传 07:18–10:33 → finish 10:35 全链完成。
+> **监控口径**：`worker.attempts` 增加 + `last_exit=1` 是恢复路径，不是失败；判进度只看 stage checkpoint 与
+> `progress`，不要凭 stream 尾巴有没有输出来下结论；禁止手工重启 worker / 并发第二个 worker。
+> **预防**：content 这类长生成阶段开始前先落 progress checkpoint（本期在 pdf 已 checkpoint 后进入 content，
+> 续跑没有重做已核验阶段）；整期 10h+ 属正常长尾，半夜别误判卡死。
+>
+> ③ **验证正例**：坑 475 的预防生效——arm 前清 `crawl-resource.lock.owner.json`（lsof 无持有者 + ps 无爬虫），
+> 本期冷启动归档一次通过、无 rc=3；坑 477 的 adoption 竞态本期未触发（crawl 正常接管）。
 >
 > **🔴 v16.8 核心改进（2026-11-14 1114 期实跑：列表页永不收敛 / 永久消失帖把整条链卡成死循环，坑 469-470）**
 >
@@ -1745,6 +1774,24 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 - **坑 475：跨期共享锁 sidecar 会把新期号冷启动打成粘性 blocked**。上一期留下的 `data/logs/crawl-resource.lock.owner.json`（`date=2026-11-14`、`owner:null`、`released_at` 有值）让本期 `Mutex.__enter__` 的 `record['date'] == DATE` 判定失败 → 归档 `rc=3 LOCK metadata identity refusal` → `blocked.automatic_retry=false`。**处置顺序**：`lsof` 无持有者 + `ps` 无活跃爬虫 → 备份并移出 sidecar（禁止直接 rm）→ 清 state 的 `blocked` → 下一轮 tick 自动归档。**预防**：arm 新期号前先清上一期 sidecar。
 - **坑 476：CAP 的「现场推导」只写在文档里，派生器照抄 2200 字面量**。1115 期 `_fetch_lists_1115.mjs` 仍是 `count >= 2200`；本期靠 A 列表 `created` 回溯到 2024-11-25 才确认没截断。派生器必须输出 CAP 推导过程，断言里禁止历史硬编码值；验收用 `created` 反算窗口内最后一行索引 `< CAP × 0.7`，而不是「行数到了」。
 - **坑 477：`RETRY_LATER supervisor exited before adoption rc=0` 是良性竞态**。daily 已就绪时 `_run crawl` 只做校验、2s 内退出，父进程按「未接管」报可重试错误。**先 `status` 再决定**：`ready_downstream` 或后续 tick 返回 SKIP 即已成功，不要重置 state 或重复起 worker。
+
+### v16.11.0 (2026-11-16) — 1116 期实跑：触发串占位保护 + worker 自动续跑
+
+**版本**：16.10.0 → 16.11.0
+
+**实测数据（2026-11-16 期，DATE=2026-11-16，触发 2026-11-15 22:35）**
+- Source A 2216 行 / Source B 605 行 → 队列 321 → daily **294 帖**（二次过滤排除 27，22 批 err=0）
+- 22:35 触发 → 23:08 归档完成 → 23:15 crawl+merge VALIDATED → 23:39 report / 23:41 press / 23:43 PDF
+- downstream：attempt 1 23:08–01:48（rc=1，无新 checkpoint）→ attempt 2 02:07–10:35（`--resume` 续跑）
+- 总时长 12h00m；上传阶段 06:50–10:33（约 3h43m），其中抖音独占 2h11m（见 ai-news-factory v3.99.0 坑 489）
+
+**新坑（v16.11.0）**
+- **坑 487：触发时刻串会被「日期四形态替换」二次位移，必须用占位符保护**。1115 源码 GUARD 文案/`trigger_at` 是 `2026-11-15 22:35`，与 `TRIGGER_EPOCH=1794666900`（`2026-11-14 22:35`）错位一天——1114→1115 派生时通用日期替换把触发串又推了一天，且在替换列表第一行放 `(X, X)` 的 no-op「guard」并不保护任何东西。1116 修法：先把触发串（ISO/空格两形态）替换为 `\x00TRIG_ISO\x00`/`\x00TRIG_SP\x00`，全部日期/期号替换跑完再原样放回；触发断言 tuple 单独 +1 天。派生器末尾加全量审计：派生文件不得含上期号 `1115`、不得含旧 epoch `1794666900`、剩余 `2026-11-15` 只允许紧跟 `T22:35`/` 22:35`、旧 cutoff 形态（`2026-11-13T16:05`/`2026-11-13 16:05`）不得残留。
+- **坑 488：worker 首尝试静默退出 rc=1 → L2 `--resume` 续跑是设计内恢复**。1116 期 attempt 1 于 23:08 启动、01:48 无新 checkpoint 退出（2h40m）；L2 在 02:07:22 用同一 session `--resume` + 磁盘 checkpoint 起 attempt 2，后续 content/audit/covers/video/articles/publish/五平台上传全部完成。**监控口径**：`worker.attempts` 增加 + `last_exit=1` ≠ 失败，判进度只看 stage checkpoint/progress；禁止手工重启 worker 或并发第二 worker。**预防**：长生成阶段开始前先落 progress checkpoint；整期 10h+ 属正常长尾。
+
+**验证正例（v16.11.0）**
+- 坑 475 预防生效：arm 前清 `crawl-resource.lock.owner.json`（`lsof` 无持有者 + `ps` 无爬虫），冷启动归档一次通过、无 `rc=3`。
+- 坑 477 未触发：crawl 阶段正常接管，没有出现 `RETRY_LATER ... before adoption`。
 
 ### v16.8.0 (2026-11-14) — 1114 期：板块列表无界增长 + 永久消失帖把整条链钉死
 
