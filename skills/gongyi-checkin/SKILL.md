@@ -1,7 +1,7 @@
 ---
 name: gongyi-checkin
 description: 公益站（new-api / one-api 系）每日签到自动化。读取 Chrome 书签文件夹 daily-check-in，打开每个站点完成签到，输出签到成功/失败归档（含奖励金额与余额）。触发词：公益站签到、签到、每日签到、check-in、gongyi、公益站、station checkin、签到报告
-version: 1.0.0
+version: 1.1.0
 ---
 
 # gongyi-checkin — 公益站每日签到
@@ -33,6 +33,10 @@ version: 1.0.0
 
 **不要**每轮重开浏览器：用户日常 Chrome 里的登录态才是关键，重开就丢。
 
+> 进程命令行里带 `--remote-debugging-port=9222` **不代表 CDP 可用**：2026-11-16 实测日常 Chrome
+> 带着该参数启动，但 `curl http://127.0.0.1:9222/json/version` 无响应（Chrome 拒绝在默认 profile
+> 开调试端口）。判据永远是「端口有没有应答」，不要因为看到参数就临时切回 CDP 方案。
+
 ### 🚨 致命：同时存在两个 Chrome 实例时，AppleScript 会绑错
 
 `tell application "Google Chrome"` 按 **bundleID `com.google.Chrome`** 解析。
@@ -54,7 +58,10 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
   1. `kill <browser_daemon.py 的 pid>`，再 `kill <mcp-chrome Chrome 的 pid>`，sleep 2 秒复查，还在就 `kill -9`
   2. 按下面「验证绑定正确」复查一遍，确认回到日常 Chrome 再往下跑
   3. 签完恢复：`nohup python3 ~/.claude/skills/ai-news-factory/templates/browser_daemon.py > /tmp/browser_daemon.log 2>&1 &`
-  **绝对不要 kill 日常 Chrome**——它不带 `--user-data-dir` 参数，是唯一有登录态的那个。
+  **绝对不要 kill 日常 Chrome**——判断依据是 `--user-data-dir` 的**路径**，不是「有没有这个参数」：
+  日常 Chrome 要么不带该参数，要么显式指向 `~/Library/Application Support/Google/Chrome`
+  （2026-11-16 实测日常 Chrome 就带 `--user-data-dir=.../Google/Chrome --remote-debugging-port=9222`，
+  按「不带参数」的旧判据会把它误认成流水线实例）。流水线实例的路径一定含 `mcp-chrome-`。
   若当时新闻流水线正在上传，先判断再动手；拿不准就问用户。
 - **验证绑定正确**：`osascript -e 'tell application "Google Chrome" to get name of window 1'`
   应返回**用户自己**的标签标题，而不是「New Tab」/「公众号 / 视频号助手」这类流水线页面。
@@ -74,7 +81,7 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 
 ---
 
-## 🚨 三十五个会静默失败的坑
+## 🚨 三十八个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
@@ -409,6 +416,47 @@ PM-Plan 的验证从行为滑块换成了**图片点选**：`.modal-backdrop.ope
   4. 图片点选/滑块**不自动求解**：新增两段式命令（见「用法」），
      `--prepare-captcha` 把验证弹窗留在前台，人工完成后 `--submit-captcha` 只用于图形码。
 
+### 坑 36：单站补跑（`--url`）会覆盖当天的全量归档
+
+全量跑后把 `unknown` / `pending` 的站点用 `--url` 逐个补跑是常规收尾动作，
+但旧版每次运行都会**整体重写** `data/last-run.json` / `last-run.md`——
+2026-11-16 实测：32 站的全量报告在补跑 3 个站点后只剩 1 条结果，
+`--report-only` 也只能渲染出最后一站，当天的完整归档等于丢了，只能手工重建。
+
+- **修法**（2026-11-16 落地，`run_checkin.py`）：单站运行结束时，若
+  `last-run.json` 的 `meta.date` 就是今天且已有条目更多，则按
+  `(url, name)` 把本次单站结果**合并回原列表**再落盘，保留全量报告。
+- 兜底：万一报告已被覆盖，`data/run-log.md` 只记「有变化的站点」，
+  不能还原全量；此时只能按终端日志逐站重建，或在同一天重跑全量（已签站点不会被重复领取）。
+- 提醒：`--submit-captcha` 更新归档是**原地匹配 URL**，不会丢其它站点；问题只在 `--url` 全量落盘路径。
+
+### 坑 37：`--prepare-captcha` 报 `blocked_captcha` ≠ 一定需要人工
+
+2026-11-16 PM-Plan 实测：`--prepare-captcha` 返回
+`{"kind":"verify","state":"blocked_captcha"}`，但几秒后再 probe，弹窗已消失、
+页面显示「今天是 YYYY-MM-DD，已完成签到」+ 按钮 disabled —— 验证在无人操作下
+自行通过/关闭了（该站的点选验证对本次会话未强制拦截）。
+
+- **修法**（2026-11-16 落地，`run_checkin.py`）：`prepare_captcha()` 发现
+  `verify`/`slider` 类验证后，先做最多 10 秒的重探；若状态翻转为 `done`/`auto`，
+  返回里带 `resolved_after_wait: true` 并自动回收临时标签，不必再叫人。
+- **人工前先重探**：看到 `blocked_captcha` 别急着喊人，先用 `probe` 看一眼当前状态；
+  只有弹窗仍可见、状态仍阻塞时才走人工两段式。
+- 重探时**不要点签到按钮**（会重置验证）；只读 DOM 即可。
+
+### 坑 38：验证码图片太小，直接读容易认错字
+
+2026-11-16 简直了的 5 位彩色图形码原图约 120×46，直接读图容易把 `M` 看成 `H`、
+`D` 看成 `O`。低分辨率是实打实的误判来源。
+
+- **修法**：读图前先放大（无插值失真担忧，验证码是硬边缘字形）：
+  ```bash
+  sips -z 400 960 data/captcha.png --out /tmp/captcha_big.png
+  ```
+  再读 `/tmp/captcha_big.png`；提交后以 `--submit-captcha` 返回的
+  `state=done` 与 Toast 回执为准，失败就重新 `--prepare-captcha` 换一张（验证码一次性）。
+- 识别结果**不要写进 `EXPERIENCE.md` 等入库文件**（验证码是一次性的，没有沉淀价值）。
+
 ---
 
 ## ⚠️ 不要动用户的标签页
@@ -495,16 +543,22 @@ python3 run_checkin.py --no-login         # 不尝试 OAuth 登录
 # 两段式人工验证：全量跑报 blocked_captcha 后使用（坑 35）
 python3 run_checkin.py --prepare-captcha https://plan.pmcat.top/ --name PM-Plan
 #   返回 JSON: tab / kind(graphic|verify|slider) / prompt / page / image
-#   图形码 → 图片存到 data/captcha.png，人工或 agent 识图后提交：
+#   verify/slider 会先自动重探 10 秒：若验证自行通过，返回 resolved_after_wait=true 并回收标签（坑 37）
+#   图形码 → 图片存到 data/captcha.png，放大后识图再提交（坑 38）：
+sips -z 400 960 data/captcha.png --out /tmp/captcha_big.png
 python3 run_checkin.py --submit-captcha BDMM8 --host jianzhile.vip
-#   图片点选/滑块 → 标签页已留在前台，人工完成即可（脚本绝不代选/代滑）
+#   图片点选/滑块 → 标签页留在前台，人工完成即可（脚本绝不代选/代滑）
 #   默认成功后保留标签页；加 --close-tab 才会关闭
 ```
 
-产物（每次运行覆盖）：
+产物：
 
 - `data/last-run.json` —— 机器可读
 - `data/last-run.md` —— 人读报告（成功/待签/需登录/暂时失联 + 奖励 + 余额）
+- 单站补跑（`--url`）在同一天会**合并回全量归档**，不再覆盖整天报告（坑 36）
+
+**收尾**：`--prepare-captcha` / `--submit-captcha` 默认可能留下自己的临时标签，
+确认完成后按 URL 只关这些临时标签；**绝不批量关闭**，用户自己的页面要原样保留。
 
 **归档**：跑完把 `data/last-run.md` 内容贴进最终回复。
 

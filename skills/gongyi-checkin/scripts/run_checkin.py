@@ -772,6 +772,45 @@ def archive_experience(results, meta):
         fh.write(content)
     return exp_path
 
+
+def merge_into_today_archive(json_path, results, today):
+    """Merge a single-station rerun back into today's full-run archive.
+
+    Returns (merged_results, merged_bool). See 坑 36: a `--url` rerun used to
+    overwrite last-run.json/md with one row, destroying the day's report.
+    """
+    try:
+        with open(json_path, encoding="utf-8") as fh:
+            prev_payload = json.load(fh)
+        prev_results = prev_payload.get("results") or []
+        prev_date = (prev_payload.get("meta") or {}).get("date")
+        if prev_date != today or len(prev_results) <= len(results):
+            return results, False
+
+        def _url_key(row):
+            return (row.get("url") or "").rstrip("/").lower()
+
+        def _name_key(row):
+            return (row.get("name") or "").lower()
+
+        merged = list(prev_results)
+        by_url = {_url_key(row): i for i, row in enumerate(merged) if _url_key(row)}
+        by_name = {_name_key(row): i for i, row in enumerate(merged) if _name_key(row)}
+        for row in results:
+            # URL 精确匹配优先（同一站可能换了书签路径）；退回站名匹配，
+            # 避免补跑地址带/不带尾部 #hash 时在同一份报告里出现重复条目。
+            pos = by_url.get(_url_key(row))
+            if pos is None:
+                pos = by_name.get(_name_key(row))
+            if pos is None:
+                merged.append(row)
+            else:
+                merged[pos] = row
+        return merged, True
+    except Exception:  # noqa: BLE001
+        return results, False
+
+
 def claim_scratch_tab():
     """Open a dedicated scratch tab and return its index.
 
@@ -893,6 +932,31 @@ def prepare_captcha(url, name="", close_if_done=True):
             info["kind"] = "slider"
         info["prompt"] = c.get("prompt") or ""
         info["page"] = c.get("page") or ""
+
+        # 2026-11-16：点选/滑块验证弹窗可能在停留数秒后自行通过或关闭。
+        # PM-Plan 实测：prepare 返回 blocked_captcha，再次 probe 时弹窗已消失、
+        # 页面已是「已完成签到」。发现此类验证后先短暂重探，已翻转为 done/auto
+        # 就不要让人白跑一趟（图形码不会自行通过，不在此等待）。
+        if info["kind"] in ("verify", "slider") or (
+                state["state"] == "blocked_captcha" and not info["kind"]):
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                time.sleep(2.5)
+                page = probe(tab=tab)
+                state = classify(page)
+                info["state"] = state["state"]
+                info["evidence"] = state["evidence"]
+                if state["state"] in ("done", "auto"):
+                    info["resolved_after_wait"] = True
+                    info["kind"] = ""
+                    info["prompt"] = ""
+                    info["page"] = ""
+                    break
+                c2 = page.get("captcha") or {}
+                if not (c2.get("hasModal") or c2.get("hasSlider")
+                        or c2.get("hasVerify") or c2.get("blocking")):
+                    break
+
         if info["kind"] == "graphic":
             os.makedirs(DATA_DIR, exist_ok=True)
             out_path = os.path.join(DATA_DIR, "captcha.png")
@@ -1111,6 +1175,15 @@ def main():
                 fh.write(render_report(results, meta_mid))
     finally:
         release_scratch_tab(scratch)
+
+    # 2026-11-16：单站补跑（--url）不得覆盖当天的全量归档（坑 36）。
+    # dry-run 不合并：只用探测结果替换真实签到结果会污染归档。
+    if args.url and not args.dry_run:
+        merged, did_merge = merge_into_today_archive(
+            json_path, results, started.strftime("%Y-%m-%d"))
+        if did_merge:
+            results = merged
+            log("单站补跑已合并进当日全量归档（%d 站）" % len(results))
 
     meta = {
         "date": started.strftime("%Y-%m-%d"),

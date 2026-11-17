@@ -45,8 +45,11 @@
   `tell application "Google Chrome"` 绑到 ai-news-factory 的那个
   （`--user-data-dir=.../mcp-chrome-10b76e5`，CDP 9222），`name of window 1` 返回「公众号」。
   判据：先 `URL of every tab of every window` 看是不是五个平台页面。
-  `open -a "Google Chrome"` 不改变绑定；必须按 `kill daemon → kill mcp-chrome → 复查` reclaim，
-  **绝不 kill 不带 `--user-data-dir` 的日常 Chrome**（30 站登录态全在它那儿）。
+  `open -a "Google Chrome"` 不改变绑定；必须按 `kill daemon → kill mcp-chrome → 复查` reclaim。
+  **2026-11-16 修正「谁是日常 Chrome」的判据**：不能按「不带 `--user-data-dir`」判断——
+  当天日常 Chrome 自己就带 `--user-data-dir=/Users/.../Google Chrome（默认目录）--remote-debugging-port=9222`。
+  正确判据是**路径**：默认 profile 路径（或参数缺省）= 日常 Chrome；含 `mcp-chrome-` = 流水线实例。
+  当天只有 1 个实例，AppleScript 绑定正确，无需 reclaim。若确实 reclaim 过，
   签完 `bash data/_restart_upload_daemon_1111.sh` 恢复 pipeline。详见 SKILL.md 坑 17。
 - 2026-11-04 单站打不开重试 3 次即可判「暂时失联」，不要死磕（可能是站点自己挂了或被墙）。
 - **2026-11-12 Cloudflare Turnstile 验证盾与弹窗显式等待闭环**：
@@ -89,6 +92,20 @@
   旧探针完全漏检并在验证期间可能重复点击；现在 `hasVerify`/`blocking` 会归入 `blocked_captcha`
   并禁止补点。人工验证改用两段式 `--prepare-captcha` / `--submit-captcha`，绝不代选图片或滑块。
   详见 SKILL.md 坑 34、坑 35。
+- **2026-11-16 全量跑后的「补跑收尾」流程定型**：全量一次跑完仍有少量
+  `⚠️ 状态未知` / `🟡 待签到` 是常态（当天 AzureKilnAPI、dudu、GN 三站如此），
+  用 `--url <原书签地址> --name <站点名>` 逐站重跑基本都能转 `done`
+  （AzureKilnAPI 还需重走一次 LinuxDO OAuth）。单站补跑现在会合并回当日全量归档，
+  不再覆盖整天报告（详见 SKILL.md 坑 36）。
+- **2026-11-16 点选验证可能自行通过**：PM-Plan `--prepare-captcha` 返回 `blocked_captcha` 后，
+  重探时弹窗已消失、页面已显示「已完成签到」。现在 prepare 会先自动重探 10 秒，
+  `resolved_after_wait=true` 即无需人工（详见 SKILL.md 坑 37）。看到 `blocked_captcha` 先重探再喊人。
+- **2026-11-16 图形码识图先放大**：简直了 5 位码原图约 120×46，`sips -z 400 960` 放大后再读更稳；
+  当天一次识别通过，奖励以 Toast 回执为准（详见 SKILL.md 坑 38）。
+  验证码是一次性的，不要把具体识别结果写进入库文件。
+- **2026-11-16 临时标签收尾**：`--prepare-captcha` / `--submit-captcha` 默认保留标签页，
+  收尾时要按 URL 只关脚本自己开的临时标签（当天留了 jianzhile / plan.pmcat 两个），
+  **绝不批量关闭**，用户原有 3 个标签全程未动。
 
 ## 站点笔记
 
@@ -156,10 +173,15 @@
   2026-11-09 遇 Cloudflare Tunnel Error 1033 隧道宕机。
   **2026-11-15 形态变更**：滑块换成了**图片点选验证**（`.modal-backdrop.open .selfcheck-*`，提示「找出所有通常趁热食用的食物」，第 1 页共 2 页，`/api/selfcheck/img/img-*`）。
   按钮在验证期间为 `disabled`，通过后自动继续签到。此类验证仍**归 `blocked_captcha`、必须人工完成**，不要脚本点选图片。
+  **2026-11-16 实测 `--prepare-captcha` 后验证自行通过**：返回 `kind=verify / blocked_captcha`，
+  但 10 秒内重探弹窗已消失，页面显示「今天是 YYYY-MM-DD，已完成签到」+ 按钮 disabled。
+  说明该站的图片点选对本次会话未强制拦截；现在 prepare 会先自动重探，无需人工（SKILL.md 坑 37）。
+  若重探时弹窗仍在，则仍需人工点选。
 - **简直了**（`https://jianzhile.vip/console/personal`）：点 `Check in now` 弹
   「Security verification / Refresh captcha」5位彩色英数字图形验证码。
   **处置策略**：提取 `<img src="data:image/png;base64,...">` 进行 OCR 识别，通过 React 状态绑定或置顶标签页人工输入 5 位验证码完成签到。
   **2026-11-15 自动化闭环验证通过**：`save_captcha_image()` 落盘 → 识图得 5 位码 → `solve_react_captcha()` 原生 setter 提交 → 按钮翻转为 `Checked in`，奖励 +¥X 次日历可见、余额同步增加。注意签到前页面里的 `Received ¥X` 可能是**昨日日历残留**，不能当作今日已签的依据。
+  **2026-11-16 再次验证通过**：`--prepare-captcha` 出图 → `sips -z 400 960` 放大 → 识图 → `--submit-captcha` 一次成功，Toast 回执 `Check-in successful! Received ¥X`。原图偏小，先放大再读更稳（SKILL.md 坑 38）。
 
 ### dicksuck / 多数 new-api 站：重复点会被拒
 - 2026-11-07 曾把 `You can only check in once per day` / `Do not repeat check-in` 并入 `DONE_PATTERNS`
@@ -237,6 +259,17 @@
 - **2026-11-06 复现**：`#root` 仍为 0 子节点；多个 vendor chunk 的 `transferSize=0`（6ms 返回），
   只有一个 206KB 的 chunk 花了 7.3s。属于**站点自身 chunk 加载失败**，不是本机网络策略。
   连续两天如此 → 建议当作「站点不可用」，不要反复重试占用整体时长。
+- **2026-11-16 恢复可用**：全量跑首次 probe 为空判 `unknown`，单站补跑时页面提示未登录，
+  自动走 LinuxDO OAuth（`Continue with LinuxDO` → `允许`）后正常显示 `Check in now`，
+  点击签到成功，余额 `$X`。结论：`unknown` 且无证据时优先单站重跑，很多是登录态过期而非站点宕机。
+
+### dudu 公益站 — https://wududu.edu.kg/profile
+- **2026-11-16 首次全量跑 probe 为空判 `unknown`**，单站补跑即成功（无需登录/验证）。
+  典型的首轮瞬时失败，不要直接判失联。
+
+### [147ldc]GN公益站 — https://grok-heavy.878.indevs.in/profile
+- **2026-11-16 全量跑点击后状态未翻转（`pending`）**，单站补跑点击 `Check in now` 后成功。
+  验证循环已覆盖大部分情形，但偶发接口慢时仍可能停在 pending；用单站补跑收尾即可。
 
 ### 42 API — https://api.42x.shop/profile
 - 2026-11-04 `ERR_CONNECTION_CLOSED` 打不开 → 暂时失联。
@@ -269,10 +302,12 @@
    Huan / 烁 / 魔方 / CM-API / Orbitix / 方舟）。00:05 跑签的是「上一个 08:00 窗口」，
    白天打开站点会重新显示「今日尚未签到」；08:05 跑则两种口径都在当日窗口内。
 
-1. `SKILL.md` 的「三十三个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
+1. `SKILL.md` 的「三十八个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
    「读到上一个站点的页面」是危害最大的（数字看着对但全是错的）。
 2. 「站点形态」表 + 本文件的「站点笔记」，判断新站点归哪一形态。
 3. 新站点先 `--dry-run --url <地址> --name <名字>` 单站试，别直接全量点。
+4. 全量跑完先看 `⚠️ 状态未知` / `🟡 待签到`，用 `--url` 单站补跑（会合并进当日归档）；
+   仍有 `🔒 需人工验证` 时先 `probe` 重探，再决定是否 `--prepare-captcha` 叫人。
 
 ---
 

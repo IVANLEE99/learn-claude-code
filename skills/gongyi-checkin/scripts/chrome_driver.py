@@ -530,6 +530,16 @@ PROBE_JS = r"""
     var pg = verifyEl.querySelector('.selfcheck-page');
     verifyPrompt = pe ? (pe.textContent||'').trim().slice(0,80) : '';
     verifyPage = pg ? (pg.textContent||'').trim().slice(0,30) : '';
+    // 2026-11-16：PM-Plan 的提示文案/页码节点类名带其它后缀，固定选择器取空。
+    // 兜底从弹窗整段文本里提取提示语与「第 N 页，共 M 页」，否则人工侧看不到要求。
+    if (!verifyPrompt) {
+      var ptm = vt.match(/找出所有[^，。;；]{0,40}|请选出[^，。;；]{0,40}|拖动滑块[^，。;；]{0,20}/);
+      if (ptm) verifyPrompt = ptm[0].slice(0,80);
+    }
+    if (!verifyPage) {
+      var pgm = vt.match(/第\s*\d+\s*页\s*[，,]?\s*共\s*\d+\s*页/);
+      if (pgm) verifyPage = pgm[0].slice(0,30);
+    }
   }
   // 任意打开的模态弹窗：验证期间禁止重复点击（宁可不点，不可重置验证）
   var hasBlockingModal = false;
