@@ -1,10 +1,10 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.11.0
+version: 16.12.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.11.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.12.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
@@ -107,6 +107,38 @@ version: 16.11.0
 >
 > 另：本期 32h 窗口是 `2026-11-13 16:05 → 2026-11-15 00:05`，`too_old=970 future=0 parse_fail=0`；
 > 标题去重一次砍 1213 条（近 3 天覆盖度高）属正常，别为了「多抓」放宽去重。
+>
+> **🔴 v16.12.0 核心改进（2026-11-17 1117 期实跑：audit 探针要求字面 PASS / Claude CLI 路径写死扩展版本，坑 491-492）**
+>
+> 1117 期：Source A 2217 / Source B 595 → 队列 **507** → daily **464 帖**（507/507 有效、0 error）；
+> 22:35 触发 → 23:20 crawl VALIDATED → 23:23 downstream；00:13 在 audit 处粘性 blocked，人工修复后
+> 15:48 DONE，全程约 **17 小时**。两条都不是抓取问题，而是**判据**与**运行环境**。
+>
+> ① **坑 491：控制器 `_audit_probe` 要求系统 checker 的 stdout 含字面 `PASS`，而 checker 的真实成功契约是
+> `rc=0` + `RESULT: OK`——这个门永远不可能通过。**
+> 1116 是靠额外写 `run_check_1116.py` 适配器补打 `PASS:` 绕过去的；1117 的 worker 拒绝伪造 PASS，
+> 按契约 `block --kind source` 停机（00:13，report/press/pdf/content 断点全部保留）。
+> **正确修法（改判据，不伪造证据）**：
+> ```python
+> upper = (result.stdout or '').upper()
+> if (result.returncode or 'RESULT: BLOCKED' in upper or 'FAIL' in upper
+>         or not ('RESULT: OK' in upper or 'PASS' in upper)):
+>     raise Refusal(1, 'actual derived-content audit did not PASS')
+> ```
+> **纪律**：新期派生后先跑一次真实 checker，确认探针接受的成功令牌；不要写 PASS 适配器、不要改内容层。
+> 遇到 `kind=source` 的 audit block，先查这条；修完探针后用原 evidence 重新 `checkpoint audit`。
+>
+> ② **坑 492：`CLAUDE` 常量写死了扩展版本号，VS Code 扩展升级后所有 downstream worker 都 spawn 失败。**
+> 1117 期间扩展从 `anthropic.claude-code-2.1.310` 升到 `2.1.325`，旧路径消失，L2 每 180s 重试、
+> 连续 16 次 `FileNotFoundError: .../resources/native-binary/claude`，日志只有 supervisor traceback，
+> 表面像「worker 没进展」。**预防/处置**：arm 前和长跑中定期检查
+> `ls -d ~/.devin/extensions/anthropic.claude-code-*`，把 `CLAUDE` 指到实际存在的最新
+> `resources/native-binary/claude`；指纹是 `<issue>-downstream-supervisor.log` 里的 `FileNotFoundError`。
+> 不要重装/降级扩展，也不要改 `worker_command` 的其它参数。
+>
+> ③ **验证正例**：坑 475 预防生效（arm 前移走 `crawl-resource.lock.owner.json`，lsof/ps 双确认）；
+> 507 队列全量抓取 0 error；五平台草稿全部落库（公众号 `100002098` / 知乎 `2106048447715468379` /
+> B站 `4132286` / 抖音 `v0300fg…` / 视频号 `export/UzFf…`）。
 >
 > **🔴 v16.11.0 核心改进（2026-11-16 1116 期实跑：触发时刻串被日期替换二次位移 / worker 首尝试静默退出后自动续跑，坑 487-488）**
 >
@@ -322,6 +354,7 @@ cd /Users/youngsdream/Documents/learn-claude-code
 
 ```
 0. 清上一期跨期锁 sidecar：`data/logs/crawl-resource.lock.owner.json` 若仍是上期的 date（先 lsof+ps 确认无活跃），备份后移出，否则冷启动归档会 rc=3 粘性 blocked（坑 475）
+0.5 校验 `CLAUDE` 二进制路径：`ls -d ~/.devin/extensions/anthropic.claude-code-*`，把 `_scheduler_<issue>.py` 的 `CLAUDE` 指到实际存在的最新 `resources/native-binary/claude`；扩展升级后旧路径消失会让所有 downstream spawn 失败（坑 492）
 1. 清理旧 batch + 浏览器预授权（固定 cwd）
 2. Source A/B 列表 + 合并去重/公益站/32h → crawl_queue + batch_ids
 3. 全量逐帖抓取正文（每批立即保存）
@@ -1742,6 +1775,23 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.12.0 (2026-11-17) — 1117 期实跑：audit 探针要求字面 PASS + CLI 路径写死扩展版本
+
+**版本**：16.11.0 → 16.12.0
+
+**实测数据（2026-11-17 期，DATE=2026-11-17）**
+- Source A 2217 / Source B 595 → 队列 **507** → 正文 507/507 有效、0 error → daily **464 帖**
+- 22:35 触发 → 23:20 crawl+merge VALIDATED → 23:23 downstream → 00:13 audit 粘性 blocked
+- 人工修判据 + 12:08 续跑 → 15:48 DONE；五平台草稿全落库（公众号 `100002098` / 知乎 `2106048447715468379` / B站 `4132286` / 抖音 `v0300fg…` / 视频号 `export/UzFf…`）
+
+**新坑（v16.12.0）**
+- **坑 491：audit 探针要求字面 `PASS`，系统 checker 只输出 `RESULT: OK` → 门永远不可能通过**。1116 用 `run_check_1116.py` 适配器补 PASS 绕开；1117 worker 拒绝伪造 PASS，按契约 `block --kind source` 停机，断点保留。**修法**：探针接受 `rc==0 and ('RESULT: OK' in upper or 'PASS' in upper)`，同时拒绝 `RESULT: BLOCKED`/`FAIL`；新期派生后先跑真实 checker 验证成功令牌，不写适配器、不改内容层。
+- **坑 492：`CLAUDE` 常量写死扩展版本号，扩展升级后 worker 全部 spawn 失败**。1117 期间 `2.1.310 → 2.1.325`，旧路径 `FileNotFoundError`，L2 连试 16 次。**处置**：arm 前与长跑中检查 `ls -d ~/.devin/extensions/anthropic.claude-code-*`，把 `CLAUDE` 指到最新存在的二进制；指纹是 `<issue>-downstream-supervisor.log` 的 `FileNotFoundError`。
+
+**验证正例（v16.12.0）**
+- 坑 475 预防生效：arm 前移走 `crawl-resource.lock.owner.json`，归档一次通过。
+- 507 队列全量抓取 0 error；五平台草稿全部落库，DONE 15:48:26。
 
 ### v16.10.0 (2026-11-15) — W45 周报：平台合集/专栏必须按模式取值
 

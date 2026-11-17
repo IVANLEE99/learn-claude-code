@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.99.0
+version: 3.100.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.99.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.100.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -36,6 +36,39 @@ version: 3.99.0
 5. **不要 kill 用户日常 Chrome**；**不要**清空该 profile 目录（等于让五个平台重新扫码）。
 6. 若某平台掉登录，只需在该 profile 的浏览器窗口里重新扫码，**不需要**重建 profile。
 
+> **🔴 v3.100.0 核心改进（2026-11-17 1117 期实跑：结尾 CTA 被 AI 声明挤掉 / 改已 checkpoint 内容要重置阶段 / 长跑后登录态过期，坑 493-495）**
+>
+> 1117 期：daily 464 帖 → 视频 **65.16s / 6.5MB / 1920×1080**（锚点 0.7158）→ 五平台草稿
+> （公众号 `100002098` / 知乎 `2106048447715468379` / B站 `4132286` / 抖音 `v0300fg…` / 视频号 `export/UzFf…`）。
+> 本期三坑的共同点：产物都在、校验也绿，但**用户一眼看出不对**或**门禁永远不可能通过**。
+>
+> ① **坑 493：日报视频结尾必须保留标准 CTA「关注今日羊报AI，明天见。」；AI 合成声明只能插在 CTA 前面，不能替代它。**
+> 1117 的 content 层把结尾写成「…先保存约束，再核参数和账单。配图配音为 AI 合成。」——CTA 关注句整句丢失，
+> 用户对比 1116 成片后立刻发现。**规则**：daily 脚本最后一个 scene（`role=cta`）必须包含
+> `关注今日羊报AI，明天见。`；`配图配音为 AI 合成`（或等价 AI 声明）放在它前面，二者都要有。
+> **加长 CTA 会拉低锚点占比**：1117 从 30 字加到 46 字，实测 `46.703 / 67.500 = 0.6919`（低于 0.70）；
+> 正确对策是压缩 CTA 前导句（本期压回 32 字：`十一月十七日，配图配音为 AI 合成。关注今日羊报AI，明天见。`），
+> 实测 `46.703 / 65.191 = 0.7164`，一次通过。**必须用最终 MP4 音频实测**，不要用 wav 求和或字数估算。
+>
+> ② **坑 494：已 checkpoint 的 content/video 要改，必须由操作者把 content/audit/covers/video/articles 重置为 pending。**
+> `checkpoint` 对 `status=done` 的阶段只接受**完全相同**的 evidence digest；任何改动（`content_sha256` 变化）都会被
+> `completed artifact/receipt cannot be silently replaced` 拒绝。1117 改结尾时的正确顺序：
+> ① 备份旧 content/video/voiceover/captions；② 改 content 源脚本与 `content.json` / `voiceover-texts.json` / `script-<DATE>.md`；
+> ③ 在 state 锁内把这五个阶段置回 `pending`、清空 evidence；④ 删掉待重生成的 scene wav（`gen_tts` 会跳过已存在文件）；
+> ⑤ 清 worker session 强制新会话，让 worker 从 content 起重跑。
+> **可复用的部分不要重做**：covers 图不需要重生成（只重写 evidence 的 `content_sha256`）；articles 文本不需要重写；
+> publish 不需要重置。**要避免的半成品**：只改 `content.json` 不重置阶段 → 所有依赖阶段的 `content_sha256`
+> 全部对不上，`finish` 时连环失败。
+>
+> ③ **坑 495：长跑 10h+ 后上传平台会掉登录，upload 前必须重新做只读探针；扫码后按「归档 BLOCKED → 清 state.blocked → 强制新 session」续跑。**
+> 1117 从 22:35 跑到次日 15:11，公众号 `cgi-bin/home` 返回「登录超时，请重新登录」、视频号 302 到 `login.html`；
+> 知乎/B站/抖音仍在线。**探针必须用 default context（坑 288）**，只读打开五个平台首页/上传页，读表单元素或
+> 后台文本判登录；**不要打开上传页录入任何内容**。判定 `login_required` 时：保留扫码页、保存截图与
+> `login-probe.json`、`block --kind login_required`、停止上传（本期未打开任何上传/发布页、未消耗抖音恢复令牌）。
+> **用户扫码后**：重新跑只读探针确认（公众号 URL 带 token 且首页有账号数据、视频号 `/platform` 有视频号 ID）→
+> 归档 `<issue>-BLOCKED.json` → 在 state 锁内 `blocked=null, status=interrupted, session_id=null,
+> initialized=false, next_retry_epoch=0` → `bash data/_watchdog_<issue>.sh` 拉起新 worker。**绝不代扫、绝不重建 profile。**
+>
 > **🔴 v3.98.0 核心改进（2026-11-15 W45 周报实跑：平台合集/专栏按模式取值 / 抖音竖封面不缩放 / 公众号摘要必填，坑 482-486）**
 >
 > W45 周报：daily 7 天 2911 帖 → PDF 831KB → 视频 189.49s / 15.74MB / 1920×1080 → 五平台草稿全部落库
@@ -1228,6 +1261,8 @@ $PY ~/.claude/skills/ai-news-factory/templates/check-derived-content.py --date <
 ```
 
 `check-derived-content.py` 的核心判据（**已用正负样本双向验证**，见 v3.87.0 changelog）：
+- **成功契约（v3.100.0，坑 491）**：成功时输出 `RESULT: OK` 且 `rc=0`；它**从不输出字面 `PASS`**。
+  控制器的 audit 探针必须认这个契约，不要写 PASS 适配器、不要让 worker 伪造 PASS。
 - **孤儿英文专名 ≥ 2 个 → 硬失败**（本期负样本：口播里同时残留 GitHub / Rubicon / Menlo / Ventures）
 - **上一期日期的中文形态**（`十一月九日` / `11月9日`）也算残留（只查 `2026-11-09` 会漏）
 - **prompts 层默认豁免**孤儿检查（英文 prompt 与中文报告词表天然不同）；要查用 `--strict-prompts`
@@ -1425,6 +1460,10 @@ Now What：{可执行建议，含操作动词（换/挪/配/备/查/避/开/砍/
 
 结尾：{CTA}
 ```
+> 🔴 **日报结尾 CTA 固定句（v3.100.0，坑 493）**：最后场景的口播与字幕必须包含
+> `关注今日羊报AI，明天见。`。AI 合成声明（如「配图配音为 AI 合成」）放在它**前面**，不能替代它。
+> 改完结尾必须用**最终 MP4 音频**重测锚点占比；低于 0.70 时压缩 CTA 前导句，不要动锚点场景。
+>
 > 🔴 **4 主力钩子公式**（源 `social_media/爆款开头钩子.md`，Hook 必须套其一）：1.社交共鸣型"你身边有没有这样的人" 2.反转认知型"今天被上了一课" 3.否定警告型"千万不要" 4.数据背书型"99%的人都不知道"
 
 细则：`templates/script-template.md`、`templates/credibility-and-tone.md`；周报见 `templates/script-template-weekly.md`
@@ -7579,6 +7618,22 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.100.0（2026-11-17 1117 期实跑：结尾 CTA 被 AI 声明挤掉 / 改已 checkpoint 内容要重置阶段 / 长跑后登录过期，坑 493-495）
+
+1117 期：daily **464 帖**（507 队列全量、0 error）→ 7 场景 → 视频 **65.16s / 6.5MB / 1920×1080**（锚点 0.7158）→
+五平台草稿（公众号 `100002098` / 知乎 `2106048447715468379` / B站 `4132286` / 抖音 `v0300fg…` / 视频号 `export/UzFf…`），
+DONE 15:48:26。本期三条：一条是用户肉眼发现的**内容回归**，两条是**改产物与长跑登录**的工程流程。
+
+**新坑（v3.100.0）**
+- **坑 493：日报视频结尾必须保留「关注今日羊报AI，明天见。」，AI 合成声明只能插在它前面**。1117 content 层用「配图配音为 AI 合成。」替代了 CTA，关注句整句丢失。加长 CTA 会把锚点占比从 0.716 拉到 0.6919（30 字→46 字），正确对策是压缩 CTA 前导句而非动锚点；压回 32 字后实测 0.7164。必须用最终 MP4 音频实测。
+- **坑 494：已 checkpoint 的 content/video 要改，必须重置 content/audit/covers/video/articles 五个阶段**。`checkpoint` 只接受完全相同的 evidence digest；只改 `content.json` 不重置阶段会让所有下游 `content_sha256` 对不上，`finish` 连环失败。顺序：备份 → 改源脚本与三份内容产物 → state 锁内 reset → 删 scene wav → 强制新 session 重跑。covers 图与 articles 文本不必重做，publish 不必重置。
+- **坑 495：长跑 10h+ 后上传平台会掉登录，upload 前必须重做只读探针**。1117 在 16 小时后发现公众号登录超时、视频号跳 login.html；按 `login_required` 停机（保留扫码页、未打开上传页、未消耗抖音恢复令牌）。用户扫码后：只读复检 → 归档 BLOCKED → 清 state.blocked → 强制新 session → tick 续跑。绝不代扫、不重建 profile。
+
+**验证正例（v3.100.0）**
+- 五平台 receipt 全为真实回读：`checks={readback_after_save, cover_verified, draft_only, current_issue}` 全 true，`required_failures=[]`。
+- 视频 1920×1080 / h264+aac / 65.16s；横竖封面 1536×1152 / 1152×1536。
+- 知乎 scene6 图片块「上传失败」按坑 424 复核后定向补图，最终 6 张服务端图片。
 
 ### v3.99.0（2026-11-16 1116 期实跑：抖音长尾与手动发布竞态 / 视频号 objectId 取证，坑 489-490）
 
