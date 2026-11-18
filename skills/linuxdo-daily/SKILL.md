@@ -1,10 +1,10 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.12.0
+version: 16.13.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.12.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.13.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
@@ -107,6 +107,31 @@ version: 16.12.0
 >
 > 另：本期 32h 窗口是 `2026-11-13 16:05 → 2026-11-15 00:05`，`too_old=970 future=0 parse_fail=0`；
 > 标题去重一次砍 1213 条（近 3 天覆盖度高）属正常，别为了「多抓」放宽去重。
+>
+> **🔴 v16.13.0 核心改进（2026-11-18 1118 期实跑：Source A 懒加载失败只抓到 30 帖，daily 全绿却是静默欠抓，坑 496）**
+>
+> 1118 期：Source A 只返回 **30 帖**（1117 是 2217、1116 是 2219），32h 窗口内 19 帖，
+> daily 只有 **28 帖**；而控制器的 queue_hash / batch 覆盖 **29/29 全绿**，没有任何告警。
+> 用户对比历史期数后发现，整条报告基于 1/16 的素材生成，只能重抓重跑。
+>
+> ① **坑 496：`scrollLoad` 的 `stable >= 3` plateau 判据会把「首屏 30 行没继续加载」误判成列表已到底。**
+> 日志指纹：`scroll 1..320: 0 rows`（列表元素 `tr.topic-list-item` 根本没渲染）→ transient 重试 →
+> `scroll 1: 30 rows` → 连续 3 次不变 → 返回 30。**修法（`_fetch_lists_<issue>.mjs`）**：
+> - 加行数下限 `MIN_ROWS = { a: 800, b: 200 }`（Source A 历史 ~2200 行，Source B 过滤前 ~2200 行）；
+> - plateau 阈值 `3 → 6`，且必须 `count >= MIN_ROWS[key]` 才允许返回；
+> - 滚动 12 次仍 0 行 → 立即 transient 重试（不再空转 420 次 / 11 分钟）；
+> - 低于下限时先点 `button.load-more / a.load-more / .load-more`，没有或仍不涨就 reload；
+> - 三次仍短 → 抛 `rc=4`（source abnormal），让控制器 **block** 而不是静默继续。
+> 修复后同一页面立刻抓到 **2219 帖 / 窗口内 709**，说明是瞬时渲染失败，不是站点改版。
+>
+> ② **判据纪律**：`validate_daily` 只校验队列内部一致性，**不校验源是否抓全**。
+> 开工后先看 `data/source_a.json` 条数，`< 1500` 一律按欠抓处理；
+> 不要因为 `CHECKPOINT coverage: valid=N/N` 与 `DAILY VERIFIED` 全绿就认为素材完整。
+>
+> ③ **恢复路径（本期实测有效）**：停 L2 与 supervisor → 归档 bad-run 产物（daily/report/press/pdf/
+> news-pipeline/logs/batch/queue，共 23 项）→ 保留 `ARCHIVE-DONE` marker → 重置 state →
+> 修 `_fetch_lists` → 重新 arm → tick。重抓后 495 队列、494 帖正文、1 帖 404 确认删除
+> （写 `permanent-gone.json`，需 ≥6 个同错误 attempt 文件佐证）、daily 459 帖。
 >
 > **🔴 v16.12.0 核心改进（2026-11-17 1117 期实跑：audit 探针要求字面 PASS / Claude CLI 路径写死扩展版本，坑 491-492）**
 >
@@ -1775,6 +1800,38 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.13.0 (2026-11-18) — 1118 期实跑：Source A 短列表静默欠抓（坑 496）
+
+**坑 496：`scrollLoad` 的 `stable >= 3` 会把「首屏 30 行 + 懒加载失败」误判为列表到底。**
+
+- **实测指纹**：`data/logs/<issue>-crawl.log`
+  ```
+  scroll 10: 0 rows
+  ...（到 scroll 320 全是 0 rows）
+  Source A transient attempt=1
+  scroll 1: 30 rows
+  SOURCE A: count=30 ...
+  ```
+  即首轮列表元素 `tr.topic-list-item` 完全没渲染；重试后只拿到首屏 30 行，
+  连续 3 次不变（3.6s）就返回。Source B 同会话正常（594 帖 / 2220 行），说明浏览器与 profile 没问题。
+- **后果**：32h 窗口内 Source A 只有 19 帖（正常 655），daily 28 帖（正常 460+）；
+  控制器 `CHECKPOINT coverage: valid=29/29`、`DAILY VERIFIED` 全绿，**没有任何告警**。
+- **修法**（`_fetch_lists_<issue>.mjs`）：
+  ```js
+  const MIN_ROWS = { a: 800, b: 200 };
+  // plateau: stable >= 6 且 count >= MIN_ROWS[key] 才允许返回
+  if (stable >= 6 && count > 0 && i >= 12) {
+    const clicked = await evaluate30(page, () => { /* 点 button.load-more / a.load-more / .load-more */ });
+    if (clicked) { stable = 0; await sleep(2500); continue; }
+    throw shortList(key, count);      // rc=1，触发 transient 重试
+  }
+  if (!count && i >= 12) throw shortList(key, count);
+  ```
+  外层 3 次仍 short → `throw fail(4, 'under-coverage after 3 attempts')`，让控制器 block。
+- **修复后实测**：同一 URL 立刻 2219 帖 / 窗口内 709，证明是瞬时渲染失败。
+- **验收纪律**：开工后先看 `data/source_a.json` 条数，`< 1500` 一律按欠抓处理；
+  **daily 的内部一致性全绿不代表源完整**。重抓恢复路径见 v16.13.0 顶部摘要 ③。
 
 ### v16.12.0 (2026-11-17) — 1117 期实跑：audit 探针要求字面 PASS + CLI 路径写死扩展版本
 

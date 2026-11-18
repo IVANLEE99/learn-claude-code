@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.100.0
+version: 3.101.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.100.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.101.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -36,6 +36,39 @@ version: 3.100.0
 5. **不要 kill 用户日常 Chrome**；**不要**清空该 profile 目录（等于让五个平台重新扫码）。
 6. 若某平台掉登录，只需在该 profile 的浏览器窗口里重新扫码，**不需要**重建 profile。
 
+> **🔴 v3.101.0 核心改进（2026-11-18 1118 期实跑：receipt 首尾判据恒假 / 公众号插图假绿 / 抖音假草稿 / DONE 被旧 block 覆盖，坑 497-500）**
+>
+> 1118 期：daily **459 帖**（队列 495、正文 494/495、1 帖确认 404 已删除、二次过滤剔除 36）→ 视频 → 五平台草稿。
+> 本期最贵的不是生成，而是**四个「日志全绿、用户一眼看出不对」的判据坑**。共同点：产物/证据都在，
+> 但判据本身写错，worker 与控制器互相认为对方在骗人。
+>
+> ① **坑 497：receipt 的 body 首尾比较必须 strip 两侧，否则以空格开头的末 40 字符永远不可能相等。**
+> `norm = ' '.join(str(t).split())` 会把 capture 的前导空格吃掉，而 `body[-40:]` 若从空格开始则保留它。
+> 抖音/视频号 description 在 hashtag 行前有换行，必然命中。**修法**：
+> `edge_start, edge_end = body[:40].strip(), body[-40:].strip()`，再比较两侧 `norm(...).strip()`。
+> 改完**先用真实 `Validator(ROOT).receipt(platform, evidence)` 复验**（不需要 job token），
+> 再让 worker 重跑 receipt。本期该门连续误拒 3 次，白烧 40 分钟。
+>
+> ② **坑 498：公众号「占位符清零」不等于图片落库；必须数真实 `<img src>` 并在 reload 后复验。**
+> 1118 的 images 步报告 `placeholders remaining: 0`、verify 也写 `placeholders: 0`，但草稿正文实际只有
+> **4 张真实图片 + 4 个残留占位符**（`PLACEHOLDER_IMG_5/6/7/COVER`）。`ProseMirror-separator` 与 widget
+> 会让占位符计数假绿。**判据改为**：`realImgs = [...pm.querySelectorAll('img')].filter(i => i.getAttribute('src')).length`，
+> 必须等于 `1 + len(SECTIONS) + 1`（7 场景 + 封面 = 8）；**保存后从草稿列表重新打开**再数一次。
+> 本期补齐后以 8 图 / 0 占位符落库（更新于 11:35）。
+>
+> ③ **坑 499：抖音 capture 里的 `video_id` 不是草稿凭证。** 1118 的 `douyin-capture.json` 写了
+> `draft_id=v0200fg…`、`saved:true`，但用户打开草稿箱**看不到任何草稿**（内容管理页只有 299 个已发布作品，
+> 发布页也没有「继续编辑」横幅）。**规则**：抖音 `saved:true` 必须同时满足「继续编辑横幅可见」或
+> 「恢复后 `videos>=1`」；仅有上传返回的 `video_id` 时，`nonpersistent_fields` 必须如实声明，
+> 且不得据此宣称草稿已保存。**用户说草稿箱看不到 = 以用户为准重新上传**，不要拿 capture 反驳用户。
+>
+> ④ **坑 500：DONE marker 已写、但 `state.status` 被后续 block 覆盖时，恢复而不是重跑。**
+> 1118 的 finish 在 09:47:03 已写 `1118-DONE`（`stages_sha256` 与 `digest(state['stages'])` 完全一致），
+> 但紧随其后的 identity block 把 status 改成 `blocked`；之后 tick 一直报
+> `bare/unvalidated DONE marker refused`。**恢复步骤**：归档残留 `BLOCKED.json` → 清 `state.blocked` →
+> **核对 marker 的 `stages_sha256` 与当前 `digest(stages)` 相等** → 把 `status` 置回 `done` →
+> tick 即返回 `DONE`。**不要重跑任何 stage**。反之，若 digest 不等，说明 stage 真变了，才需要重置。
+>
 > **🔴 v3.100.0 核心改进（2026-11-17 1117 期实跑：结尾 CTA 被 AI 声明挤掉 / 改已 checkpoint 内容要重置阶段 / 长跑后登录态过期，坑 493-495）**
 >
 > 1117 期：daily 464 帖 → 视频 **65.16s / 6.5MB / 1920×1080**（锚点 0.7158）→ 五平台草稿
@@ -7618,6 +7651,66 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.101.0（2026-11-18 1118 期实跑：receipt 首尾判据恒假 / 公众号插图假绿 / 抖音假草稿 / DONE 被旧 block 覆盖，坑 497-500）
+
+1118 期：daily **459 帖**（队列 495 / 正文 494 / permanent_gone 1 / 二次过滤 36）→ 报告 + press + PDF →
+content/audit/covers/video/articles/publish → 五平台草稿。触发 22:35，DONE 09:47，**约 11h12m**；
+其中抓取返工 1 次（Source A 欠抓）、receipt 误拒 3 轮、公众号补图 1 轮。
+
+#### 坑 497：receipt 的 body 首尾比较必须 strip 两侧
+
+- **症状**：抖音/视频号草稿真实存在、capture 也正确，`receipt` 却恒定报
+  `body first/last and current media identity refusal`；worker 据此写了 `receipt-edge-blocker.json` 并 block 两次。
+- **根因**：`norm(t) = ' '.join(str(t).split())`。capture 的 `body_end` 字符串前导空格被 `split()` 吃掉，
+  而 expected `body[-40:]` 从空格开始、保留该空格 → 两侧长度 39 vs 40，等式恒假。
+  publish 的 description 在 hashtag 行前有换行，本期两个平台都命中。
+- **修法**：
+  ```python
+  edge_start, edge_end = body[:40].strip(), body[-40:].strip()
+  if (len(body) < 40 or norm(observed.get('body_start','')).strip() != edge_start
+          or norm(observed.get('body_end','')).strip() != edge_end
+          or observed.get('video_sha256') != sha(self.path(pub['video']))):
+  ```
+- **验证**：`Validator(ROOT).receipt(platform, evidence)` 可直接在普通进程调用（不需要 job token），
+  改完先复验两平台都 `RECEIPT OK`，再让 worker 重跑，别让它重新推导。
+- **注释坑（同源）**：第一次修完在注释前半句写「这个比较永远不可能相等」（描述 bug），worker 读到前半句
+  就认定仍不可修复并自行 block。**修 bug 的注释第一句必须写 FIXED 及已验证事实**，否则会误导下一个 worker。
+
+#### 坑 498：公众号「占位符清零」≠ 图片落库
+
+- **症状**：`wechat_upload_<issue>.py images` 打印 `placeholders remaining: 0`，verify 也写 `placeholders: 0`，
+  但用户打开草稿发现图片没插完。实测正文只有 **4 张真实图片 + 4 个残留占位符**
+  （`PLACEHOLDER_IMG_5/6/7/COVER`）。
+- **根因**：① 占位符计数只看 innerText，`ProseMirror-separator` / widget 节点会让它假绿；
+  ② 每插一张就 `click_save`，保存过程中页面跳转/重渲染，后续改动可能落在已失效的标签页上，
+  只有前几张真正落库。
+- **修法**：判据改为真实图片节点数：
+  ```js
+  [...pm.querySelectorAll('img')].filter(i => i.getAttribute('src')).length
+  ```
+  必须等于 `1 + len(SECTIONS) + 1`（7 场景 + 封面 = 8）。**保存后从草稿列表重新打开**再数一次；
+  不要接受 `placeholders == 0` 作为唯一判据。若已在草稿上补图，先给该标签打 `window.__wx<issue> = 1`
+  再复用脚本的替换逻辑（脚本会 `not-found → skip`，天然幂等）。
+- **限流**：短时间反复保存会触发 `系统错误(320003)`；冷却 10–15 分钟再验，不要连续重试。
+
+#### 坑 499：抖音 capture 的 `video_id` 不是草稿凭证
+
+- **症状**：`douyin-capture.json` 写 `draft_id=v0200fg…`、`saved:true`、`draft_id_kind=douyin_ingest_video_id`，
+  但用户打开草稿箱**看不到任何草稿**；内容管理页只有已发布作品，发布页也没有「继续编辑」横幅。
+- **规则**：抖音 `saved:true` 必须同时满足「继续编辑横幅可见」或「恢复后 `videos >= 1`」，
+  且 `nonpersistent_fields` 如实写「草稿无平台 ID 可回读」。仅有上传返回的 `video_id` 时不得宣称草稿已保存。
+- **用户口径优先**：用户说草稿箱没看到 = 以用户为准重新上传（走完整 e2e：上传 → 填字段 → 双封面 →
+  暂存 → 同标签「继续编辑」回读 `videos>=1` → 再暂存），不要用 capture 反驳用户。
+
+#### 坑 500：DONE marker 已写但 status 被后续 block 覆盖
+
+- **症状**：`data/logs/<issue>-DONE` 存在且 `verified:true`，但 tick 报
+  `bare/unvalidated DONE marker refused`，state 里 `status=blocked`。
+- **根因**：finish 先写 marker 并置 `status=done`，随后的 identity block 把 status 覆盖成 `blocked`。
+- **恢复**：归档残留 `BLOCKED.json` → 清 `state.blocked` → **核对 marker 的 `stages_sha256`
+  与当前 `digest(state['stages'])` 是否相等** → 相等则把 `status` 置回 `done`，tick 直接返回 `DONE`，
+  **不重跑任何 stage**；不相等才说明 stage 真变了，需要重置对应阶段。
 
 ### v3.100.0（2026-11-17 1117 期实跑：结尾 CTA 被 AI 声明挤掉 / 改已 checkpoint 内容要重置阶段 / 长跑后登录过期，坑 493-495）
 
