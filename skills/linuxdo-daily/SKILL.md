@@ -1,10 +1,10 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.13.0
+version: 16.14.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.13.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.14.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
@@ -27,24 +27,31 @@ version: 16.13.0
 
 抓取 profile 是干净的、无需登录，首次过 Cloudflare 实测一次即过。
 
-## 🔒 浏览器 profile 约定（2026-11-12 用户明确指示；2026-11-13 再次强调三遍）
+## 🔒 浏览器 profile 约定（2026-11-12 用户明确指示；2026-11-13 / 2026-11-19 两次补充）
 
-> 用户原话：「**记得保留这个 profile，现在每次都要登录好烦**」「打开专用 profile 的浏览器，里面已经登录五个平台；以后每次都用这个独立 profile」
+> 用户原话：「**记得保留这个 profile，现在每次都要登录好烦**」「打开专用 profile 的浏览器，里面已经登录五个平台；**以后每次都用这个独立 profile**」
 
-**这个 profile 是登录态的唯一载体。用户为它扫过至少两轮码，重建 = 让用户重扫五个平台，属于严重返工。**
+**上传 profile 是登录态的唯一载体**：`~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5`。
+用户为它扫过至少三轮码，重建 = 让用户重扫五个平台，属于严重返工。
 
-抓取与上传**共用同一个专用 profile**：`~/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5`。
-
-- 该 profile 长期驻留五平台上传登录态（公众号/知乎/B站/抖音/视频号），**不要清空**。
-- **禁止**对该目录做任何破坏性操作：`rm -rf` / `mv` / 重命名 / 清空 `Default/` 或 `Cookies` / `Login Data`；
+- 长期驻留五平台上传登录态（公众号/知乎/B站/抖音/视频号），**不要清空、不要重建**。
+- **禁止**对该目录做任何破坏性操作：`rm -rf` / `mv` / 重命名 / 清空 `Default/`、`Cookies`、`Login Data`；
   也不要用 `cp -r` 复制到别处再跑（Cookie 加密绑定会让复制品失效）。
 - 允许读 `Default/History`，但必须 `cp` 到 `/tmp` 再读（原库被 Chrome 锁住）。
 - 需要清理时先 `cp -a` 备份到 `~/Library/Caches/ms-playwright-mcp/.backup-<ts>/`。
 - **禁止**用日常 Chrome 的 `~/Library/Application Support/Google/Chrome` 跑自动化
   （Chrome 157+ 拒绝默认 data dir 开调试端口，坑 461；也会污染用户日常登录态）。
-- 抓取阶段由 `_launch_<issue>.sh` 的 `reclaim_profile` 独占该 profile；抓取收工后
-  用 `bash data/_restart_upload_daemon_<issue>.sh` 恢复上传 daemon（CDP 9222）。
-- 抓取期间**不要**重启 daemon；上传期间**不要**再跑抓取。
+- 某平台掉登录 → 只在该 profile 的窗口里重新扫码，**不要**重建 profile。
+
+**抓取 profile 独立**：`~/Library/Caches/ms-playwright-mcp/mcp-chrome-crawl`（Chrome for Testing）。
+抓取与上传**不再互踢**：`reclaim_profile` 只清抓取 profile 自己的残留，**不 kill `browser_daemon.py`**；
+抓取期间不需要重启上传 daemon，上传期间也不需要停抓取。两边共用会毁登录态（坑 463）。
+
+**2026-11-19 路径漂移事故（必读）**：home 改名后 daemon 默认路径会静默从
+`/Users/<oldhome>/Library/Caches/ms-playwright/mcp-chrome-10b76e5` 漂到
+`/Users/<newhome>/Library/Caches/ms-playwright-mcp/mcp-chrome-10b76e5`（`ms-playwright` vs
+`ms-playwright-mcp`）。旧目录不存在时 Chrome 会新建空壳，表现是「五平台全部未登录」而**不是报错**。
+开工前先核对 `DAEMON_START ... profile=` 与预期路径；不一致就 `UPLOAD_PROFILE=<正确路径>` 或修默认值。
 
 > **🔴 v16.7 核心改进（2026-11-13 1113 期实跑：触发时刻不是惯例值 / 派生器断言照抄上期 needle）**
 >
@@ -107,6 +114,39 @@ version: 16.13.0
 >
 > 另：本期 32h 窗口是 `2026-11-13 16:05 → 2026-11-15 00:05`，`too_old=970 future=0 parse_fail=0`；
 > 标题去重一次砍 1213 条（近 3 天覆盖度高）属正常，别为了「多抓」放宽去重。
+>
+> **🔴 v16.14.0 核心改进（2026-11-19 1119 期实跑：Cloudflare 中文挑战页 / 派生常量未导出 / created 窗口覆盖 / worker 会话复用 / 模型别名漂移，坑 501-505）**
+>
+> 1119 期：Source A 2218 / Source B 605 → 队列 679 → daily 630（675/679 有效 + 4 帖永久消失）。
+> 抓取阶段连踩四坑，全部是「代码看起来对、跑起来空转」：
+>
+> ① **坑 501：Cloudflare 挑战页现在会说中文「请稍候…」。** 旧 `passCloudflare` 只匹配
+> `Just a moment|Checking|Attention Required`，中文页直接当成功返回；随后 12 次滚动全 0 行，
+> 被 `shortList` 判欠抓。**修法**：挑战标题正则同时包含
+> `请稍候|请稍等|正在检查|检查中|验证中`，等待上限提到 **12×10s=120s**（实测挑战约 40–48s）。
+> 日志里 `scroll 10: 0 rows` + 没有 `[cf]` 行就是本坑。
+>
+> ② **坑 502：派生脚本引用共享常量必须显式 export/import。** `_fetch_lists_<issue>.mjs` 新增的
+> created 覆盖检查用了 `CUTOFF`，但 `_crawl_<issue>.mjs` 里 `const CUTOFF` 没 `export` →
+> 每轮滚到 2216 行后抛 `ReferenceError`，表现成 transient 重试 3 次 → `rc=1 failed after 3 attempts`，
+> resume 又从第 1 行重来。**判据**：日志 transient 后**没有** `(short list)` 后缀。
+> **修法**：`export const CUTOFF` + fetch 侧 `import { ..., CUTOFF }`；派生后 `node --check` 不够，
+> 要 `node --input-type=module -e "import('./_fetch_lists_<issue>.mjs')"` 实跑 import。
+>
+> ③ **坑 503：CAP 2200 只是安全上限，完整性要用 created 反算。** 列表按活动排序，CAP 早退不代表
+> 32h 窗口覆盖。抓完必须验证「加载到的最老一行 created < CUTOFF」；仍 >= CUTOFF 就按欠抓重试/block。
+> 1119 实测 2218 行、min created 2024-05-05、窗口内 896，才允许进 build_queue。
+>
+> ④ **坑 504：worker 复用同一个 `--resume` 会话会把请求体滚坏。** 连续十几个 attempt 都
+> `API Error 400 ... Invalid request` 或只写 2 条事件挂起；换模型别名无效。**修法**：operator 在
+> job 空闲时清 `worker.session_id` / `initialized=False` / `next_retry_epo`，强制新会话；
+> 磁盘 checkpoint（batch/evidence/state）才是事实源，坏会话可丢。
+>
+> ⑤ **坑 505：本地代理模型别名会整条消失。** `auto/deepseek-v4.1-flash[1m]` 当天不在 `/v1/models`，
+> CLI 直接 `unrecognized_model`；`[1M]` 版本可能被上游按签名 403。**修法**：scheduler 加
+> `WORKER_MODEL = os.environ.get('PIPELINE_<issue>_MODEL', '<别名>')` 并给 worker 传 `--model`，
+> 不改用户全局 settings；选别名必须用**完整 worker prompt** 实测（`--print` + 长 prompt + 90s），
+> PING 测不出。
 >
 > **🔴 v16.13.0 核心改进（2026-11-18 1118 期实跑：Source A 懒加载失败只抓到 30 帖，daily 全绿却是静默欠抓，坑 496）**
 >
