@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.102.0
+version: 3.103.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.102.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.103.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -36,6 +36,50 @@ version: 3.102.0
 5. **不要 kill 用户日常 Chrome**；**不要**清空该 profile 目录（等于让五个平台重新扫码）。
 6. 若某平台掉登录，只需在该 profile 的浏览器窗口里重新扫码，**不需要**重建 profile。
 
+> **🔴 v3.103.0 核心改进（2026-11-20 1120 期实跑：公众号摘要 120 字硬上限 / 抖音 ingest id 只在请求体 / 续跑空转 180 秒，坑 511-513）**
+>
+> 1120 期全链一次跑通：daily 550 帖 → 报告/PDF → 视频 93.56s → **五平台草稿全部 verified**。
+> 全程抓到三个「判据对但会被卡住」的坑，都不是内容问题，是**平台硬限 + 取证位置 + 调度节拍**。
+>
+> ① **坑 511：公众号摘要超过 120 字会让保存整体失败，且没有 appmsgid。**
+> 编辑器回显 `保存失败 :: 摘要长度不能超过120字`，同时右上角还会出现 `自动保存失败` ——
+> 极易被误判成网络/登录问题，浪费整轮。**修法**：`publish.json` 里保留原文摘要（它已被 publish
+> 阶段 hash-pin，**绝不能在上传阶段去改它**），上传时按**分句边界**截到 ≤120 字再填，
+> 并把截断事实写进 capture 的 `nonpersistent_fields`（本期 204 → 109 字）。
+> 校验：`digest_len <= 120` 且 capture 有该注记，否则不算 verified。
+>
+> ② **坑 512：抖音的 ingest `video_id` 抓不到在 DOM 里，只能在保存请求里拦。**
+> 恢复页（`enter_from=draft`）的 DOM 不含 video_id，抓 innerText/属性一律为空。
+> **修法**：点「暂存离开」**之前**挂 `page.on('request')`，从 create/post 请求体里取 id；
+> 拿到后再做「回读 → 重存 → 独立横幅核验 → 写 capture」。
+> 同时注意该 id 不是持久草稿 ID（坑 499），且「继续编辑」是**一次性消费令牌**，
+> 外部核验只读横幅文本、绝不点击。
+>
+> ③ **坑 513：worker 干净退出后的 180 秒空档是两次 180 秒叠加，可直接跳过。**
+> `next_retry_epoch = 退出时刻 + INTERVAL(180)` 是防崩溃热循环的退避，**叠加** L2 自身 180 秒节拍，
+> 一次 `end_turn`（正常结束，`is_error=false`）最多白等 180 秒。
+> **修法**：确认 `leases.job.busy == False` 后 `mutate(lambda d: d['worker'].update(next_retry_epoch=0))`
+> 再立刻 tick。1120 期用 30 行驱动器把 16 轮的空档压到 3–5 秒，最后两个平台 10 分钟内收口。
+> **但退避不能全局取消**：只对「干净退出且磁盘有新产物」的轮次跳过；真崩溃时保留。
+> 纪律：驱动器必须自带「连续 3 轮不新增 stage 就停机等人工」的刹车，否则会变成烧钱循环。
+>
+> ④ **坑 508 的口径更新（用户 2026-11-20 定案，覆盖旧的「只能留 pending」）：带注记通过。**
+> 1119 期因 `*#` 无法逐字一致把整条流水线终态 blocked，等用户裁决；1120 起改为：
+> **只对这一条已知、可复现的平台改写做归一化**，实现落在 `Validator.receipt()` 的 `douyin` 分支——
+> ```python
+> def strip_douyin_asterisk(text):
+>     return re.sub(r'(^|\s)\*(?=#)', r'\1', text)   # 只剥「行首/空白后紧跟 #」的 *
+> for field in ('body_start', 'body_end'):
+>     observed[field] = strip_douyin_asterisk(observed[field])
+> disclosed = observed.get('nonpersistent_fields')
+> assert isinstance(disclosed, list) and any('*' in str(x) and '话题行' in str(x) for x in disclosed)
+> ```
+> **硬约束**：① 只剥话题行星号，非话题行的 `*`（如 `*important*`）必须保留；
+> ② 原始 capture 原样落盘，不许改；③ `nonpersistent_fields` 必须有一条同时含 `*` 与「话题行」，
+> 否则 `Refusal(3)`；④ 其余任何漂移（内容、hashtag 间距、结尾）照旧拒绝。
+> **负样例必须实测**：内容漂移 / hashtag 间距漂移 / 结尾漂移三种都要仍被拒。
+> 1120 实测：五平台草稿全部 verified，抖音不再卡住整条链。
+>
 > **🔴 v3.102.0 核心改进（2026-11-19 1119 期实跑：保存按钮误点发布 / 上传 profile 路径漂移 / 抖音话题行加星号 / 渲染缓存复用 / AI 声明可关闭，坑 506-510）**
 >
 > ① **坑 506（最高优先级）：保存按钮禁止泛匹配「发布」。** 1119 修复知乎第 7 张失败图时，

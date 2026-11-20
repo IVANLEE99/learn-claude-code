@@ -1,10 +1,10 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.14.0
+version: 16.15.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.14.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.15.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
 
@@ -114,6 +114,33 @@ version: 16.14.0
 >
 > 另：本期 32h 窗口是 `2026-11-13 16:05 → 2026-11-15 00:05`，`too_old=970 future=0 parse_fail=0`；
 > 标题去重一次砍 1213 条（近 3 天覆盖度高）属正常，别为了「多抓」放宽去重。
+>
+> **🔴 v16.15.0 核心改进（2026-11-20 1120 期实跑：permanent-gone 不会自动生成 / 健康压缩循环别误判成坏会话，补坑 470·504）**
+>
+> 1120 期：Source A 2217 / Source B 613 → 队列 601 → 正文 598 → daily **550**（51 excluded，含 3 帖永久消失）。
+> 抓取侧没出新坑，但两个**既有结论需要补操作细节**，都是「判据对、但操作者不知道下一步该干嘛」。
+>
+> ① **补坑 470：`permanent-gone.json` 没有任何自动生成机制，必须操作者手写。**
+> 1120 期 3 个 id（3206149 / 3198175 / 3202642）每轮都返回 `empty_deleted_private_or_unloaded`，
+> resume 会**每 ~60 秒新造一个** `batch_browser_retry<N>.json` 无限重试 —— 日志看起来像「在干活」，
+> 实际永远 `missing=3`。**磁盘上没有任何脚本会写这个清单**，`permanent_gone()` 只读不写。
+> **操作步骤**：`ls data/batch_browser_retry*.json | wc -l` 确认 ≥6 → 逐 id 校验每个文件
+> 「恰好一行 + 无 title + error 逐字一致」→ 原子写清单 → 下一轮 resume 自动读到。
+> 1120 实测：23:39 写入 → 23:41 就 `crawl+merge VALIDATED`（7 份证据：origin batch + retry0..5）。
+> 写清单前**不要**先改门禁或删 retry 文件——那是伪造覆盖率。
+>
+> ② **补坑 504：除了「4 行就退」的真坏会话，还有一种健康压缩循环，绝不能清 session。**
+> 1120 期 worker 连续多轮以 `end_turn` 干净退出、状态 `interrupted`，看起来极像 504，
+> 但清 session 会丢进度。**三条同时成立就是健康、不要动**：
+> `is_error=false` / stream **100+ 行** / **每轮都有新落盘产物或 progress 推进**。
+> 退化的信号是**三者同时崩**：stream 行数断崖式下降（1120 实测 50 → 37 → **4** 行）、
+> `input_tokens` 只剩两千、末尾直接吐压缩摘要、零产物 —— 这时才按 504 清 `session_id`。
+> 机理：单轮几十次工具调用把上下文顶到压缩阈值（实测 in 400–780K / cache_read 1–5M），
+> 压缩即结束该轮，摘要成为下一轮起点，上下文骤降后才腾出空间推进。
+>
+> ③ **附：成本统计口径。** `result.total_cost_usd` 是**会话累计值**不是单轮值
+> （1120 实测 1.71 → 5.14 → 8.25 → 15.59 → 19.08 → 31.56 → 53.68 → 60.17 单调递增）。
+> 汇报成本时取最后一次的值，别把各轮相加。
 >
 > **🔴 v16.14.0 核心改进（2026-11-19 1119 期实跑：Cloudflare 中文挑战页 / 派生常量未导出 / created 窗口覆盖 / worker 会话复用 / 模型别名漂移，坑 501-505）**
 >
