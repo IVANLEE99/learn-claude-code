@@ -57,6 +57,8 @@ SKIP_URL_FRAGMENTS = [
 # Load / settle times (seconds) per station, by page archetype.
 LOAD_SECONDS = 8
 SETTLE_SECONDS = 3
+# 空壳页（body 为空、主包还在下载）最长等待秒数，见 probe/classify 后的兜底分支
+SHELL_WAIT_SECONDS = 240
 LOGIN_SETTLE_SECONDS = 6
 
 # Stations whose check-in state is fetched asynchronously AFTER the page body is
@@ -414,6 +416,29 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
             time.sleep(3.0)
             page = probe(tab=tab)
             state = classify(page)
+            # 大体积主包兜底（2026-11-20 新增，ArcaneAI / AzureKilnAPI 形态）：
+            # 这两站的 index.*.js 有 4~5MB 且源站限速（curl 实测 ~27KB/s，需数分钟），
+            # 8 秒 settle 后页面只剩 "New API" 空壳（bodyLen=0、readyState=interactive、
+            # 主包不出现在 resource entries 里），探针读不到任何证据就报 unknown。
+            # 此处仅对「空壳页」长轮询等挂载；任何正常站点都走不到这一步，无额外耗时。
+            if (state["state"] == "unknown" and not page.get("hits")
+                    and not page.get("apiHits") and not (page.get("bodyLen") or 0)):
+                deadline = time.time() + SHELL_WAIT_SECONDS
+                log("     [空壳等待] body 为空，主包可能仍在下载，最多等 %ds ..."
+                    % SHELL_WAIT_SECONDS)
+                waited = 0
+                while time.time() < deadline:
+                    time.sleep(5)
+                    waited += 5
+                    page = probe(tab=tab)
+                    state = classify(page)
+                    if (page.get("hits") or page.get("apiHits")
+                            or (page.get("bodyLen") or 0)):
+                        log("     [空壳等待] 页面已挂载（bodyLen=%s，等待 %ds）"
+                            % (page.get("bodyLen"), waited))
+                        break
+                else:
+                    log("     [空壳等待] 超时 %ds 仍未挂载" % SHELL_WAIT_SECONDS)
         result["state"] = state["state"]
         result["reward"] = state["reward"]
         result["balance"] = state["balance"]
@@ -569,11 +594,29 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
             if not verified:
                 page_final = probe(tab=tab)
                 state_final = classify(page_final)
+                c_final = page_final.get("captcha") or {}
+                captcha_open = bool(c_final.get("hasModal") or c_final.get("hasSlider")
+                                    or c_final.get("hasVerify") or c_final.get("blocking"))
+                # 坑 41：点击后 SPA 可能不翻页（iGrok / Pigeonw 2026-11-21 首轮仍 pending/unknown），
+                # 重新打开同一 URL 才会显示已签到。无验证弹窗时刷新一次再判，避免漏记成功。
+                if (state_final["state"] in ("pending", "unknown") and not captcha_open
+                        and clicked.startswith("CLICKED")):
+                    log("     [刷新复核] 点击后仍未确认且无验证弹窗，刷新页面再判一次...")
+                    navigate(url, tab=tab)
+                    time.sleep(2)
+                    wait_cf_pass(tab=tab, timeout=20, poll=1.5, log_fn=log)
+                    settle(tab=tab, seconds=LOAD_SECONDS)
+                    page_final = probe(tab=tab)
+                    state_final = classify(page_final)
+                    result["evidence"] += " | 刷新复核=" + state_final["evidence"]
                 result["state"] = state_final["state"]
                 result["reward"] = state_final["reward"] or result["reward"]
                 result["balance"] = state_final["balance"] or result["balance"]
                 result["evidence"] += " | 最终状态=" + state_final["evidence"]
                 result["final_url"] = current_url(tab)
+                if result["state"] in ("done", "auto"):
+                    log("     ✅ [明确确认成功] 刷新后签到已确认！奖励: %s | 余额: %s"
+                        % (result["reward"] or "—", result["balance"] or "—"))
 
         elif result["state"] == "pending":
             result["action"] = "dry_run_pending"
@@ -773,6 +816,35 @@ def archive_experience(results, meta):
     return exp_path
 
 
+def patch_today_archive(json_path, md_path, today, choose, mutate):
+    """Update chosen rows in today's last-run and re-render the markdown.
+
+    choose(results) returns the row dicts to mutate in place. Returns how many
+    rows changed, or 0 when the archive is missing, not from today, or unmatched.
+    Used by --submit-captcha and by --prepare-captcha when a recheck lands on
+    done (坑 40: prepare used to print done and leave last-run stale).
+    """
+    try:
+        with open(json_path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception:  # noqa: BLE001
+        return 0
+    meta = payload.get("meta") or {}
+    if meta.get("date") != today:
+        return 0
+    results = payload.get("results") or []
+    chosen = list(choose(results) or [])
+    if not chosen:
+        return 0
+    for row in chosen:
+        mutate(row)
+    with open(json_path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    with open(md_path, "w", encoding="utf-8") as fh:
+        fh.write(render_report(results, meta))
+    return len(chosen)
+
+
 def merge_into_today_archive(json_path, results, today):
     """Merge a single-station rerun back into today's full-run archive.
 
@@ -962,6 +1034,8 @@ def prepare_captcha(url, name="", close_if_done=True):
             out_path = os.path.join(DATA_DIR, "captcha.png")
             if save_captcha_image(tab=tab, out_path=out_path):
                 info["image"] = out_path
+        info["reward"] = state.get("reward")
+        info["balance"] = state.get("balance")
         if state["state"] in ("done", "auto", "unsupported") and close_if_done:
             release_scratch_tab(tab)
             info["left_open"] = False
@@ -1088,6 +1162,43 @@ def main():
     if args.prepare_captcha:
         info = prepare_captcha(args.prepare_captcha, name=args.name)
         print(json.dumps(info, ensure_ascii=False, indent=2))
+        # 坑 40：复核已经是 done/auto 时回写当天归档，避免 last-run 停在 blocked_captcha。
+        if info.get("state") in ("done", "auto") and os.path.exists(json_path):
+            host = (urlparse(info.get("final_url") or args.prepare_captcha).hostname or "").lower()
+            name = (args.name or info.get("name") or "").strip()
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            def choose(rows, host=host, name=name):
+                hits = [r for r in rows if host and host in (r.get("url") or "").lower()]
+                if not name:
+                    return hits
+                exact = [r for r in hits if (r.get("name") or "") == name]
+                if exact:
+                    return exact
+                partial = [r for r in hits if len(name) >= 4 and name in (r.get("name") or "")]
+                if len(partial) == 1:
+                    return partial
+                return hits if len(hits) == 1 else []
+
+            def mutate(row, info=info):
+                row["state"] = "done"
+                if info.get("reward"):
+                    row["reward"] = info["reward"]
+                if info.get("balance"):
+                    row["balance"] = info["balance"]
+                note = "prepare 复核已签到=" + (info.get("evidence") or "")[:80]
+                ev = row.get("evidence") or ""
+                if note not in ev:
+                    row["evidence"] = (ev + " | " + note).strip(" |")
+
+            try:
+                n = patch_today_archive(json_path, md_path, today, choose, mutate)
+                if n:
+                    log("updated archive from prepare-captcha (%d)" % n)
+                else:
+                    log("prepare-captcha archive not updated (not today, or no matching row)")
+            except Exception as exc:  # noqa: BLE001
+                log("archive update failed: %s" % exc)
         return 0 if not info.get("error") else 1
 
     if args.submit_captcha:
@@ -1097,26 +1208,30 @@ def main():
         info = submit_captcha(host, args.submit_captcha, close_tab=args.close_tab)
         print(json.dumps(info, ensure_ascii=False, indent=2))
         if info.get("state") in ("done", "auto") and os.path.exists(json_path):
+            host_l = host.lower()
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            def choose(rows, host_l=host_l):
+                return [r for r in rows if host_l in (r.get("url") or "").lower()]
+
+            def mutate(row, info=info):
+                row["state"] = "done"
+                row["reward"] = info.get("reward") or row.get("reward")
+                row["balance"] = info.get("balance") or row.get("balance")
+                row["evidence"] = (row.get("evidence") or "") + \
+                    " | 人工验证码提交成功=" + (info.get("evidence") or "")[:80]
+                if info.get("tab") and not info.get("closed"):
+                    try:
+                        row["final_url"] = current_url(info["tab"])
+                    except Exception:  # noqa: BLE001
+                        pass
+
             try:
-                with open(json_path, encoding="utf-8") as fh:
-                    payload = json.load(fh)
-                for r in payload.get("results", []):
-                    if host.lower() in (r.get("url") or "").lower():
-                        r["state"] = "done"
-                        r["reward"] = info.get("reward") or r.get("reward")
-                        r["balance"] = info.get("balance") or r.get("balance")
-                        r["evidence"] = (r.get("evidence") or "") + \
-                            " | 人工验证码提交成功=" + (info.get("evidence") or "")[:80]
-                        if info.get("tab") and not info.get("closed"):
-                            try:
-                                r["final_url"] = current_url(info["tab"])
-                            except Exception:  # noqa: BLE001
-                                pass
-                with open(json_path, "w", encoding="utf-8") as fh:
-                    json.dump(payload, fh, ensure_ascii=False, indent=2)
-                with open(md_path, "w", encoding="utf-8") as fh:
-                    fh.write(render_report(payload["results"], payload.get("meta", {})))
-                log("updated archive for %s" % host)
+                n = patch_today_archive(json_path, md_path, today, choose, mutate)
+                if n:
+                    log("updated archive for %s" % host)
+                else:
+                    log("archive update skipped for %s (not today, or no matching row)" % host)
             except Exception as exc:  # noqa: BLE001
                 log("archive update failed: %s" % exc)
         return 0 if info.get("state") in ("done", "auto") else 1
@@ -1158,21 +1273,24 @@ def main():
                 % (res["state"], res["reward"], res["balance"],
                    (res.get("evidence") or "")[:100]))
             sys.stdout.flush()
-            # 实时保存中间进度
-            meta_mid = {
-                "date": started.strftime("%Y-%m-%d"),
-                "started_at": started.strftime("%Y-%m-%d %H:%M:%S"),
-                "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "folder_id": args.folder_id,
-                "total": len(stations),
-                "processed": len(results),
-                "unprocessed": max(0, len(stations) - len(results)),
-                "dry_run": args.dry_run,
-            }
-            with open(json_path, "w", encoding="utf-8") as fh:
-                json.dump({"meta": meta_mid, "results": results}, fh, ensure_ascii=False, indent=2)
-            with open(md_path, "w", encoding="utf-8") as fh:
-                fh.write(render_report(results, meta_mid))
+            # 实时保存中间进度。
+            # 坑 36 回归（2026-11-20）：单站补跑（--url）不能在这里落盘，
+            # 否则会把当天全量归档覆盖成 1 条，merge_into_today_archive 再读时已无全量可合。
+            if not args.url:
+                meta_mid = {
+                    "date": started.strftime("%Y-%m-%d"),
+                    "started_at": started.strftime("%Y-%m-%d %H:%M:%S"),
+                    "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "folder_id": args.folder_id,
+                    "total": len(stations),
+                    "processed": len(results),
+                    "unprocessed": max(0, len(stations) - len(results)),
+                    "dry_run": args.dry_run,
+                }
+                with open(json_path, "w", encoding="utf-8") as fh:
+                    json.dump({"meta": meta_mid, "results": results}, fh, ensure_ascii=False, indent=2)
+                with open(md_path, "w", encoding="utf-8") as fh:
+                    fh.write(render_report(results, meta_mid))
     finally:
         release_scratch_tab(scratch)
 

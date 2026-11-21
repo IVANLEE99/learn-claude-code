@@ -599,23 +599,27 @@ CLICK_JS = r"""
     if(!tx || tx.length>30) return false;
     if(!/签到|打卡|check[\s_-]?in|开始转动|转动|开始抽奖/i.test(tx)) return false;
     if(/已签到|Checked in|已领取|明日|明天|转动中/i.test(tx)) return false;
+    // 历史/记录入口也含「签到」，但点开只是查看，不是领取（坑 39）
+    if(/历史签到|签到历史|签到记录|历史记录/.test(tx)) return false;
     if(e.disabled) return false;
     if(!vis(e)) return false;
     return true;
   });
   if(!cand.length) return 'NO_PENDING_BUTTON';
-  // Rank:
+  // Rank（越小越优先）:
   // 1. BUTTON 优于 A
   // 2. 导航链接 (class 含 nav/menu/tab/sidebar) 降权
-  // 3. 动作词 (立即/现在/领取/去签到/签到领/开始/Check in now) 优先
-  // 4. 面积更小的优先
+  // 3. 历史/记录/日历类降权（坑 39：面积更小也不能赢过今日签到）
+  // 4. 动作词 (立即/今日签到/每日签到/现在/领取/去签到/签到领/开始/Check in now) 优先
+  // 5. 面积更小的优先
   function score(e){
     var t=(e.textContent||'').trim();
     var isButton = (e.tagName==='BUTTON' || e.getAttribute('role')==='button') ? 0 : 1;
-    var action=/立即|现在|领取|去签到|签到领|开始转动|转动|开始|Check in now|Check-in now/i.test(t)?0:1;
+    var history=/历史|签到记录|日历|排行/.test(t)?1:0;
+    var action=/立即|今日签到|每日签到|现在|领取|去签到|签到领|开始转动|转动|开始|Check in now|Check-in now/i.test(t)?0:1;
     var navish=(e.tagName==='A' && /sidebar|nav|menu|tab/i.test((e.className||'').toString()))?1:0;
     var r=e.getBoundingClientRect();
-    return [isButton, navish, action, r.width*r.height];
+    return [isButton, navish, history, action, r.width*r.height];
   }
   cand.sort(function(a,b){
     var sa=score(a), sb=score(b);

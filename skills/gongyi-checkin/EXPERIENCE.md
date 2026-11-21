@@ -106,6 +106,32 @@
 - **2026-11-16 临时标签收尾**：`--prepare-captcha` / `--submit-captcha` 默认保留标签页，
   收尾时要按 URL 只关脚本自己开的临时标签（当天留了 jianzhile / plan.pmcat 两个），
   **绝不批量关闭**，用户原有 3 个标签全程未动。
+- **2026-11-20 坑 36 的合并逻辑曾被中间落盘击穿（已修）**：单站补跑（`--url`）时，
+  主循环每站结束都会写一次 `last-run.json`，**在合并之前就把当天全量归档覆盖成 1 条**，
+  于是 `merge_into_today_archive` 再读已无「全量」可合 —— 一天 35 站的报告被 3 次补跑抹掉。
+  修法：单站跑跳过中间落盘（`if args.url: pass else: <写中间归档>`）。
+  **兜底认知**：全量跑的控制台日志里保留了完整报告与每站 `-> state=...` 行，
+  归档被覆盖时可以据此重建（按 `[i/N] name` 顺序 zip `read_bookmarks()` 拿 URL）。
+- **2026-11-20 大体积主包站点会被误判 unknown**：ArcaneAI / AzureKilnAPI 的
+  `index.*.js` 有 4~5MB 且源站限速（curl 实测约 27KB/s，要数分钟），8 秒 settle 后
+  页面只有 `New API` 空壳——`bodyLen=0`、`readyState=interactive`、**主包不出现在
+  `performance` 的 resource entries 里**，探针读不到任何证据 → `⚠️ 状态未知`。
+  判据：`bodyLen=0` + 有 title + `/api/status` 返回 200（站点活着，只是包慢）。
+  修法：对「空壳页」长轮询等挂载（`SHELL_WAIT_SECONDS=240`），正常站点走不到这一步。
+  另注：`probe()` 返回的字段是 `bodyLen`（camelCase），不是 `body_len`。
+- **2026-11-21 YeeMagine 点到「历史签到」**：与「今日签到」并列、都是 BUTTON、都不含动作词，
+  面积更小的历史按钮赢了，点两次都是 `CLICKED:历史签到`，状态停在 pending。
+  文本恰好是「今日签到」的那个才是领取按钮。详见 SKILL.md 坑 39。
+- **2026-11-21 iGrok / Pigeonw 点了但不翻转**：验证循环结束仍是 pending 或 unknown
+  （Pigeonw 最终证据为空）。同一天重新打开页面才是「已签到」。
+  无验证弹窗时要刷新原 URL 再判一次，不要直接记待签到。详见 SKILL.md 坑 41。
+- **2026-11-21 `--prepare-captcha` 不回写归档**：PM-Plan 复核时页面已是「今日已签到」，
+  命令输出 `state=done`，但 `last-run.json` 仍是上一轮的 `blocked_captcha`。
+  只有 `--submit-captcha` 会改归档。现在 prepare 成功也会回写当天那一行。详见 SKILL.md 坑 40。
+- **2026-11-21 多实例不必先杀也能签**：空闲的 mcp-chrome（9222 无应答、没有 browser_daemon）
+  还在时，AppleScript 仍绑在日常 Chrome（窗口是用户自己的 linux.do 标签）。
+  绑定已经是日常 Chrome 就继续跑；只有窗口标题是公众号/视频号/抖音时才要 reclaim。
+  自动模式可能拦截 kill，不要为了清实例去杀日常 Chrome。
 
 ## 站点笔记
 
@@ -291,6 +317,12 @@
 ### 子非鱼 status / CHY 状态页
 - 2026-11-04 uptime-kuma 状态页，不签到，已在 `SKIP_URL_FRAGMENTS` 排除。
 
+### YeeMagine — https://demo.yeelo.fun/admin/user-info
+- 2026-11-21 用户信息页同一行三个按钮：`历史签到`（只打开记录）、`今日签到`（真正领取）、
+  `试试手气`（抽奖，不含「签到」，不要点）。旧排序会点中历史按钮。详见 SKILL.md 坑 39。
+- 签到成功的页面标志是日历区「已签到」并且余额增加；奖励文案是「今日奖励 N Credit」，
+  未确认成功前不要把这个数字计进合计（坑 34）。
+
 ### CM-API-公益站 — https://cm-api.top/profile
 - 2026-11-12 React SPA 架构。初次加载虽然 readyState 已为 complete，但组件挂载存在数秒异步延迟。
   若初次 probe 拿不到 hits 且分类为 unknown，额外等待 3 秒重探即可正常发现待签到按钮并完成签到闭环。详见 SKILL.md 坑 23。
@@ -302,7 +334,7 @@
    Huan / 烁 / 魔方 / CM-API / Orbitix / 方舟）。00:05 跑签的是「上一个 08:00 窗口」，
    白天打开站点会重新显示「今日尚未签到」；08:05 跑则两种口径都在当日窗口内。
 
-1. `SKILL.md` 的「三十八个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
+1. `SKILL.md` 的「四十一个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
    「读到上一个站点的页面」是危害最大的（数字看着对但全是错的）。
 2. 「站点形态」表 + 本文件的「站点笔记」，判断新站点归哪一形态。
 3. 新站点先 `--dry-run --url <地址> --name <名字>` 单站试，别直接全量点。

@@ -1,7 +1,7 @@
 ---
 name: gongyi-checkin
 description: 公益站（new-api / one-api 系）每日签到自动化。读取 Chrome 书签文件夹 daily-check-in，打开每个站点完成签到，输出签到成功/失败归档（含奖励金额与余额）。触发词：公益站签到、签到、每日签到、check-in、gongyi、公益站、station checkin、签到报告
-version: 1.1.0
+version: 1.2.0
 ---
 
 # gongyi-checkin — 公益站每日签到
@@ -81,7 +81,7 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 
 ---
 
-## 🚨 三十八个会静默失败的坑
+## 🚨 四十一个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
@@ -169,8 +169,9 @@ Consumption 额（都不是钱）。
 
 2026-11-06 lOXO：侧边栏 `<A>每日签到</A>`（231×40）比真按钮 `<BUTTON>立即签到</BUTTON>`（384×48）**面积更小**。
 旧的「最小面积优先」选中了导航链接——点完只是重新进入当前页，状态永远 pending，看起来像「点了没反应」。
-**修法**：候选排序改为 `导航链接标记 > 动作词 > 面积`；
-动作词（`立即|现在|领取|去签到|开始|Check in now`）优先，`A` 且 class 含 `sidebar|nav|menu|tab` 的降权。
+**修法**：候选排序改为 `按钮优于链接 > 导航链接降权 > 历史/记录降权 > 动作词 > 面积`；
+动作词（`立即|今日签到|每日签到|现在|领取|去签到|签到领|开始|Check in now`）优先，`A` 且 class 含 `sidebar|nav|menu|tab` 的降权。
+同为按钮、又都不含动作词时，面积更小的「历史签到」仍会赢过「今日签到」，见坑 39。
 
 ### 坑 11：label→value 的兄弟节点必须「整段就是金额」
 
@@ -429,6 +430,8 @@ PM-Plan 的验证从行为滑块换成了**图片点选**：`.modal-backdrop.ope
 - 兜底：万一报告已被覆盖，`data/run-log.md` 只记「有变化的站点」，
   不能还原全量；此时只能按终端日志逐站重建，或在同一天重跑全量（已签站点不会被重复领取）。
 - 提醒：`--submit-captcha` 更新归档是**原地匹配 URL**，不会丢其它站点；问题只在 `--url` 全量落盘路径。
+- **回归**（2026-11-20）：合并只发生在跑完之后，主循环每站结束的中间落盘会先把全量覆盖成 1 条，
+  `merge_into_today_archive` 再读就没有全量可合。单站跑（`--url`）必须跳过这次中间落盘。
 
 ### 坑 37：`--prepare-captcha` 报 `blocked_captcha` ≠ 一定需要人工
 
@@ -456,6 +459,44 @@ PM-Plan 的验证从行为滑块换成了**图片点选**：`.modal-backdrop.ope
   再读 `/tmp/captcha_big.png`；提交后以 `--submit-captcha` 返回的
   `state=done` 与 Toast 回执为准，失败就重新 `--prepare-captcha` 换一张（验证码一次性）。
 - 识别结果**不要写进 `EXPERIENCE.md` 等入库文件**（验证码是一次性的，没有沉淀价值）。
+
+### 坑 39：并列按钮里「历史签到」会因面积更小赢过「今日签到」
+
+2026-11-21 YeeMagine（`demo.yeelo.fun`）：同一行有 `历史签到`、`今日签到`、`试试手气` 三个按钮。
+前两者都含「签到」、都是 `BUTTON`、都不含 `立即|去签到|签到领|Check in now`，
+排序落到最后一档「面积更小优先」。`历史签到` 更短，两次都返回 `CLICKED:历史签到`——
+点开的是历史记录，状态永远停在 `pending`。手点文本恰好为「今日签到」的按钮后，
+余额增加、日历变为「已签到」。
+
+- **修法**（2026-11-21，`chrome_driver.py` 的 `CLICK_JS`）：
+  1. 候选直接排除 `历史签到|签到历史|签到记录|历史记录`；
+  2. 排序在面积之前增加「历史/记录/日历/排行」降权；
+  3. 动作词补上 `今日签到|每日签到|签到领`，避免真按钮和记录按钮同分后再比面积。
+- `试试手气` 这类抽奖按钮不含「签到」，本来就不会被选中，不要为了它放宽匹配。
+
+### 坑 40：`--prepare-captcha` 复核成 `done` 不回写归档
+
+2026-11-21 PM-Plan：全量跑留下 `blocked_captcha`。之后 `--prepare-captcha` 打开页面已经是
+「今日已签到」（`state=done`，坑 37 的自行通过），JSON 打印是对的，但 `last-run.json`
+仍停在 `blocked_captcha`——只有 `--submit-captcha` 会原地改归档。当天只能手改 JSON 再渲染。
+
+- **修法**（2026-11-21，`run_checkin.py`）：`--prepare-captcha` 与 `--submit-captcha`
+  在结果为 `done`/`auto` 时都走 `patch_today_archive()`，按域名（有站名则再按站名）
+  改当天归档里的那一行并重渲染 markdown。归档日期不是今天、或匹配不到行，则不写并打日志。
+- 回写前确认 `meta.date` 是今天，避免把昨天的失败行改成成功。
+
+### 坑 41：点击后页面不翻转，重新打开才显示已签到
+
+2026-11-21 iGrok、Pigeonw：验证循环里已经 `CLICKED:立即签到` / `CLICKED:Check in now`，
+14 轮结束后仍是 `pending` 或 `unknown`（Pigeonw 的最终证据甚至是空的）。
+同一天用 `--url` 重新打开，页面直接是「已签到」并带上今日奖励。
+new-api 系本来就会在加载时发 checkin，SPA 却不一定把按钮文案翻过来。
+
+- **修法**（2026-11-21，`run_checkin.py`）：验证循环耗尽且仍是 `pending`/`unknown`、
+  并且**没有**验证弹窗（`hasModal/hasSlider/hasVerify/blocking` 都没有）时，
+  `navigate` 回原 URL 再 probe 一次，把刷新后的状态当最终结果。
+- 有验证弹窗时不刷新——刷新会把 Turnstile / 图形码 / 点选验证重置（坑 35）。
+- 这不是再点一次按钮。第 8 轮的补点逻辑不变。
 
 ---
 
@@ -544,6 +585,7 @@ python3 run_checkin.py --no-login         # 不尝试 OAuth 登录
 python3 run_checkin.py --prepare-captcha https://plan.pmcat.top/ --name PM-Plan
 #   返回 JSON: tab / kind(graphic|verify|slider) / prompt / page / image
 #   verify/slider 会先自动重探 10 秒：若验证自行通过，返回 resolved_after_wait=true 并回收标签（坑 37）
+#   复核结果已是 done/auto 时，会回写当天 last-run 里该站的状态（坑 40）
 #   图形码 → 图片存到 data/captcha.png，放大后识图再提交（坑 38）：
 sips -z 400 960 data/captcha.png --out /tmp/captcha_big.png
 python3 run_checkin.py --submit-captcha BDMM8 --host jianzhile.vip
