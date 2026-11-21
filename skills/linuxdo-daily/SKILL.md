@@ -1,12 +1,46 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.15.0
+version: 16.16.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.15.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.16.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
+
+> **🔴 v16.16.0 核心改进（2026-11-21 1121 期实跑：L3 巡检空转 / 派生 Markdown 补丁格式 / 模型别名告警误判 / CLI 路径漂移，坑 515-518）**
+>
+> 1121 期：Source A 2217 / Source B 2009 → 队列 **547** → 正文 37 批 → daily **500**（47 帖二次过滤出局）；
+> 22:35 触发、22:35:06 归档 92 个上期中间态、23:19 建队列、00:08 L1 校验 daily 后退出，
+> 次日 10:30 五平台收口（中途视频号掉登录，见 ai-news-factory 坑 514）。
+> 抓取与日报侧零新坑，四条都是「运维判据」——每条都能让一整晚白跑或白等。
+>
+> ① **坑 515：L3 会话巡检 cron 不要 24 小时 `*/3`。**
+> 1121 建任务时用全天 `*/3`，从 17:24 到 22:35 触发前空转 **100+ 次**，每次都要起一个会话轮次、
+> 只为读一行 `WAIT`。**修法**：cron 用小时窗口 `*/3 22-23,0-6`（覆盖 22:35 触发到凌晨收工即可），
+> 并在 prompt 里写明「action 为 DONE 时先 CronList 找到自己再 CronDelete」。
+> L1/L2 是常驻 shell（ppid=1），**不依赖**会话 cron；L3 只用来更快发现中断，会话关掉也不影响主链。
+>
+> ② **坑 516：派生器给 Markdown 打补丁，锚点必须按文件真实文本，插入 bullet 不要重复 `- `。**
+> 1121 派生连踩两次：a) prompts 里「批抓阶段仅一个抓取驱动…」这一行**行首没有 `- `**，
+> 照抄带 `- ` 的锚点直接 `AssertionError`；b) 往已有 `- ` 的条目**前面**插新 bullet 时，
+> 插入块又写了一遍 `- `，生成 `- - **坑 512…**`。
+> **纪律**：所有 patch 锚点先 `grep -F` 确认命中（连行首空白一起比）；插入块的首行**不要**自带 `- `，
+> 因为锚点已包含原行前缀；派生写盘后立刻 `grep -n '^- - '` 断言为空，再跑 `--check`。
+>
+> ③ **坑 517：`[claude-code:unrecognized_model]` 是告警，不是模型死亡判决。**
+> 1121 建任务时同一别名（`auto/deepseek-v4.1-flash-1017[1M]`）先打这行，随后**正常返回结果**；
+> 大小写 `[1m]` / `[1M]` 两种写法都只是告警。**判据仍是 worker stream**：只有 `system init` + 报错两行、
+> 无任何 assistant 输出，才是真挂（对应 1119 的坑 483）。别因为看到这行就换模型、清 session 或改全局 settings。
+>
+> ④ **坑 518：worker CLI 路径写死扩展版本目录，扩展一升级 worker 全部 spawn 失败。**
+> `data/_scheduler_<issue>.py` 的 `CLAUDE` 常量形如
+> `~/.devin/extensions/anthropic.claude-code-<version>-darwin-arm64/resources/native-binary/claude`，
+> 版本号是目录名的一部分。扩展自动升级后旧目录消失 → 每晚 22:35 起 `Popen` 直接 `FileNotFoundError`，
+> 看门狗只看到 `RETRY`，整晚没有 worker、没有 stage。
+> **修法（三层）**：派生器 `validate()` 断言 `Path(CLAUDE).is_file()`；`_arm_<issue>.sh` 启动 L1/L2 前
+> 预检 claude/node/python，缺失即 `exit 65`；`worker_command()` 运行时再判一次，缺失 `Refusal(1)` 并提示
+> 「更新 CLAUDE 常量后重跑 `_derive_<issue>.py --check`」。永远不要改用户全局 settings 来绕过。
 
 ## 🔒 抓取 profile 必须与上传 profile 分开（2026-11-13 根因查清，坑 463）
 

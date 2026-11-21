@@ -1,10 +1,10 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.103.0
+version: 3.104.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.103.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.104.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
 
@@ -36,6 +36,40 @@ version: 3.103.0
 5. **不要 kill 用户日常 Chrome**；**不要**清空该 profile 目录（等于让五个平台重新扫码）。
 6. 若某平台掉登录，只需在该 profile 的浏览器窗口里重新扫码，**不需要**重建 profile。
 
+> **🔴 v3.104.0 核心改进（2026-11-21 1121 期实跑：视频号掉登录的粘性 block 与恢复流程，坑 514）**
+>
+> 1121 期 22:35 触发、23:19 建队列、00:08 daily 通过，00:47–01:08 下游推进到 `upload_channels` 时
+> `channels.weixin.qq.com/platform` 重定向到 `/login.html`（页面标题「视频号助手」+ 扫码 iframe）。
+> worker 按契约保留扫码页、不登录、不重建 profile，落 `login_required` 粘性 block（`automatic_retry: false`），
+> 其余四平台草稿已 verified。用户次日扫码后清 block → 10:12 tick 续跑**同一 session** → 10:29 视频号 checkpoint
+> → 10:30 DONE；16 个已完成 stage 全部复用，没有重抓、重传。**最贵的一步不是登录，而是「登录之后怎么继续」——
+> 当时没有任何 unblock API，只能手工改 state。**
+>
+> ① **坑 514：`login_required` / 任何粘性 block 都没有 unblock CLI，必须「持锁清 state + 删 BLOCKED.json」再 tick。**
+> 判定：`status` 返回 `action=BLOCKED`、`blocked.kind=login_required`、`automatic_retry=false`；
+> 证据里 `redirected_to_login=true`、`probe.has_qr_iframe=true`。扫码完成后按下面三步恢复：
+> ```python
+> import json, sys; from pathlib import Path
+> sys.path.insert(0, 'data'); import _resume_lock_<issue> as contract
+> state = Path('.pipeline-state-<DATE>.json')
+> with contract.Mutex(Path('data/logs/<issue>-state.lock'), 'state'):
+>     d = json.loads(state.read_text(encoding='utf-8'))
+>     d['blocked'] = None; d['status'] = 'interrupted'
+>     contract.atomic_json(state, d)                      # 原子写，别手写文件
+>     Path('data/logs/<issue>-BLOCKED.json').unlink(missing_ok=True)
+> ```
+> 然后 `bash data/_l3_tick_<issue>.sh`：返回 `START / phase=downstream`，调度器 `--resume` 原 session，
+> 只补 `upload_channels` 一个 stage。**纪律**：① 不要手工起第二个 worker 或新会话（会与 job 租约打架）；
+> ② 不要重传已验证平台（读 state 的 stage 证据即可）；③ 绝不为「让它过」伪造 channels receipt；
+> ④ 不要重建上传 profile —— 扫码页就留在原 profile 里，用户扫完 cookie 即持久化。
+> 清 block 前先确认用户**真的**已完成扫码：未登录就清，worker 会再次 blocked，白白多烧一轮。
+>
+> ② **视频号草稿的两个非持久字段（1121 实测，必须写进 `nonpersistent_fields`）。**
+> - `Contains AI-generated content` 视频标注在**草稿重开时丢失**（编辑页回到「选择视频标注」）：
+>   保存前设定过，但平台不持久化，**发布前必须重设并确认**，不能报成 PASS。
+> - 短标题、竖版封面、合集属于「保存后重新打开草稿才可实读」的字段，不是 URL 级持久字段；
+>   核验时按重开后的编辑页取值，并如实注明。
+>
 > **🔴 v3.103.0 核心改进（2026-11-20 1120 期实跑：公众号摘要 120 字硬上限 / 抖音 ingest id 只在请求体 / 续跑空转 180 秒，坑 511-513）**
 >
 > 1120 期全链一次跑通：daily 550 帖 → 报告/PDF → 视频 93.56s → **五平台草稿全部 verified**。
