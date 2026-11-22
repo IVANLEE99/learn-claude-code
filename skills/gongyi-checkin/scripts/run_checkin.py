@@ -32,10 +32,11 @@ from urllib.parse import urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from chrome_driver import (  # noqa: E402
-    ChromeError, activate_tab, classify, click_checkin, close_extra_tabs,
-    count_tabs, current_url, get_captcha_image_base64, is_cf_challenge, js,
+    ChromeError, activate_tab, classify, click_checkin, click_confirm,
+    close_extra_tabs, confirm_visible, count_tabs, current_url,
+    get_captcha_image_base64, is_cf_challenge, js,
     js_retry, navigate, new_tab, osa, probe, save_captcha_image,
-    solve_react_captcha, tab_count, wait_cf_pass, wait_for,
+    solve_react_captcha, tab_count, trusted_click_button, wait_cf_pass, wait_for,
 )
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -361,6 +362,101 @@ def handle_linuxdo_oauth_authorize(tab=1, timeout=45):
     return "AUTH_TIMEOUT"
 
 
+def nudge_reward_dialog(tab, log, flags):
+    """Click 领取当前奖励 if it is up. Fall back to one real mouse click.
+
+    坑 42：iGrok 的「立即签到」只打开说明框，入账按钮是「领取当前奖励」，
+    而且 element.click() 打不开前一个框。flags 记录本站已经试过的手段，避免连点。
+    返回写进 evidence 的短句，没有动作则返回空串。
+    """
+    if not confirm_visible(tab):
+        return ""
+    notes = []
+    if not flags.get("confirm_js"):
+        res = click_confirm(tab)
+        flags["confirm_js"] = True
+        notes.append(res)
+        log("     [确认领取] %s" % res)
+        time.sleep(0.6)
+    if confirm_visible(tab) and not flags.get("confirm_trusted"):
+        res = trusted_click_button(tab, "confirm")
+        flags["confirm_trusted"] = True
+        notes.append(res)
+        log("     [确认领取] 脚本点击无效，改用真实鼠标：%s" % res)
+    return " | ".join(n for n in notes if n)
+
+
+def maybe_trusted_open(tab, page, log, flags):
+    """One real click on an exact 「立即签到」 button that ignored JS click.
+
+    Only that exact label. Check in now stations already succeed with JS click;
+    a trusted click moves the user's pointer, so it stays a fallback.
+    """
+    if flags.get("open_trusted") or confirm_visible(tab):
+        return ""
+    captcha = page.get("captcha") or {}
+    if (captcha.get("hasModal") or captcha.get("hasSlider")
+            or captcha.get("hasVerify") or captcha.get("blocking")):
+        return ""
+    cf_active, _title = is_cf_challenge(tab)
+    if cf_active:
+        return ""
+    want = False
+    for hit in page.get("hits") or []:
+        if not hit.get("vis") or hit.get("disabled"):
+            continue
+        if (hit.get("txt") or "").strip() == "立即签到":
+            want = True
+            break
+    if not want:
+        return ""
+    flags["open_trusted"] = True
+    res = trusted_click_button(tab, "open")
+    log("     [真实点击] JS 点击未打开确认框：%s" % res)
+    return res
+
+
+def _captcha_open(page):
+    captcha = page.get("captcha") or {}
+    return bool(captcha.get("hasModal") or captcha.get("hasSlider")
+                or captcha.get("hasVerify") or captcha.get("blocking"))
+
+
+def settle_non_graphic_captcha(tab, url, log, wait_s=30):
+    """Wait out a non-graphic verification, then reload if the dialog closed.
+
+    坑 37/44：点选或 Turnstile 可能自行通过。弹窗还在时不能刷新（会重置验证）。
+    弹窗消失但本页没变成已签到时，SPA 可能已经软跳到别的 hash（PM-Plan #/models），
+    必须 about:blank 后重新打开原 URL，不能拿残留的 checkin 请求当成功。
+    """
+    log("     [验证复核] 非图形验证，前台最多再等 %ds ..." % wait_s)
+    deadline = time.time() + wait_s
+    page = probe(tab=tab)
+    state = classify(page)
+    while time.time() < deadline:
+        if state["state"] in ("done", "auto"):
+            return page, state
+        if not _captcha_open(page) and state["state"] != "blocked_captcha":
+            break
+        time.sleep(2.5)
+        activate_tab(tab=tab)
+        page = probe(tab=tab)
+        state = classify(page)
+    if state["state"] in ("done", "auto"):
+        return page, state
+    if _captcha_open(page):
+        return page, state
+    log("     [验证复核] 弹窗已关但未确认，重新打开原页再判一次...")
+    navigate("about:blank", tab=tab)
+    time.sleep(0.4)
+    navigate(url, tab=tab)
+    time.sleep(2)
+    wait_cf_pass(tab=tab, timeout=20, poll=1.5, log_fn=log)
+    settle(tab=tab, seconds=LOAD_SECONDS)
+    page = probe(tab=tab)
+    return page, classify(page)
+
+
 def process_station(entry, tab=1, dry_run=False, do_login=True):
     """Check in one station. Returns a result dict."""
     name = entry["name"]
@@ -439,6 +535,13 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                         break
                 else:
                     log("     [空壳等待] 超时 %ds 仍未挂载" % SHELL_WAIT_SECONDS)
+        # 坑 43：RelayFor 这类 hash 控制台，3 秒重试时签到区还没挂上，正文只有导航。
+        if (state["state"] == "unknown" and "#" in (page.get("url") or url)
+                and not re.search(r"签到|check-?in", page.get("body") or "", re.I)):
+            log("     [哈希路由] 控制台已打开但签到区未挂载，再等 8s ...")
+            time.sleep(8)
+            page = probe(tab=tab)
+            state = classify(page)
         result["state"] = state["state"]
         result["reward"] = state["reward"]
         result["balance"] = state["balance"]
@@ -518,9 +621,13 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
             # 🚨 核心要求：明确签到成功才进行下一个！循环验证与确认（支持等待 CF Turnstile 弹窗完成）
             log("     [验证确认] 等待签到结果确认与状态翻转（遇到CF盾/Turnstile持续等待）...")
             verified = False
+            dialog_flags = {}
             for v_round in range(1, 15):  # 最多等 30 秒，给 CF 充分时间
                 time.sleep(2.0)
                 activate_tab(tab=tab)
+                note = nudge_reward_dialog(tab, log, dialog_flags)
+                if note:
+                    result["evidence"] += " | 确认=" + note
                 # 辅助尝试点击可能出现的 Turnstile checkbox
                 js(r"""
                 (function(){
@@ -537,6 +644,12 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
 
                 page_v = probe(tab=tab)
                 state_v = classify(page_v)
+                if (v_round >= 4 and state_v["state"] == "pending"
+                        and not dialog_flags.get("open_trusted")):
+                    opened = maybe_trusted_open(tab, page_v, log, dialog_flags)
+                    if opened:
+                        result["evidence"] += " | 真实点击=" + opened
+                        continue
 
                 v_body = page_v.get("body", "")
                 v_toasts = page_v.get("toasts", "")
@@ -566,12 +679,34 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                     log("     ✅ [明确确认成功] 签到已成功完成！奖励: %s | 余额: %s" % (result["reward"] or "—", result["balance"] or "—"))
                     break
                 elif state_v["state"] == "blocked_captcha":
+                    c_info = page_v.get("captcha") or {}
+                    cf_active, _cf_title = is_cf_challenge(tab=tab)
+                    # Turnstile「安全验证」在前台会自行通过，不要立刻判人工（坑 42）。
+                    if cf_active and not c_info.get("hasModal") and not c_info.get("hasSlider"):
+                        if v_round in (1, 5, 9):
+                            log("     [等待验证] Turnstile/安全验证，保持前台等待...")
+                        continue
+                    # 点选/滑块：再等一会儿，弹窗自己关掉就重新打开原页确认（坑 44）。
+                    # 图形码不会自行通过，不走这条。
+                    if not c_info.get("hasModal"):
+                        page_v, state_v = settle_non_graphic_captcha(tab, url, log)
+                        if state_v["state"] in ("done", "auto"):
+                            result["state"] = state_v["state"]
+                            result["reward"] = state_v["reward"] or result["reward"]
+                            result["balance"] = state_v["balance"] or result["balance"]
+                            result["evidence"] += " | 验证复核=" + state_v["evidence"]
+                            result["final_url"] = current_url(tab)
+                            verified = True
+                            log("     ✅ [明确确认成功] 验证自行通过！奖励: %s | 余额: %s"
+                                % (result["reward"] or "—", result["balance"] or "—"))
+                            break
+                        c_info = page_v.get("captcha") or {}
                     result["state"] = "blocked_captcha"
                     result["reward"] = state_v["reward"] or result["reward"]
                     result["balance"] = state_v["balance"] or result["balance"]
                     result["evidence"] += " | " + state_v["evidence"]
                     result["final_url"] = current_url(tab)
-                    if save_captcha_image(tab=tab):
+                    if c_info.get("hasModal") and save_captcha_image(tab=tab):
                         result["evidence"] += " (已提取验证码至 /tmp/gongyi_captcha.png)"
                         log("     📸 [验证码已保存] 验证码已提取并保存至 /tmp/gongyi_captcha.png")
                     else:
@@ -584,7 +719,8 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                     cf_active, _ = is_cf_challenge(tab=tab)
                     c_info = page_v.get("captcha") or {}
                     has_captcha = bool(c_info.get("hasModal") or c_info.get("hasSlider")
-                                       or c_info.get("hasVerify") or c_info.get("blocking"))
+                                       or c_info.get("hasVerify") or c_info.get("blocking")
+                                       or confirm_visible(tab))
                     if not cf_active and not has_captcha:
                         log("     [重试] 按钮仍未翻转且无验证弹窗，再次点击...")
                         click_checkin(tab=tab)
@@ -602,6 +738,8 @@ def process_station(entry, tab=1, dry_run=False, do_login=True):
                 if (state_final["state"] in ("pending", "unknown") and not captcha_open
                         and clicked.startswith("CLICKED")):
                     log("     [刷新复核] 点击后仍未确认且无验证弹窗，刷新页面再判一次...")
+                    navigate("about:blank", tab=tab)
+                    time.sleep(0.4)
                     navigate(url, tab=tab)
                     time.sleep(2)
                     wait_cf_pass(tab=tab, timeout=20, poll=1.5, log_fn=log)
@@ -980,11 +1118,17 @@ def prepare_captcha(url, name="", close_if_done=True):
         if (state["state"] not in ("done", "auto", "unsupported", "blocked_captcha")
                 and not c0.get("blocking")):
             info["action"] = click_checkin(tab=tab)
+            dialog_flags = {}
+            polls = 0
             deadline = time.time() + 15
             while time.time() < deadline:
                 time.sleep(1.5)
+                polls += 1
+                nudge_reward_dialog(tab, print, dialog_flags)
                 page = probe(tab=tab)
                 state = classify(page)
+                if polls >= 3 and state["state"] == "pending":
+                    maybe_trusted_open(tab, page, print, dialog_flags)
                 c = page.get("captcha") or {}
                 if (c.get("hasModal") or c.get("hasSlider")
                         or c.get("hasVerify") or c.get("blocking")):
@@ -1005,29 +1149,19 @@ def prepare_captcha(url, name="", close_if_done=True):
         info["prompt"] = c.get("prompt") or ""
         info["page"] = c.get("page") or ""
 
-        # 2026-11-16：点选/滑块验证弹窗可能在停留数秒后自行通过或关闭。
-        # PM-Plan 实测：prepare 返回 blocked_captcha，再次 probe 时弹窗已消失、
-        # 页面已是「已完成签到」。发现此类验证后先短暂重探，已翻转为 done/auto
-        # 就不要让人白跑一趟（图形码不会自行通过，不在此等待）。
+        # 2026-11-16 / 2026-11-22：点选或 Turnstile 可能自行通过。弹窗还开着不能刷新。
+        # 弹窗关掉但停在别的 hash 时，重新打开原 URL 再判（坑 44），不要拿残留 checkin 请求当成功。
+        # 图形码不会自行通过，不在此等待。
         if info["kind"] in ("verify", "slider") or (
                 state["state"] == "blocked_captcha" and not info["kind"]):
-            deadline = time.time() + 10
-            while time.time() < deadline:
-                time.sleep(2.5)
-                page = probe(tab=tab)
-                state = classify(page)
-                info["state"] = state["state"]
-                info["evidence"] = state["evidence"]
-                if state["state"] in ("done", "auto"):
-                    info["resolved_after_wait"] = True
-                    info["kind"] = ""
-                    info["prompt"] = ""
-                    info["page"] = ""
-                    break
-                c2 = page.get("captcha") or {}
-                if not (c2.get("hasModal") or c2.get("hasSlider")
-                        or c2.get("hasVerify") or c2.get("blocking")):
-                    break
+            page, state = settle_non_graphic_captcha(tab, url, print, wait_s=30)
+            info["state"] = state["state"]
+            info["evidence"] = state["evidence"]
+            if state["state"] in ("done", "auto"):
+                info["resolved_after_wait"] = True
+                info["kind"] = ""
+                info["prompt"] = ""
+                info["page"] = ""
 
         if info["kind"] == "graphic":
             os.makedirs(DATA_DIR, exist_ok=True)

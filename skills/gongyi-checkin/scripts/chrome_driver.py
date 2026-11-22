@@ -642,6 +642,118 @@ def click_checkin(tab=DEFAULT_TAB):
     return js_retry(CLICK_JS, tab=tab)
 
 
+# 坑 42：iGrok 的「立即签到」只打开奖励说明，真正入账的是「领取当前奖励」。
+# 该按钮不响应 element.click()（不可信点击），要另走真实鼠标事件。
+_CONFIRM_RE_JS = r"/^(?:领取当前奖励|领取此奖励|确认领取|Claim this reward)$/i"
+_OPEN_RE_JS = r"/^立即签到$/"
+
+
+def _button_query_js(js_regex, do_click):
+    """JS that finds a visible button matching a regex literal, optionally clicks it."""
+    if do_click:
+        tail = "btn.click(); return 'CLICKED:'+t.slice(0,20);"
+    else:
+        tail = (
+            "btn.scrollIntoView({block:'center'});"
+            "var rc=btn.getBoundingClientRect();"
+            "var el=document.elementFromPoint(rc.left+rc.width/2, rc.top+rc.height/2);"
+            "var hit=el?((el.innerText||el.textContent||'').trim()):'';"
+            "return JSON.stringify({t:t.slice(0,40), hit:hit.slice(0,40),"
+            "sx:window.screenX, sy:window.screenY,"
+            "outerW:window.outerWidth, outerH:window.outerHeight,"
+            "innerW:window.innerWidth, innerH:window.innerHeight,"
+            "left:rc.left, top:rc.top, w:rc.width, h:rc.height});"
+        )
+    return (
+        "(function(){"
+        "function vis(e){var r=e.getBoundingClientRect(), s=getComputedStyle(e);"
+        "return r.width>0 && r.height>0 && s.display!=='none' && s.visibility!=='hidden' && s.opacity!=='0';}"
+        "var re=%s;"
+        "var nodes=Array.from(document.querySelectorAll('button,[role=button]'));"
+        "var btn=null, t='';"
+        "for(var i=0;i<nodes.length;i++){"
+        "t=(nodes[i].textContent||'').trim();"
+        "if(re.test(t) && vis(nodes[i]) && !nodes[i].disabled){btn=nodes[i]; break;}"
+        "}"
+        "if(!btn) return 'NO_BUTTON';"
+        "t=(btn.textContent||'').trim();"
+        "%s"
+        "})()"
+    ) % (js_regex, tail)
+
+
+def confirm_visible(tab=DEFAULT_TAB):
+    """True when the reward-confirm button (领取当前奖励) is on screen."""
+    res = js(_button_query_js(_CONFIRM_RE_JS, False), tab=tab)
+    return bool(res) and res != "NO_BUTTON" and not str(res).startswith(("NO_", "__"))
+
+
+def click_confirm(tab=DEFAULT_TAB):
+    """Click 领取当前奖励 / Claim this reward. JS click, not the check-in button."""
+    res = js(_button_query_js(_CONFIRM_RE_JS, True), tab=tab)
+    return res or "NO_CONFIRM"
+
+
+def _post_mouse_click(x, y):
+    """Post one left click in screen points. Moves the pointer; caller must aim first."""
+    import ctypes
+    class CGPoint(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+    cg = ctypes.cdll.LoadLibrary(
+        "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+    cg.CGEventCreateMouseEvent.restype = ctypes.c_void_p
+    cg.CGEventCreateMouseEvent.argtypes = [
+        ctypes.c_void_p, ctypes.c_uint32, CGPoint, ctypes.c_uint32]
+    cg.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+    for ev, delay in ((5, 0.12), (1, 0.06), (2, 0.0)):
+        evref = cg.CGEventCreateMouseEvent(None, ev, CGPoint(float(x), float(y)), 0)
+        if not evref:
+            raise ChromeError("CGEventCreateMouseEvent returned null")
+        cg.CGEventPost(0, evref)
+        time.sleep(delay)
+
+
+def trusted_click_button(tab, kind):
+    """Real mouse click on 立即签到 (kind='open') or 领取当前奖励 (kind='confirm').
+
+    2026-11-22 iGrok: HTMLElement.click() fires a click listener but the button's
+    handler does not run, so the reward dialog never opens. A CGEvent click whose
+    hit-test is the button itself does. Refuses to click if the element under the
+    point is not that button, or the point is outside the Chrome window.
+    """
+    js_regex = _OPEN_RE_JS if kind == "open" else _CONFIRM_RE_JS
+    osa('tell application "Google Chrome" to activate', timeout=20)
+    activate_tab(tab)
+    time.sleep(0.35)
+    raw = js(_button_query_js(js_regex, False), tab=tab)
+    if not raw or raw == "NO_BUTTON" or str(raw).startswith(("NO_", "__")):
+        return raw or "NO_BUTTON"
+    try:
+        g = json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return "TRUSTED_BAD_GEOM"
+    text = (g.get("t") or "").strip()
+    hit = (g.get("hit") or "").strip()
+    if not text or (text not in hit and hit not in text):
+        return "TRUSTED_MISS:%s" % hit[:24]
+    if g.get("w", 0) < 8 or g.get("h", 0) < 8:
+        return "TRUSTED_MISS:tiny"
+    x = g["sx"] + (g["outerW"] - g["innerW"]) + g["left"] + g["w"] / 2.0
+    y = g["sy"] + (g["outerH"] - g["innerH"]) + g["top"] + g["h"] / 2.0
+    bounds = osa(
+        'tell application "Google Chrome" to get bounds of front window', timeout=20)
+    nums = [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", bounds or "")]
+    if len(nums) >= 4:
+        left, top, right, bottom = nums[:4]
+        if not (left <= x <= right and top <= y <= bottom):
+            return "TRUSTED_OFFSCREEN"
+    try:
+        _post_mouse_click(x, y)
+    except Exception as exc:  # noqa: BLE001
+        return "TRUSTED_ERR:%s" % type(exc).__name__
+    return "TRUSTED:" + text[:20]
+
+
 def solve_react_captcha(tab=DEFAULT_TAB, code=""):
     """Inject graphical captcha code into React controlled input via native property setter and submit."""
     js_expr = r"""
@@ -733,7 +845,7 @@ CUMULATIVE_HINTS = [
 DONE_PATTERNS = [
     r"今日已签到", r"已签到", r"Checked in", r"checked in",
     r"明天\s*00:00", r"明日再来", r"今日已领取", r"今日已打卡",
-    r"已领取，明天再来",
+    r"已领取，明天再来", r"已完成签到",
 ]
 PENDING_MARKERS = [
     r"每日签到", r"Daily Check-?in", r"签到领取", r"每天8点刷新",
@@ -1045,7 +1157,7 @@ def _classify(page):
         and not re.search(r"已签到|Checked in|已领取|nav|sidebar|tab|menu", (h.get("cls", "") + " " + _clean(h.get("txt", ""))), re.I)
     ]
     _hard_done = re.search(
-        r"今日已签到|今日已领取|今日已打卡|明天\s*00:00|明日再来|已领取，明天再来",
+        r"今日已签到|今日已领取|今日已打卡|明天\s*00:00|明日再来|已领取，明天再来|已完成签到",
         body, re.I)
 
     # 只要存在可见未禁用的动作按钮，且页面没有硬完成标志，必须判 pending
@@ -1056,7 +1168,7 @@ def _classify(page):
 
     if any(re.search(p, body, re.I) for p in DONE_PATTERNS):
         out["state"] = "done"
-        m = re.search(r"(今日已签到[^ ]{0,18}|已签到[^ ]{0,14}|Checked in[^ ]{0,22})", body, re.I)
+        m = re.search(r"(今日已签到[^ ]{0,18}|已完成签到[^ ]{0,14}|已签到[^ ]{0,14}|Checked in[^ ]{0,22})", body, re.I)
         out["evidence"] += "状态←" + (m.group(0)[:34] if m else "已签到")
         return out
 
@@ -1096,8 +1208,14 @@ def _classify(page):
     # check-in, and the station shows no check-in card at all.
     api_hits = page.get("apiHits") or []
     if api_hits and out["state"] == "unknown":
-        out["state"] = "auto"
-        out["evidence"] += "打开即签到←" + api_hits[0].split("/")[-1][:36]
+        # 坑 44：SPA 软跳转不会清空 performance resource。PM-Plan 签到请求留在
+        # #/models 文档里时，模型页没有签到卡片也会被判「打开即签到」。
+        # 当前页自己还像账户页（已读到余额，或正文有签到/余额）才认这笔请求。
+        surface = bool(bal) or bool(re.search(
+            r"签到|check-?in|已完成签到|余额|balance", body, re.I))
+        if surface:
+            out["state"] = "auto"
+            out["evidence"] += "打开即签到←" + api_hits[0].split("/")[-1][:36]
 
     if not out["evidence"]:
         out["evidence"] = _clean(body[:110])

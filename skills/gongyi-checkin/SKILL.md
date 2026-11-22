@@ -1,7 +1,7 @@
 ---
 name: gongyi-checkin
 description: 公益站（new-api / one-api 系）每日签到自动化。读取 Chrome 书签文件夹 daily-check-in，打开每个站点完成签到，输出签到成功/失败归档（含奖励金额与余额）。触发词：公益站签到、签到、每日签到、check-in、gongyi、公益站、station checkin、签到报告
-version: 1.2.0
+version: 1.3.0
 ---
 
 # gongyi-checkin — 公益站每日签到
@@ -81,7 +81,7 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 
 ---
 
-## 🚨 四十一个会静默失败的坑
+## 🚨 四十四个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
@@ -497,6 +497,44 @@ new-api 系本来就会在加载时发 checkin，SPA 却不一定把按钮文案
   `navigate` 回原 URL 再 probe 一次，把刷新后的状态当最终结果。
 - 有验证弹窗时不刷新——刷新会把 Turnstile / 图形码 / 点选验证重置（坑 35）。
 - 这不是再点一次按钮。第 8 轮的补点逻辑不变。
+- 刷新必须先走 `about:blank`，否则同 URL 不会重新请求文档（坑 3）。
+
+### 坑 42：`立即签到` 只打开说明框，而且不吃脚本点击（iGrok）
+
+2026-11-22 iGrok：`CLICKED:立即签到` 之后按钮一直还在，刷新也还是「立即签到」。
+这个按钮的点击处理只打开「签到奖励说明」，真正入账的是框里的 `领取当前奖励`
+（POST `/api/user/checkin`）。`element.click()` 能触发 DOM click，但处理函数不跑，
+框根本不出现；按按钮的屏幕坐标发一次真实鼠标点击才会打开。确认后再点
+`领取当前奖励`，接着弹出 Turnstile「安全验证」。标签在前台时这个盾会自己通过，
+不要把它当成图片点选交给人工。
+
+- **修法**（2026-11-22，`chrome_driver.py` / `run_checkin.py`）：
+  1. 验证循环每轮先找 `领取当前奖励` / `Claim this reward`，找到就点；脚本点击后按钮还在，再补一次真实鼠标点击；
+  2. 只有文本恰好是 `立即签到`、JS 点击约 8 秒后仍是 pending、且没有验证弹窗时，才对这个按钮做一次真实鼠标点击。`Check in now` 不走这条，避免每个慢站都挪鼠标；
+  3. 点击前用 `elementFromPoint` 核对目标就是该按钮，并且坐标落在 Chrome 窗口内，对不上就不点；
+  4. 探测到可见的 Turnstile iframe 时继续前台等待，不判 `需人工验证`。
+- 真实鼠标点击会挪一下指针，只作为上面这一次兜底。锁屏时 AppleEvent 和鼠标事件都不可用（坑 15）。
+
+### 坑 43：哈希路由的控制台壳先出来，签到区晚挂（RelayFor）
+
+2026-11-22 RelayFor（`/console/#benefits`）：第一次 probe 的正文全是侧边栏
+（概览、模型与价格、API Key），没有签到按钮，3 秒重试后仍是 `unknown`。
+同一天重新打开，签到区已经在，按钮是 `今日签到还款`，点完是「今日已签到」。
+
+- **修法**（2026-11-22，`run_checkin.py`）：`unknown`、URL 带 `#`、正文里还没有
+  「签到 / check-in」时，再等 8 秒探一次。没有 hash、或正文里已经有签到字样的站不额外等。
+
+### 坑 44：验证弹窗关掉后的 SPA 软跳，残留 checkin 请求不是成功（PM-Plan）
+
+2026-11-22 PM-Plan：点选验证在 10 秒复核里还开着。过一会儿弹窗没了，地址却停在
+`#/models`。这时 `performance` 里仍留着刚才的 `/api/user/checkin`，分类器把它当成
+「打开即签到」。重新 `about:blank` 再打开首页，页面才是「今天是 YYYY-MM-DD，已完成签到」。
+
+- **修法**（2026-11-22，`chrome_driver.py` / `run_checkin.py`）：
+  1. 只有当前页读得到余额，或正文里有签到/余额字样，才允许 `apiHits` 判 `auto`；
+  2. 非图形验证（点选/滑块）先在前台再等最多 30 秒；弹窗还在就不要刷新（坑 35）；
+  3. 弹窗已经不在、页面又不是已签到时，走 `about:blank` 重新打开原 URL 再判；
+  4. `已完成签到` 算硬完成语。图形验证码仍不在这里干等。
 
 ---
 
