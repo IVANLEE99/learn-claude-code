@@ -1,12 +1,41 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.17.0
+version: 16.18.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.17.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.18.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
+
+> **🔴 v16.18.0 核心改进（2026-11-22 W46 周报实跑：目标周口径 / 周报不重抓 / typst 缺席，坑 525-527）**
+>
+> W46 周报（2026-11-16 ~ 2026-11-22）实跑：7 天日报全在（294 / 464 / 459 / 630 / 550 / 500 / 365），
+> 周内去重 **3258 帖**，公益/交易过滤后 **3241** 进入主题分布；周报 md + press + PDF(832 KB) 落盘后
+> 才开视频链，全程没有重新抓取。三条都是「周报模式独有」的口径问题，日报侧不受影响。
+>
+> ① **坑 525：周报的「本周」不能用 `datetime.now()` 直接取，必须显式指定目标周一。**
+> 周日跑时 `now.weekday()==6`，`now - 6天` 恰好是周一，看起来天衣无缝；但周一到周六跑，
+> `week_end=now` 会把最近 7 天（含还没产日报的日子）当成一整周，得到「6 天有数据 + 1 天缺失」的残周，
+> 且 `--week-id` 随运行日漂移（同一周想补跑会得到另一个周号）。
+> **修法**：聚合脚本第一行写死 `TARGET_MONDAY`，`week_end = TARGET_MONDAY + 6 天`；
+> 开工前先 `ls data/daily/<week_start>..<week_end>` 确认 7 天齐，缺哪天就在报告「数据来源说明」里点名，
+> 不要用「覆盖 6/7 天」含糊带过。
+>
+> ② **坑 526：周号必须沿用 `%W`（周一起点），不要换成 `isocalendar().week`。**
+> 本期一度改成 ISO 周，算出来是 **W47**，而历史产物是 W40–W46 一整套 `%W` 编号（2026-11-16 → `%W46` /
+> ISO `W47`）。换成 ISO 会与 `data/weekly/` 全部历史文件断代一天，也会让下游按周号找稿的地方全错位。
+> **判据**：新周号必须能对上 `data/weekly/{week_id}.md` 的历史序列；对不上就是口径换了，回退 `%W`。
+>
+> ③ **坑 527：本机没有 `typst`，PDF 走 Chrome headless 打印，别再等 typst 装好。**
+> `command -v typst` 为空（只有 ffmpeg）。本期把 md 转成自写 HTML（标题/列表/表格/引用全支持，
+> 中文用 PingFang SC），再用 `playwright` 驱动**系统 Chrome**（`/Applications/Google Chrome.app`）
+> `page.pdf(format=A4, print_background=True)`，832 KB / 一次成功，不再走「先 `pip install typst` 再说」。
+> 注意两点：① `launch()` 才接受 `executable_path`，`connect_over_cdp()` 不接受；
+> ② HTML 里 `**bold**` 要自己转 `<strong>`，Typst 的转义规则（`$`/`#`/`_`）在这里不适用。
+>
+> 另：本周灰色渠道关键词表补了 `焚诀`（免费试用薅取类黑话）、`虚拟卡`、`不弹出kyc` 三个词，
+> 老表只有 `公益站/中转站/接码/代充`，这三类会漏进分布表。
 
 > **🔴 v16.17.0 核心改进（2026-11-22 1122 期实跑：cron 窗口踩当前小时 / worker 空转 / 来源平台名越界，坑 519-521）**
 >
@@ -1101,6 +1130,10 @@ GONGYI_KEYWORDS = [
     '中转站', '高级推广', '抽奖', '富可敌国', '接码', '代充',
     # v15.2 正文二次过滤补充
     'LightBridge公益', 'YSX666', '日抛', '午夜福利', 'CDK',
+    # v16.18 补充（W46 实测漏网）：薅取黑话与虚拟卡/绕验证类操作帖。
+    # 注意不要加 '0元试用' 这类纯事件词——它会把「官方免费试用被清算」的新闻帖一起滤掉，
+    # 那类帖属于风险信号，应保留并按降权处理（不进亮点、不给操作步骤）。
+    '焚诀', '虚拟卡', '不弹出kyc', '不弹kyc',
 ]
 TRADE = ['求号', '出号', '共享车']
 
@@ -1469,12 +1502,24 @@ typst compile data/reports/{date}.typ data/reports/{date}.pdf
 import json, os, glob, re
 from datetime import datetime, timedelta, timezone
 
-now = datetime.now(timezone(timedelta(hours=8)))
-# 计算本周范围（周一~周日）
-weekday = now.weekday()  # 0=Monday
-week_start = (now - timedelta(days=weekday)).strftime('%Y-%m-%d')
-week_end = now.strftime('%Y-%m-%d')
-week_id = now.strftime('%Y-W%W')  # 如 "2026-W27"
+# 🔴 v16.18：目标周必须显式取「周一 → 周日」，不能用 now 直接取「本周至今」。
+#    now.weekday() 在周日跑时恰好等于 6，看起来没问题；但周一到周六跑会把最近 7 天
+#    （含缺勤日）当成一整周，产出「6 天有数据、1 天缺失」的残周，而且 --week-id 会漂移。
+TARGET_MONDAY = datetime(2026, 11, 16, tzinfo=timezone(timedelta(hours=8)))  # ← 当场显式写死
+week_start = TARGET_MONDAY.strftime('%Y-%m-%d')
+week_end = (TARGET_MONDAY + timedelta(days=6)).strftime('%Y-%m-%d')
+# 周号沿用历史口径 %W（周一起点），与 data/weekly/W40..W46 全部产物一致：
+# 11-16 周一 → %W46；若换 isocalendar().week（ISO）会得到 W47，与历史断代一天。
+week_id = TARGET_MONDAY.strftime('%Y-W%W')  # 2026-11-16 → 2026-W46
+# 🔴 v16.18 门禁：先把 7 天日报点齐再聚合，缺哪天要点名而非静默跳过。
+missing_days = [ (TARGET_MONDAY + timedelta(days=i)).strftime('%Y-%m-%d')
+                 for i in range(7)
+                 if not os.path.exists(f'data/daily/{(TARGET_MONDAY + timedelta(days=i)).strftime("%Y-%m-%d")}.json') ]
+if missing_days:
+    print(f'WARN missing daily: {missing_days}  -> 必须写进报告「数据来源说明」')
+    # 缺 1-2 天可继续（报告里点名）；缺 >=3 天就停，让用户先补日报，别产出半周周报
+    assert len(missing_days) < 3, f'缺 {len(missing_days)} 天日报，周报不成立：{missing_days}'
+
 
 # 聚合本周 daily JSON（注意只匹配 YYYY-MM-DD.json，排除 _sorted/_topics 等后缀文件）
 week_posts = {}
@@ -2204,7 +2249,16 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 - 覆盖检查：本周 7 日 `daily/*.json` + `reports/*.md` 齐全后再写周报
 
 **产物与衔接**
-- 周报 md/press/typ/**pdf** 必须落盘；`typst compile data/weekly/{week_id}.typ …pdf`
+- 周报 md/press/**pdf** 必须落盘。**`typst` 本机没有（坑 527）**，现行路径是「md → 自写 HTML → 系统 Chrome `page.pdf()`」：
+  ```bash
+  # 1) md -> HTML（自己转 <h1/h2/h3>、<ul>、<table>、<blockquote>；**bold** -> <strong>）
+  # 2) Chrome headless 打印（launch() 才接受 executable_path，connect_over_cdp 不接受）
+  python3 -c "from playwright.sync_api import sync_playwright as s; \
+    p=s().start(); b=p.chromium.launch(executable_path='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless=True); \
+    pg=b.new_page(); pg.goto(html_uri); pg.pdf(path='data/weekly/<week_id>.pdf', format='A4', print_background=True); b.close()"
+  ```
+  **PDF 落盘并回读文件大小/页数之后，才允许开视频流水线**（v16.3 的衔接铁律不变）；
+  没有 typst 就不要在那上面反复尝试，也不要去 `pip install typst`（需要用户授权）。
 - 实测：去重主题 **2823**；日帖 374/491/454/390/490/531/668
 - 与 ai-news-factory：**周 PDF 落盘后再开视频流水线**；批抓阶段只保留一个 Playwright
 
