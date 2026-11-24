@@ -336,6 +336,21 @@
 - 2026-11-12 React SPA 架构。初次加载虽然 readyState 已为 complete，但组件挂载存在数秒异步延迟。
   若初次 probe 拿不到 hits 且分类为 unknown，额外等待 3 秒重探即可正常发现待签到按钮并完成签到闭环。详见 SKILL.md 坑 23。
 
+### 简直了 — https://jianzhile.vip/console/personal
+- 2026-11-24 图形验证码（Semi-UI「Security verification」弹窗，`maxlength=8`）**有时效**。
+  连续三次拿旧图提交都返回 `blocked_captcha` 并换新图；点弹窗的 `Refresh captcha`
+  换新图（现为 `--refresh-captcha --host H`），落盘后立刻读、立刻提交，一次通过。
+  详见 SKILL.md 坑 45。
+- 提交接口是 `POST /api/user/checkin` + `GET /api/user/checkin/captcha`；
+  成功回执是 Toast `Check-in successful! Received ¥X`。
+
+### 链趣 — https://qulink.cyou/points/check-in
+- 2026-11-24 该页未登录时 `每日签到` 只是**顶部导航**（80×44 的 `A`，和「积分专区 / 积分控制台 / 调用文档」并排），
+  点了不会签到；正文写着「登录后即可使用积分控制台」，旁边有「登录本站账户」。
+  旧分类器把它当待签到按钮反复点，状态永远 pending。
+  现已由 `_classify()` 的登录门禁规则判为 `logged_out`（详见 SKILL.md 坑 46）。
+- 这站要签到得先注册/登录本站账户，LinuxDO OAuth 未必可用。
+
 ## 下次开工先看
 
 0. **定时放 08:05，不要 00:05**：站点的签到窗口分两套——`00:00` 重置（lOXO / 咕咕嘎嘎 / Pigeonw /
@@ -343,7 +358,7 @@
    Huan / 烁 / 魔方 / CM-API / Orbitix / 方舟）。00:05 跑签的是「上一个 08:00 窗口」，
    白天打开站点会重新显示「今日尚未签到」；08:05 跑则两种口径都在当日窗口内。
 
-1. `SKILL.md` 的「四十四个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
+1. `SKILL.md` 的「四十六个会静默失败的坑」——`esc()` 注释吃掉脚本是头号杀手，
    「读到上一个站点的页面」是危害最大的（数字看着对但全是错的）。
 2. 「站点形态」表 + 本文件的「站点笔记」，判断新站点归哪一形态。
 3. 新站点先 `--dry-run --url <地址> --name <名字>` 单站试，别直接全量点。

@@ -1023,6 +1023,20 @@ def _classify(page):
         out["evidence"] = "linuxdo登录按钮: " + _clean(login[0].get("txt", ""))[:30]
         return out
 
+    # ---- 登录门禁页：正文有「登录后即可…」且没有任何已登录迹象 ----
+    # 2026-11-24 链趣（qulink.cyou/points/check-in）：未登录时顶部「每日签到」
+    # 只是导航链接（A，80×44），点了不会签到；正文写着「登录后即可使用积分控制台」。
+    # 旧逻辑把这条含「签到」的导航链接当成待签到按钮，报 pending 并反复点击。
+    # 这里要求「有登录门禁文案 + 有登录入口 + 无余额/无完成语」三者同时成立，
+    # 避免把正常已登录页脚里的「登录」字样误判。
+    _gate = re.search(r"登录后(?:即可|才能|方可|可使用)|Sign in to (?:continue|use)", body, re.I)
+    _login_cta = re.search(r"登录本站账户|立即登录|去登录|Sign in|Log in", body, re.I)
+    if (_gate and _login_cta and not _find_balance(body)[0] and not re.search(
+            r"已签到|Checked in|已完成签到|当前余额|Current balance|Available balance", body, re.I)):
+        out["state"] = "logged_out"
+        out["evidence"] = "登录门禁页←" + _clean(_gate.group(0))[:26]
+        return out
+
     # ---- reward / balance ----
     # Prefer the label->value pairs captured by the probe: they were read from
     # textContent next to their label, so evidence and value cannot drift apart.

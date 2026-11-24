@@ -1,7 +1,7 @@
 ---
 name: gongyi-checkin
 description: 公益站（new-api / one-api 系）每日签到自动化。读取 Chrome 书签文件夹 daily-check-in，打开每个站点完成签到，输出签到成功/失败归档（含奖励金额与余额）。触发词：公益站签到、签到、每日签到、check-in、gongyi、公益站、station checkin、签到报告
-version: 1.3.0
+version: 1.4.0
 ---
 
 # gongyi-checkin — 公益站每日签到
@@ -81,7 +81,7 @@ ps -Ao pid,lstart,command | grep -E "MacOS/Google Chrome( |$)" | grep -v Helper
 
 ---
 
-## 🚨 四十四个会静默失败的坑
+## 🚨 四十六个会静默失败的坑
 
 ### 坑 1：`esc()` 折叠换行 → JS 里的 `//` 注释吃掉整个脚本
 
@@ -536,6 +536,40 @@ new-api 系本来就会在加载时发 checkin，SPA 却不一定把按钮文案
   3. 弹窗已经不在、页面又不是已签到时，走 `about:blank` 重新打开原 URL 再判；
   4. `已完成签到` 算硬完成语。图形验证码仍不在这里干等。
 
+### 坑 45：图形验证码有时效，隔太久再提交必然失败（简直了）
+
+2026-11-24 简直了：`--prepare-captcha` 拿到图片后，读图→提交之间夹了多次重试，
+连续三次都返回 `blocked_captcha` 并刷新出新图。排查确认：
+输入框 `maxlength=8`、弹窗是 Semi-UI「Security verification」、提交按钮点到了、
+输入框被清空、站点接口正常（`/api/user/checkin` + `/api/user/checkin/captcha` 重复出现）。
+不是选错按钮，也不是 React setter 失效，就是**码过期了**。
+
+- **修法**（2026-11-24 已落地，`run_checkin.py` / `chrome_driver.py`）：
+  1. 新增 `--refresh-captcha --host H`：点弹窗里的 `Refresh captcha` 换新图，
+     落盘到 `data/captcha.png` 并返回 `refreshed: true`，不必再手写 AppleScript；
+  2. `--submit-captcha` 失败且返回 `next_image` 时附带 `hint` 字段，提示先刷新再读；
+  3. 读图与提交必须贴着做：先确保 Bash 可用，再 `--prepare-captcha`；
+  4. 连续两次提交仍 `blocked_captcha` 时不要继续拿旧图猜字，走第 1 步换新图。
+- **实测**：refresh 换新图后读图并马上提交，一次成功（`state=done`，
+  Toast `Check-in successful! Received ¥X`）。同一张图反复提交不会成功。
+- 验证码本身仍是一次性的，不写进任何入库文件。
+
+### 坑 46：未登录门禁页的「每日签到」只是导航链接（链趣）
+
+2026-11-24 链趣（`qulink.cyou/points/check-in`）：未登录时页面顶部一排导航
+`链趣 / 积分专区 / 每日签到 / 积分控制台 / 调用文档`，其中「每日签到」是 80×44 的 `A`。
+脚本把它当签到按钮点了，状态永远 `pending`；刷新复核仍是同一个导航链接，
+确认步报 `NO_BUTTON`。真因是**没登录**：正文写着「登录后即可使用积分控制台」，右侧有「登录本站账户」。
+
+- **修法**（2026-11-24 已落地，`chrome_driver.py` 的 `_classify()`）：
+  正文命中登录门禁文案（`登录后即可|登录后才能|登录后方可|登录后可使用|Sign in to continue|Sign in to use`）
+  **且** 有登录入口（`登录本站账户|立即登录|去登录|Sign in|Log in`）
+  **且** 读不到余额、也没有 `已签到/当前余额/Checked in` 字样 → 直接判 `logged_out`，
+  evidence 写「登录门禁页←…」，不再把导航链接当按钮反复点击。
+- 三个条件缺一不可：正常已登录页的页脚也常有「登录」字样，只匹配其中一个会误伤。
+- 回归：用今天链趣的真实正文判 `logged_out`；new-api 已签到页仍判 `done`；
+  有余额的待签到页仍判 `pending`。
+
 ---
 
 ## ⚠️ 不要动用户的标签页
@@ -627,6 +661,9 @@ python3 run_checkin.py --prepare-captcha https://plan.pmcat.top/ --name PM-Plan
 #   图形码 → 图片存到 data/captcha.png，放大后识图再提交（坑 38）：
 sips -z 400 960 data/captcha.png --out /tmp/captcha_big.png
 python3 run_checkin.py --submit-captcha BDMM8 --host jianzhile.vip
+#   提交失败返回 next_image 时，先换新图再读（坑 45）：
+python3 run_checkin.py --refresh-captcha --host jianzhile.vip
+#   → {"refreshed": true, "image": ".../data/captcha.png"}，立刻读图、立刻再提交
 #   图片点选/滑块 → 标签页留在前台，人工完成即可（脚本绝不代选/代滑）
 #   默认成功后保留标签页；加 --close-tab 才会关闭
 ```

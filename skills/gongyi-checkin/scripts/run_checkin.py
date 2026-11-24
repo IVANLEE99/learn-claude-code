@@ -37,6 +37,7 @@ from chrome_driver import (  # noqa: E402
     get_captcha_image_base64, is_cf_challenge, js,
     js_retry, navigate, new_tab, osa, probe, save_captcha_image,
     solve_react_captcha, tab_count, trusted_click_button, wait_cf_pass, wait_for,
+    _money,
 )
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1179,6 +1180,44 @@ def prepare_captcha(url, name="", close_if_done=True):
         return info
 
 
+def refresh_captcha(host):
+    """Click 'Refresh captcha' in the verification modal and save the new image.
+
+    坑 45：图形验证码有时效。连续提交失败后用这个命令换一张新图，
+    立刻读、立刻提交，避免拿旧图反复猜字。
+    """
+    tab = find_tab_by_host(host)
+    info = {"host": host, "tab": tab, "refreshed": False, "image": None}
+    if not tab:
+        info["error"] = "no open tab for host %s (先跑 --prepare-captcha)" % host
+        return info
+    url = current_url(tab)
+    if host.lower() not in (url or "").lower():
+        info["error"] = "tab %d is not the target host (url=%s)" % (tab, url)
+        return info
+    js_expr = r"""
+    (function(){
+      var modal = document.querySelector('[role=dialog], .semi-modal, .ant-modal');
+      if(!modal) return 'NO_MODAL';
+      var btns = Array.from(modal.querySelectorAll('button'));
+      for (var i=0;i<btns.length;i++){
+        if (/Refresh captcha|刷新验证码|刷新/.test(btns[i].textContent||'')) {
+          btns[i].click(); return 'REFRESHED';
+        }
+      }
+      return 'NO_REFRESH_BTN';
+    })()
+    """
+    info["refresh"] = js(js_expr, tab=tab)
+    if info["refresh"] == "REFRESHED":
+        time.sleep(1.5)
+        out_path = os.path.join(DATA_DIR, "captcha.png")
+        if save_captcha_image(tab=tab, out_path=out_path):
+            info["refreshed"] = True
+            info["image"] = out_path
+    return info
+
+
 def submit_captcha(host, code, close_tab=False):
     """Fill a graphic captcha code into the tab left open by prepare_captcha."""
     tab = find_tab_by_host(host)
@@ -1213,6 +1252,12 @@ def submit_captcha(host, code, close_tab=False):
                 info["next_image"] = out_path
             break
 
+    # 坑 45：带 next_image 说明服务端已换图（这张码被消费或判错）。
+    # 旧图反复提交不会成功，提示先刷新再读。
+    if info.get("next_image") and info.get("state") not in ("done", "auto"):
+        info["hint"] = ("码可能已过期或被判错：先 --refresh-captcha --host %s "
+                        "换新图，落盘后立刻读、立刻提交" % host)
+
     if close_tab and state and state["state"] in ("done", "auto"):
         release_scratch_tab(tab)
         info["closed"] = True
@@ -1233,7 +1278,10 @@ def main():
                     help="打开站点并触发签到，把验证弹窗留在前台（人工或 agent 继续）")
     ap.add_argument("--submit-captcha", metavar="CODE", default="",
                     help="向 --prepare-captcha 留下的图形验证码标签页提交识别结果")
-    ap.add_argument("--host", default="", help="配合 --submit-captcha：目标站点域名")
+    ap.add_argument("--refresh-captcha", action="store_true",
+                    help="配合 --host：点弹窗里的 Refresh captcha 换新图并保存到 data/captcha.png")
+    ap.add_argument("--host", default="",
+                    help="配合 --submit-captcha / --refresh-captcha：目标站点域名")
     ap.add_argument("--close-tab", action="store_true",
                     help="配合 --submit-captcha：成功后关闭该标签页（默认保留）")
     ap.add_argument("--keep-tabs", type=int, default=1,
@@ -1334,6 +1382,14 @@ def main():
             except Exception as exc:  # noqa: BLE001
                 log("archive update failed: %s" % exc)
         return 0 if not info.get("error") else 1
+
+    if args.refresh_captcha:
+        host = args.host or (urlparse(args.url).hostname if args.url else "")
+        if not host:
+            raise SystemExit("--refresh-captcha 需要 --host 指定站点域名")
+        info = refresh_captcha(host)
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        return 0 if info.get("refreshed") else 1
 
     if args.submit_captcha:
         host = args.host or (urlparse(args.url).hostname if args.url else "")
