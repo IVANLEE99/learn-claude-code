@@ -1,12 +1,71 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.106.0
+version: 3.108.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.106.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.108.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.108.0 核心改进（2026-11-24 1124 期实跑：登录探测假阳性 / ingest id 形态 / 草稿 objectId / 定稿顺序 / 标题栏裁剪 / 回读等待 / 锁屏与 CDP，坑 531-537）**
+>
+> 1124 期：daily **473 帖**（队列 522，二次过滤剔除 49）→ 报告/PDF（3 页 3827 字）→ 8 场景 content
+> → 审核九项全 PASS（系统 checker `RESULT: OK`）→ 双封面 → 成片 **95.04s / 6.56MB / 1920×1080**（锚点实测 **0.707**）
+> → 五平台草稿全部 verified（公众号 `100002214` / 知乎 `2108418041637873474` / B站 `4163396` /
+> 抖音 `v0d00fg10000dc2b38fog65ssd8gojng` / 视频号 `export/UzFfBgAAxNOA…`）。内容层零返工；
+> 七条坑集中在「判据读到的是假状态」「id 形态变了」和「渲染/回读的物理边界」上。
+>
+> ① **坑 531：公众号登录探测的 `has_qr` / 「请重新登录」文案是假阳性，必须用 token 三角判定。**
+> 1124 期同一 profile 先后两次被判「掉登录」：一次是 `has_qr:true` 命中「微信扫码查看创作周报」这种运营文案，
+> 一次是页面出现「登录超时，请重新登录」提示。实际 `mp.weixin.qq.com/cgi-bin/appmsg?...token=681854488`
+> 与 dashboard「Youngs羊示」都在，属于**完全登录态**。若据此落 `login_required`，会让用户白扫一次码、
+> 并触发粘性 block 的恢复流程（坑 514）。
+> **判据（三条同时看）**：① URL 上有 `token=` 且 `appmsgid`/`__biz`/`pass_ticket` 至少一项非空；
+> ② 页面标题是「公众号」而不是「微信公众平台」，且出现账号名；③ 编辑器可编辑正文（`editable_count>0`
+> 或能读到 `#js_editor` 内容）。**只有真的被 302 到登录页/扫码 iframe 才算 `login_required`**；
+> 页面文案里出现「重新登录」字样**不算**。
+>
+> ② **坑 532：抖音 ingest `video_id` 是字母数字混排，`v0\d{3}…` 这种纯数字正则抓不到。**
+> 1124 期真实值 `v0d00fg10000dc2b38fog65ssd8gojng`（`v0` + `d00fg…`，中间夹字母）。
+> 旧写法 `v0\d{3}[0-9a-z]{20,}` 直接匹配失败 → 回执缺 id，整条抖音链无法收口。
+> **修法**：`re.search(r'v0[0-9a-z]{23,}', body)`，仍然只从保存请求体
+> （`fast_detect/poll` 或 create/post）里取，恢复页 DOM 永远没有它（坑 512）。
+> **自检**：拿到 id 后先 `assert re.fullmatch(r'v0[0-9a-z]{23,}', vid)`，再写 capture；
+> 不要再用「长度够就算」这种模糊判据。
+>
+> ③ **坑 533：视频号草稿 `draft_id` 必须来自 `get_draft_list` 的 `objectId`，不要在上传脚本里内联拼 capture。**
+> 1124 期 worker 想在保存流程里内联生成 capture，结果因脚本缺 `Path` 导入直接抛异常，整段回执丢失。
+> **正确链路**：保存草稿 →（重开草稿后）调 `get_draft_list` → 从响应取本期 `objectId`
+> （编辑入口是 `.opr-item`）→ 用独立的 `channels_capture` 步骤写 capture。
+> 短标题、竖版封面、合集**只有重开草稿的编辑页可读**，保存当页读到的值不能当持久化证据（坑 514 同族）。
+>
+> ④ **坑 534：content 必须「先定稿、后 checkpoint」，否则会卡在 evidence sha 不一致上。**
+> 1124 期先 checkpoint 了 `content`，随后为了把锚点占比从 0.625 提到 0.70+ 又改了
+> `content.json / script / voiceover / sections`，而 `checkpoint()` **拒绝覆盖已 done 的阶段**，
+> 只能临时用 `Controller.mutate` 按磁盘现值重算 evidence 的 sha256/size 来对账——这是**补救动作，不是规范**。
+> **规范顺序**：写 content → 跑 TTS 拿到真实总时长 → 复算 `anchor_start / total`（必须 0.70–0.80）
+> → 全部定稿后再 `checkpoint content`。**在任何会改动产物的操作之前，不要先 checkpoint。**
+> 若已经踩了：允许一次性对账（重算 sha 并重跑 `check-derived-content.py` 得 `RESULT: OK`），
+> 但必须在最终汇报里如实披露，不能当成正常流程。
+>
+> ⑤ **坑 535：成片标题栏要按画布预算裁剪，别用会溢出的固定宽度。**
+> 1124 期 render 的截断阈值是 `x=760 + 1380 = 2140 > 1920`，标题右侧被切掉一截。
+> **修法**：`budget = canvas_w - x - 24`，用 `textlength` 逐字收缩并加省略号；
+> 渲染前 `assert x + title_w <= canvas_w - 24`，渲染后抽帧目检标题右边缘。
+> 已渲染的片子可以只重做标题栏再 overlay（省掉整段 15 分钟重渲），但**必须清 `/tmp/<issue>_video` 缓存**（坑 509）。
+>
+> ⑥ **坑 536：平台回读要等「真实渲染完成」，固定短 sleep 会读到空字段。**
+> 1124 期 B站首次回读只等 9 秒，标题/分区/简介/封面全空 → `required_failures` 非空、回执作废；
+> 改成 `wait_for_selector` 等到草稿表单真实出现（实测约 75 秒）后一次通过。
+> **判据**：回读时逐字段断言非空，**空值一律视为未就绪、继续等**，不要「等 9 秒没读到就判定平台失败」；
+> 也不要因为一次空回读就重传（会造重复草稿）。
+>
+> ⑦ **坑 537：Mac 锁屏不影响 Playwright/CDP，只影响 AppleEvent（osascript）。**
+> 1124 期 `CGSSessionScreenIsLocked=true`，但 CDP 页面 `visibilityState=visible`、rAF 61fps、
+> 四个平台照常上传成功。**判据**：先做只读 CDP 探针（打开页面 → 读 `visibilityState` → 测 rAF 帧率），
+> 不要一看到锁屏就落 block 或要求用户解锁；只有 AppleEvent 驱动的操作（Finder/系统对话框）才会被锁屏阻断。
+> 反过来说，**也不要**因为锁屏就跳过真实回读——该等的还得等（坑 536）。
 
 ## 🔒 上传浏览器铁律（2026-11-12 用户明确指示，优先级高于下文一切「坑」描述）
 
@@ -73,6 +132,28 @@ version: 3.106.0
 > 附：本期 `wechat` 的 `issue_words` 一度缺 `Astra` / `Gemini 4`（描述里没写），按坑 380 的做法**补描述**
 > 而不是删断言——改动后 `missing: []`。这条已经重复踩过多次，仍然值得再写一次。
 
+> **🔴 v3.107.0 用户新指示（2026-11-23）：公众号正文与公众号简介都不再写 AI 声明，坑 525**
+>
+> 用户原话：「**以后微信公众号的去掉这一部分**」——指公众号正文末尾「关于本文」整节：
+> AI 辅助整理与撰写声明 + 事实来源/五档可信度说明。
+>
+> ① **范围（用户 2026-11-23 明确确认）**：删的是**公众号路径**的两处——
+> `wechat-article-<DATE>.md` 的 `## 关于本文` 整节（含紧随其后的「事实来源…五档可信度…」段），
+> 以及 `publish.json` 的 `platform.wechat.description` 里任何 AI 声明句。
+> **知乎不动**：`zhihu-article-<DATE>.md` 的 AI 辅助创作说明保留（知乎平台另有治理细则要求，
+> 且该段是知乎通过审核的前提之一，见 §10.3b）。
+>
+> ② **公众号 CTA 与「写在最后」保留**：删的只有 AI 声明与事实来源两块，
+> `## 写在最后` 的正常收尾与「关注「今日羊报AI」」CTA 必须还在——
+> `wechat_upload_<issue>.py` 的 `assert '关注「今日羊报AI」' in body` 仍要过。
+>
+> ③ **正文图数不变**：`## 关于本文` 本来没有配图，删它不改
+> `real_imgs == expected_imgs == len(content.scenes)+1`；别因为删节把 section 计数弄错。
+>
+> ④ **不追溯已完成的期次**：用户明确「只改以后，1123 保持原样」。
+> 已 DONE 的期次其 article sha256 已被 `articles` stage 固化，回头改会造成
+> `artifact fingerprint absent/changed`，需要重跑 articles/upload 核验——不要自作主张返工历史期。
+>
 > **🔴 v3.105.0 核心改进（2026-11-22 1122 期实跑：B站草稿箱硬上限 / 来源名清洗位置 / AI 声明落点，坑 522-524）**
 >
 > 1122 期内容侧一次过：daily 365 帖 → 报告/PDF → 87 秒成片 → 双封面 → 双平台文章 → publish，
@@ -3044,6 +3125,12 @@ ls -la "/Users/youngsdream/Documents/learn-claude-code/news-pipeline/{对应目�
 - 正文从脚本段落中提取，去掉口语化表达（"今天"、"我们"、"大家"等）
 - 每个事件/趋势配一张场景图片（scene2.png ~ sceneN.png，跳过 Hook 场景）
 - 结尾署名与 CTA 按模式参数映射表读取（daily"今日羊报 AI·每天9点带你速览AI圈最热的5条新闻"；monthly"羊报AI月报·每月带你回顾AI圈整月风向"）
+- **🔴 公众号不写 AI 声明（v3.107.0 坑 525，用户 2026-11-23 明确指示）**：文章末尾**不要**出现
+  `## 关于本文` 整节，也不要「本文使用 AI 辅助整理与撰写……」「事实来源：……五档可信度：……」这两段。
+  公众号正文只保留新闻正文 + `## 写在最后` + CTA（「关注今日羊报AI」）。`publish.json` 的
+  `platform.wechat.description` 同样不写 AI 声明句。
+  知乎**不受此条影响**：`zhihu-article-<DATE>.md` 仍保留 AI 辅助创作说明（知乎治理细则要求，见 §10.3b）。
+  该条只对未来期次生效；已 DONE 期的 article sha256 已固化，不追溯改动。
 
 输出到：
 - 文章：`news-pipeline/YYYY-MM-DD/wechat-article-YYYY-MM-DD.md`

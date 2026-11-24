@@ -1,12 +1,33 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.18.0
+version: 16.19.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.18.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.19.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
+
+> **🔴 v16.19.0 核心改进（2026-11-24 1124 期实跑：并发 spawn 的正常拒绝 / stage 时间戳会被重写，坑 538-539）**
+>
+> 1124 期：Source A **2218** / Source B **603** → 队列 **522** → daily **473**（全部含正文，0 error，
+> 二次过滤剔除 49），22:35 触发、23:14 抓取收口，次日 01:45 出报告/PDF，05:51 五平台全部 verified 收工。
+> 抓取侧没有新问题，但**两个「看起来像故障」的调度现象**值得写进判据，避免下次误判。
+>
+> ① **坑 538：L1/L2 同秒并发 tick 时，先起的那个 supervisor 会被 `reserved child identity mismatch` 拒绝——这是正常竞争，不是故障。**
+> 1124 期 22:35:00 两个常驻控制器同时到点，一个 supervisor adopt 失败并打印
+> `{"rc": 3, "reason": "exact inherited job lease adoption refused: ValueError: reserved child identity mismatch"}`；
+> 父进程按 `supervisor exited before adoption rc=3` → rc=1 走重试（**不落 sticky block**），
+> 22:38:00 第二次 spawn 正常接管，之后一路跑完。
+> **判据**：`<issue>-crawl-supervisor.log` 出现一次该 JSON，且 ① `job.lock.owner.json` 的 owner/child
+> 都是活进程、② `crawl.log` 在推进、③ state 的 `blocked` 为空 —— 三条同时成立就是竞争拒绝，
+> **不要手工起第二个 worker、不要清 session、不要改 state**，下一个 180 秒节拍会自愈。
+>
+> ② **坑 539：stage 的 `completed_at` 会被后续 attempt 的 `automatic_crawl_checkpoints()` 重写，别拿它反推抓取时长。**
+> 1124 期 `archive/crawl/daily` 的 `completed_at` 都是 **05:20:06**（第三次下游 attempt 启动时重跑校验的时点），
+> 而真实抓取 23:14 就结束了。**审计口径**：抓取结束看 `data/logs/<issue>-crawl.log` 的末尾与
+> `data/daily/<date>.json` 的文件 mtime；`completed_at` 只表示「该 stage 最后一次通过校验的时间」。
+> 同理，报告里写「抓取耗时」时不要用 stage 时间差算。
 
 > **🔴 v16.18.0 核心改进（2026-11-22 W46 周报实跑：目标周口径 / 周报不重抓 / typst 缺席，坑 525-527）**
 >
