@@ -1,12 +1,51 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.108.0
+version: 3.109.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.108.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.109.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.109.0 核心改进（2026-11-25 1125 期实跑：视频号封面槽被预填 / 长跑脚本日志不可见 / Playwright 无超时静默卡死 / 视频号登录墙假阴性，坑 541-544）**
+>
+> 1125 期：daily **598 帖** → 报告/PDF（4 页）→ 8 场景 content → 审核 16 条 PASS → 双封面
+> → 成片 **110.32s / 6.79MB / 1920×1080**（锚点 **0.777**）→ 五平台草稿全部 verified
+> （公众号 `100002229` / 知乎 `2108785078071578831` / B站 `4168668` /
+> 抖音 `v0200fg10000dc307b7og65m5e1uga30` / 视频号 `export/UzFfBgAAxLqBFGd-…`）。
+> 内容层零返工；本期所有卡点都集中在**视频号上传**这一条链路，四条教训都值得固化。
+>
+> ① **坑 541：视频号竖版封面槽会被平台用「视频帧」预填（1920×1080 横向帧），脚本不能据此跳过上传。**
+> 1125 期脚本看到封面槽已有 1920×1080 图就判定「竖封面已存在」，随后按 `h > w` 断言又失败，
+> 直接 `AssertionError: vertical cover missing`。
+> **修法**：候选必须按容器判定，只有 `.vertical-img-wrap` 内的 `vertical-img-size` 才是竖封面槽；
+> `blur-wrapper` 的 `blur-img` 是背景模糊层、`horizon-img-wrap` 是横封面，一律排除。
+> 进入封面步骤就**显式上传 `vertical-3-4.png`**，不要做「已有就跳过」的优化。
+> 平台会把 1152×1536 裁成 **810×1080** 缩略图存储，回读尺寸按 810×1080 校验，并写入 nonpersistent。
+>
+> ② **坑 542：长跑上传脚本的 stdout 绝对不能接 `| tail -N`。**
+> 1125 期用 `python channels_upload.py all 2>&1 | tail -40`，`tail` 要等进程结束才吐内容，
+> 导致 23 分钟里**一行日志都看不到**，只能靠 `sample` 抓栈判断卡死。
+> **修法**：`python3 -u script.py > data/logs/<issue>-<step>.log 2>&1 &`，日志直写文件、实时 `tail`；
+> 判活三件套：日志 mtime、进程 `etime/CPU time`、CDP 页面清单。
+>
+> ③ **坑 543：Playwright 同步 API 的部分调用没有超时，会静默卡死（不是慢）。**
+> 1125 期 `channels_upload_1125.py` 卡在 `select_kqueue` 23 分钟、CPU 累计 0.43s，
+> 而 `goto`（45s）/`locator.wait_for`（20s）的超时全部早已过期 —— 卡的是**无超时的 evaluate / new_page 一类调用**。
+> **判据**：进程 CPU 时间近 0 且 CDP 里没有目标页面（`post/create` 不存在）⇒ 卡死，不是慢。
+> **修法**：脚本入口 `signal.alarm(N)` 全局超时 + 每一步 `print(..., flush=True)`；
+> 上传类脚本必须能在超时后**快速失败并留下可读日志**，再由 worker 决定是否重试。
+>
+> ④ **坑 544：视频号首次探测到 `login.html` 可能是临时跳转，不要立刻落 sticky `login_required`。**
+> 1125 期 03:32 首次 probe 显示 `channels.weixin.qq.com/platform` → `login.html`（`redirected_to_login=true`），
+> 但同一 profile 稍后重探即进入「视频号助手」并正常上传（草稿 verified）。
+> **判据**：同一 profile、间隔 ≥10 秒的两次独立探测都到登录页，才落 `login_required`（坑 514 保持粘性语义）；
+> 单次 login.html 只记录证据并**重探一次**。重探时不要在已打开的上传会话里并发起新 CDP 连接——
+> 会干扰正在跑的 wujie 双 body 页面，只做 `curl /json/list` 级别的只读检查。
+>
+> 另：`upload-status.json` 只在 `receipt <platform>` 时写入；若 worker 用 `checkpoint upload_<platform>`
+> 收口，validation 会通过但**不会生成该汇总文件**，最终汇报请直接读 state 各 stage evidence 与 `evidence/*-capture.json`。
 
 > **🔴 v3.108.0 核心改进（2026-11-24 1124 期实跑：登录探测假阳性 / ingest id 形态 / 草稿 objectId / 定稿顺序 / 标题栏裁剪 / 回读等待 / 锁屏与 CDP，坑 531-537）**
 >

@@ -1,12 +1,33 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.19.0
+version: 16.20.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.19.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.20.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
+
+> **🔴 v16.20.0 核心改进（2026-11-25 1125 期实跑：永久缺失清单的解锁时机，坑 540）**
+>
+> 1125 期：Source A **2217** / Source B **601** → 队列 **652** → daily **598**（全部含正文，0 error，
+> 二次过滤剔除 54、永久缺失 1），22:35 触发、23:14 抓取收口，次日 00:14 出报告/PDF，
+> 06:37 五平台全部 verified 收工（六次 worker attempt，均为正常续跑）。
+>
+> ① **坑 540：`data/<issue>-permanent-gone.json` 是解锁键，别等重试循环自己收敛。**
+> 1125 期 1 个 ID（`3230649`）连续 **21 次** retry 全部返回 `empty_deleted_private_or_unloaded`（无标题），
+> 抓取每次以 `rc=1 incomplete bodies` 退出、daily 永远不生成；手写 6 条「同 ID / 同 error / 无 title」的
+> 证据清单后，**下一次 tick 立即通过全量校验**（daily 598 帖）。
+> **判据**：同一 ID 出现 ≥6 次同 error 且 `permanent_gone=0`，就写清单
+> （`attempts == len(attempt_files)`，每条证据文件真实存在且内容完全一致），
+> 不要等到重试次数耗尽或人工介入。
+>
+> ② **坑 540-b：清单写入后，daily 需要下一次 gated tick 才重建；当前正在跑的 crawler 不会自动感知。**
+> 判据：写清单 → `bash data/_l3_tick_<issue>.sh` 返回 `START downstream`（或 `phase=downstream`），
+> 表示 daily 已通过、下游已启动；若仍返回 `WAIT_RETRY`，说明还在退避窗口，等 180 秒即可。
+>
+> 另：本期 L3 巡检在退避期用「每 12–15 秒一次 gated tick」的推进器代替 3 分钟 cron，
+> 六次 attempt 的空档从数分钟压缩到十余秒；不改 state、不手工起 worker，仍走调度器租约。
 
 > **🔴 v16.19.0 核心改进（2026-11-24 1124 期实跑：并发 spawn 的正常拒绝 / stage 时间戳会被重写，坑 538-539）**
 >
