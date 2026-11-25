@@ -15,11 +15,12 @@ import argparse as _argparse
 _ap = _argparse.ArgumentParser(description='post-to-video 草稿上传')
 _ap.add_argument('--dir', required=True, help='slug 目录（含 publish.json）')
 ROOT = os.path.abspath(_ap.parse_args().dir)
-ARTICLE = os.path.join(ROOT, 'zhihu-article-20261105.md')
+pub = json.load(open(f'{ROOT}/publish.json'))
+ARTICLE = os.path.join(ROOT, pub['platform']['zhihu'].get('article', 'zhihu-article.md'))
 COVER = os.path.join(ROOT, 'covers', 'horizontal-4-3.png')
 VIDEO = os.path.join(ROOT, 'video', 'post-video-3x4.mp4')
-COLUMN_WANT = '虢礫緙嘞'
-TOPICS = ['职场', '人工智能', '职业发展']
+COLUMN_WANT = pub['platform']['zhihu'].get('column', '虢礫緙嘞')
+TOPICS = pub['platform']['zhihu'].get('topics', ['职场', '人工智能', '职业发展'])
 TOPIC_CHIP_SEL = '.css-1d3pntc'
 DECL_WANT = '包含AI辅助创作作者对内容负责'
 

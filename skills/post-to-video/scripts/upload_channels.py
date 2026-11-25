@@ -237,7 +237,7 @@ with sync_playwright() as p:
     v = page.evaluate("""() => {
       const w = document.querySelector('wujie-app');
       const t = w && w.shadowRoot && w.shadowRoot.body ? w.shadowRoot.body.innerText : (document.body.innerText||'');
-      return {hasTitle: t.includes('三天五个') || t.includes('OnLeave') || t.includes('SI搞砸'), len: t.length};
+      return {hasTitle: t.includes('厉娜') || t.includes('SI搞砸'), len: t.length};
     }""")
     log('draft list result:', v)
     page.close()

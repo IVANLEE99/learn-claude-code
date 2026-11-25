@@ -96,16 +96,18 @@ def fit_ratio(path, want_ar):
     if want_ar < 1:      # 竖版目标 3:4 = 0.75
         if abs(ar - 0.75) <= 0.06:
             return True, (w, h), 'as-is-3x4'
-        if abs(ar - 2 / 3) <= 0.06:      # 2:3 → 左右补白
+        if abs(ar - 2 / 3) <= 0.06:      # 2:3 → 3:4 补边（严禁拉伸）
+            from PIL import ImageOps
             im = Image.open(path).convert('RGB')
             tw, th = TARGET_V
-            if (w, h) != TARGET_V:
-                im = im.resize(TARGET_V, Image.LANCZOS)   # 同为 2:3，等比缩放
-                w, h = im.size
+            # 坑 545：2:3(1024x1536) 与 3:4(1152x1536) 不是同一比例，
+            # 直接 resize(TARGET_V) 会把画面横向拉宽约 12.5%——人像/文字都会变形。
+            # 必须等比 contain 后再用纸色补边，内容 0 损失。
+            fitted = ImageOps.contain(im, (tw, th), Image.LANCZOS)
             bg = Image.new('RGB', (tw, th), PAPER)
-            bg.paste(im, ((tw - w) // 2, 0))
+            bg.paste(fitted, ((tw - fitted.width) // 2, (th - fitted.height) // 2))
             bg.save(path, 'PNG')
-            return True, bg.size, 'pad-2to3'
+            return True, bg.size, f'pad-2to3 from {im.width}x{im.height}'
         return False, (w, h), f'ar {ar:.3f} unsupported'
     else:                # 横版目标 4:3 = 1.3333
         if abs(ar - 4 / 3) <= 0.06:

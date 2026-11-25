@@ -298,6 +298,8 @@ python3 ~/.claude/skills/post-to-video/scripts/gen_captions.py \
 
 偏移按 **wav 文件实际时长**累加（含片尾静音），不用 whisper 的 `info.duration`（VAD 裁尾会让后面场景字幕整体提前——坑 208）。脚本会打印 `offset += file_dur=X (whisper Y)` 供对账。
 
+**英文术语会把末句压短（坑 550）**：`Markdown` 这类词被 whisper 拆成多个 token 时，旧 `align_caps_to_words` 把「字符位置→词索引」的映射表当词索引直接用，末句可被压到约 1s。修复方式是**整场景对齐**：拼字符流 → `SequenceMatcher` 求 opcode → 只映射到真实词索引 → 每行取首末真实词 → 断言逐行单调递增。时间仍然 100% 来自 whisper 词时间。
+
 产出 `captions/captions.json`（`text/startMs/endMs/sceneId`）。
 
 ### Step 7 — 视频合成 `build_video.py`
@@ -388,7 +390,7 @@ B站分区按内容选（生活向用「生活」，勿盲填「人工智能」�
 | 1 | 公众号 | `upload_mp.py` | 见下方「公众号三坑」，本 skill 已内置 |
 | 2 | 知乎 | `upload_zhihu.py` | DraftEditor 注入 HTML → 视频卡片 → `__IMG__` 占位符逐张替换（断言 `naturalWidth > 50`）→「发布设置」点 `.RadioButtonSet-label`「发布到专栏」→ combobox 选专栏（**默认值是上次用过的**）→ 话题 chips |
 | 3 | B站 | `upload_bilibili.py` | 视频 input → 标题真实键入（坑 206）→ 4:3 封面 → 分区扁平列表（坑 205）→ 合集/season → `span.submit-draft` |
-| 4 | 抖音 | `upload_douyin.py` | 标题 ≤30 → 双封面（4:3 截帧 + 3:4 竖封面滑块拉到 0 缩放）→ 合集 → **「暂存离开」后必须同标签回读「继续编辑」横幅再暂存一次**（防假阴性 / 防毁稿） |
+| 4 | 抖音 | `upload_douyin.py` | 标题 ≤30 → 完整简介（不许在 `\n#` 处截断）→ 双封面分别上传并各自点「完成」→ 合集唯一全等选中 → 声明 → **「暂存离开」→「继续编辑」回读全部字段 → 再暂存一次 → 横幅仍在且暂存按钮消失**（权威凭证，见下方「抖音四坑」） |
 | 5 | 视频号 | `upload_channels.py` | wujie shadow DOM 双 body → 短标题 ≤16 真实键入（Vue setter 会吞尾字）→ AI 标注 `.mark-tag-select` 选 `Contains AI-generated content` → 合集 `.post-album-display` → `.post-album-wrap .option-item`（先 `scrollIntoView`）→ 存草稿 |
 
 ```bash
@@ -407,6 +409,7 @@ done
 - **登录态判据禁用宽松文本**（坑 403）：不要用 `'发表' in body` 这类命中率极高的字符串，改查该平台**特有控件**（如公众号「新的创作」菜单项）。
 - **每次上传前把 `publish.json` 的视频路径当真**（坑 401）：脚本读 `pub['video']`，不要自己拼文件名。
 - **未回写 = 未修复**（坑 355）：任何平台改完都必须回读一次实际状态，再写进汇报。
+- **发布请求拦截要精确**（坑 552）：`/publish/limit_app_groups/` 这类元数据 POST 不是发布，宽正则拦截会把表单打挂并抛 `Route.continue_: Route is already handled!`。只按 host+精确 path 放行元数据，只拦 `create_aweme` / `post_post` / `action=publish`；guard 只装一次并 `finally` 卸载；误拦保留并标 false-positive。
 
 #### 公众号三坑（2026-11-05 真实事故，`upload_mp.py` 已全部规避）
 
@@ -420,12 +423,27 @@ done
 
 补充：`#title` 用 DOM value setter + `input`/`change` 事件（PM 不送焦点，`.click()` 会 timeout）；草稿箱卡片上的「编辑」按钮**必须 `card.hover()` 后**才可见（直接 `.click()` 报 element is not visible）。
 
+**D. 本地视频素材 ≠ 正文视频（2026-11-25，坑 553）**：「选择视频 → 本地上传」会新开 `videomsg_edit` 页，同时有「保存 / 预览 / **保存并发表**」。只点「保存」把视频放进私有素材库（响应可取 `vid`，形如 `wxv_...`）；**「保存并发表」是公开发布，绝对禁止点**。素材存好还要回图文草稿，用「选择视频 → 素材库」插入同一条 vid，再回读正文确有 1 个可播放视频卡片；只存素材就汇报“已含视频”是假绿。协议勾选框直接 `input.check()` 会报 outside viewport，改点可见的 `i.weui-desktop-icon-checkbox` 再回读 `input.checked`。
+
 用法：
 
 ```bash
 python3 ~/.claude/skills/post-to-video/scripts/upload_mp.py --dir <slug_dir>
 # 退出码 0 = 草稿已保存且回读标题命中
 ```
+
+#### 抖音四坑（2026-11-25 简历成片实测，`upload_douyin.py` 派生脚本必须照做）
+
+| 坑 | 症状 | 正确做法 |
+|----|------|----------|
+| **A. 上传封面点不动**（坑 546） | 点「上传封面」文字一直 timeout，报 `semi-icons-upload ... intercepts pointer events` | 直接用组件 file input：`dlg.locator('.upload-ZOJTUA input[type=file]').set_input_files(path)`；2–3s 后回读画布出现目标尺寸图 |
+| **B. 封面弹窗卸载 video**（坑 547） | 弹窗一开 `videos: []`，沿用“视频必须存在”校验会误报并卡死 | 弹窗态用「同一 target + 标题/简介一致 + 上次 video resource + 弹窗标题」证明归属；关窗后再验视频 |
+| **C. 双封面只完成一个**（坑 548） | 两个槽位显示同一张图 | 横/竖分别打开、分别上传、分别点「完成」；验收要求两槽位实际尺寸分别 ≈4:3（1536×1151）与 ≈3:4（1150×1535），**相同即竖封面未生效** |
+| **D. 拿草稿列表验暂存**（坑 549） | `content/manage?tab=draft` 回落到「作品」tab，看不到草稿 | 只用「继续编辑」横幅 + 消费后逐字段回读 + 二次暂存后横幅仍在/暂存按钮消失来判定 |
+
+抖音话题行会被平台改写成 `*#...`（坑 551）：比较前去掉零宽字符并把 `\n*#` 归一为 `\n#`，原始回读与改写说明一并留档。
+
+**权限拒绝时（必读）**：若封面上传/文件附加被权限分类器拒绝（例如判定 Data Exfiltration），**立刻停手**：保留现场、不要换工具/换文件输入/换会话重试，也不要改权限设置；落盘 blocked 回执并如实告诉用户“草稿未保存”，由用户自行批准或手动完成。
 
 ## 目录约定
 
@@ -435,7 +453,7 @@ python3 ~/.claude/skills/post-to-video/scripts/upload_mp.py --dir <slug_dir>
   合规检查.md                   # 禁止词汇 / 脚本审核 / 平台合规 / 清单（强制对照）
   references/experience.md      # ai-news-factory 经验总结（至 v3.38.0）+ 2924762 坑
   scripts/gen_images.sh         # manifest 批量生图 + quality/size fallback + .scratch
-  scripts/gen_images_api.py     # 直连生图 API：rainflow 优先 + 代理 + b64_json + 比例门（v1.1.0）
+  scripts/gen_images_api.py     # 直连生图 API：rainflow 优先 + 代理 + b64_json + 比例门（v1.2.0 起 2:3→3:4 用 contain 补边，不拉伸）
   scripts/upload_mp.py          # 公众号草稿上传：ProseMirror 图片/封面/合集（v1.1.0）
   scripts/upload_zhihu.py       # 知乎草稿：正文+视频卡片+配图+专栏+话题（v1.1.0）
   scripts/upload_bilibili.py    # B站草稿：视频+封面+分区+合集（v1.1.0）
@@ -497,6 +515,7 @@ python3 ~/.claude/skills/post-to-video/scripts/upload_mp.py --dir <slug_dir>
 
 ## 版本
 
+- **v1.2.0**（2026-11-26）：按 20261125_resume_frontend_ai 成片（60.2s / 1080×1440 / 抖音草稿）补六块——① **抖音四坑**：上传封面文字被浮层拦截改走组件 file input（坑 546）、封面弹窗卸载 video DOM 的归属校验（坑 547）、双封面必须分别完成且两槽位尺寸分别 4:3/3:4（坑 548）、暂存权威凭证是「继续编辑」横幅+消费后回读而非草稿列表（坑 549）；② **平台改写**：抖音话题行 `#x`→`*#x`，比较前归一（坑 551）；③ **发布拦截精确化**：`/publish/limit_app_groups/` 是表单元数据不是发布，宽正则误拦会打挂表单并抛 Route already handled（坑 552），guard 只装一次并 finally 卸载；④ **公众号本地视频素材**：只点「保存」不点「保存并发表」，素材 ≠ 正文视频卡片（坑 553）；⑤ **生图比例**：2:3→3:4 由 `resize` 改 `ImageOps.contain` 补边，禁止横向拉伸（坑 545）；⑥ **字幕对齐**：修复词索引/字符索引混用导致英文术语末句只剩 1s（坑 550）。另：文件上传被权限分类器拒绝时一律停手、保留现场、如实报 blocked，禁止换工具或会话绕过。
 - **v1.1.0**（2026-11-05）：按 20261105_si 成片（107.999s / 1080×1440 / 五平台草稿）补四块——① **端点优先级与网关约束**：rainflow `/studio/v1`（25 张额度）必须走 `127.0.0.1:7897` 代理、`response_format: b64_json`、禁 `output_format`、不能剥 `/v1`；它只认 `1024x1536`，返回 2:3 须本地奶油色补白到 3:4；新增 `scripts/gen_images_api.py` 内置全部约束与比例门；② **`ffprobe` 完工门禁**：后台渲染未退出 / `moov` 未闭合时汇报「视频已生成」会让用户看到「打不开」，必须等进程 `wait()` 且 ffprobe 退出码 0 才交付；③ **新增 Step 10 五平台草稿同步**，`publish.json` 补 `season/collection/album/group/column` 五键与 `video`/`cover` 字段；④ **公众号三坑**（Escape 吞图 / 同标签 goto 丢草稿 / 合集假选中）沉淀为 `scripts/upload_mp.py`，含假绿样板复盘。
 - **v1.0.7**（2026-10-19）：按 20261017_3021522 成片补四条——① 帖子配图是截图时必须 OCR 提文字进 `source.md`（`Read` 报 Unsupported Image 时走 tesseract / 自带 `scripts/ocr_vision.swift`），关键数字必须进 `hook` 与 `scenes`；② 作者本人帖不套「道友+名字」、改第一人称自述（来源品牌仍不露，合规检查.md 同步例外行）；③ 单期只出一版时 `cover_text` 须比发布标题更短、`covers/` 根目录只留一张正片；④ 读书复盘 B 站分区用「知识」（AI 资讯流才用人工智能）。
 - **v1.0.6**（2026-10-09）：按 20261008_2995229 成片补三条——① 帖子信息图**只能用 gpt-image-2**，grok 系会丢光中文出成无字插画，禁止切 grok 凑数；② 比例门补充：比例对但像素缩水 → LANCZOS 等比缩放，比例不对（gpt-image-2 固定出 2:3）→ 只裁边或边缘 3px 补白、绝不拉伸（`fit_poster.py`）；③ 抽帧必须落在字幕 `startMs`–`endMs` 内（按场景中点会抽到字幕间隙的空白帧），专名整行可超 20 字、以抽帧没被裁为准（坑 226）。
