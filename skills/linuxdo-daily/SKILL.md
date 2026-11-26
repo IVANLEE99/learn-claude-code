@@ -2034,6 +2034,36 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 
 ## 更新日志
 
+### v16.21.0 (2026-11-26) — 1126 期实跑：渲染进程崩坏自愈与永久缺失清单口径（坑 545）
+
+**实测数据（DATE=2026-11-26）**
+- Source A **2216** / Source B **600** → 合并去重 **2747** → 历史/标题去重 **1688** → 公益/交易过滤 **1556**
+  → 32h 窗口 **659** → daily **615**（657 含正文 + 2 永久缺失；二次过滤剔除 42）
+- 22:35 触发；02:05 crawl+merge VALIDATED；03:41 PDF（5 页 6846 字）；07:17 五平台全部 verified 收工
+
+#### 坑 545：连续 `Page crashed` 是浏览器实例崩坏，必须重启，不要继续跑批
+
+- **症状**：`data/logs/<issue>-crawl.log` 中 batch 1–11 正常（179 帖有效），batch 12 起每个批次都是
+  15/15 `page.goto: Page crashed` / `Target crashed`；主批次跑完后 retry0 又跑 480 个失败 ID，
+  累计 915 条 error，实际有效正文仍停在 179/659。
+- **根因**：Chromium 渲染进程整体崩坏后，`crawlOne` 的逐帖 try/catch 会把每一帖都记成
+  `Page crashed` 并继续下一帖——批次循环不会自己重启浏览器，于是剩余 32 批 + retry 全部空转。
+  旧 attempt 退出后，resume 新起 `_crawl_<issue>.mjs` + 新 Chromium，同一队列立刻恢复，最终 **657/659**。
+- **判据**：同一批内连续 ≥3 帖都是 `Page crashed`/`Target crashed`（不是 `ERR_ABORTED`、不是单帖超时）
+  ⇒ 判定浏览器实例已坏，保存已有 checkpoint 后**立即结束本次 crawl attempt**（抛出 `rc=1` 让 resume 重启），
+  不要继续遍历剩余批次，也不要等 `BODY COVERAGE` 跑完才处理。
+- **不要误判**：scheduler `status=HEALTHY` 只代表进程/租约健康，不代表抓取健康；巡检必须同时看
+  `crawl.log` 的批次错误率与 `BODY COVERAGE` 增长。
+- **验收**：新 attempt 启动后看前 3 个批次是否恢复 `15/15` content；恢复后再让它跑全量。
+
+#### 永久缺失清单（坑 540 补充）：证据可跨主批次与 retry 文件
+
+- 1126 期两个 ID `3243276` / `3243974` 分别有 **9 / 8** 条同 `empty_deleted_private_or_unloaded`、
+  无 title 的证据：`batch_browser_1.json` / `batch_browser_43.json` + `batch_browser_retry1..8.json`。
+- `attempts == len(attempt_files)` 写成 9 / 8（不是强求 6），下一次 gated tick 立即通过全量校验并生成 daily 615 帖。
+- 诊断口径：`BODY COVERAGE 657/659 errors=2 permanent_gone=0 missing=2` 时，逐个 ID 汇总
+  `(文件, error)`；只要同一 ID 的每条证据都满足「同 ID / 同 error / 无 title」，就写清单，不要再重试。
+
 ### v16.13.0 (2026-11-18) — 1118 期实跑：Source A 短列表静默欠抓（坑 496）
 
 **坑 496：`scrollLoad` 的 `stable >= 3` 会把「首屏 30 行 + 懒加载失败」误判为列表到底。**

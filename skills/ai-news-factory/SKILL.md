@@ -7973,6 +7973,48 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 
 ## 更新日志
 
+### v3.110.0 (2026-11-26) — 1126 期实跑：视频号探针假阴性跨两次 / 公众号列表重开回退 / 知乎图片口径（坑 546-548）
+
+**实测数据（DATE=2026-11-26）**
+- daily **615 帖** → 报告/PDF（5 页 6846 字）→ 8 场景 content → 审核 9 项 PASS → 双封面
+  → 成片 **98.912s / 6.03MB / 1920×1080**（锚点 71.704s，ratio **0.7249**）
+- 五平台草稿全部 verified：公众号 `100002248` / 知乎 `2109178623542535770` / B站 `4173787` /
+  抖音 `v0d00fg10000dc3mm27og65g5fcvk590` / 视频号 `export/UzFfBgAAxKGB…`
+- 07:17:57 DONE，17/17 stage 全过
+
+#### 坑 546：视频号 `/platform` 登录探针可连续两次假阴性，上传入口才是权威
+
+- **症状**：06:31 与 06:33 两次独立探测（间隔 ≥10s）都返回
+  `url=https://channels.weixin.qq.com/login.html`、`redirected_to_login=true`、正文「登录视频号助手」，
+  按坑 544 字面判据已该落 `login_required`；但 07:15 实际上传保存草稿成功
+  （`draft_id=export/UzFfBgAAxKGB…`，saved=true，竖封面 810×1080）。
+- **根因**：`/platform` 冷启动页即使登录态有效也会渲染登录壳页（含「登录视频号助手」文案与登录按钮），
+  它是营销落地页，不是上传会话的权威判据；真正上传走 `/platform/post/create` / draftListManager，
+  会话 token 在另一个入口下有效。
+- **修法**：`/platform` 探针只记录证据（login-probe.json），不直接落 sticky block；
+  用上传入口 `/platform/post/create`（或 draftListManager 的发布表单）做权威判定：
+  能打开且出现可编辑表单 = 已登录；只有上传入口也被 302 到 `login.html` 才落 `login_required`（坑 514 粘性）。
+- **判据**：探针 `has_qr` / `has_login_word` / `redirected_to_login` 都可能假阴性或假阳性，
+  不要用单一页面文案决定扫码；先试真实入口，失败再 block。
+
+#### 坑 547：公众号草稿列表重开失败 → 回退编辑 URL 新标签核验，不重传
+
+- **症状**：1126 期保存后 `draft-list reopen failed`（草稿列表页未加载/未找到本期条目），worker 改在
+  新标签打开保存后的编辑 URL（含 `appmsgid=100002248`），`MP_VERIFY` 返回 `saved:true`。
+- **规则**：`appmsgid` 是持久草稿凭证；列表页失败只是 UI/加载问题，不能据此重传（会造重复草稿）。
+  回退顺序：草稿列表重开 → 保存后的编辑 URL 新标签 → 记录 capture；三者任一成功即可。
+- **回执**：capture 的 `draft_id` 用 `appmsgid`（数字），不要用 URL 里的临时 timestamp/参数。
+
+#### 坑 548：知乎 `real_imgs` 与 `https` 图数不是一个口径，落库判据看 https
+
+- **症状**：1126 期知乎回读 `real_imgs=3`、`https=9`、`blob_or_failed_imgs=[]`；
+  实际文章 8 张正文图 + 1 封面 = 9 张 https 图全部落库。
+- **根因**：`real_imgs` 是编辑器当前已渲染层（懒加载只渲染视口附近），不是落库图片总数；
+  只用 `real_imgs` 会误判「图片缺失」，进而重传。
+- **判据**：`https` 图数 == 预期图数（正文图 + 封面）且 `blob_or_failed_imgs=[]` 才算通过；
+  capture 同时写 `https` 与 `real_imgs`，并在 `nonpersistent_fields`/汇报中说明差异。
+  另：视频号封面槽、抖音 id、B站回读等 1125 期已固化的判据本期全部复验通过，不重复展开。
+
 ### v3.101.0（2026-11-18 1118 期实跑：receipt 首尾判据恒假 / 公众号插图假绿 / 抖音假草稿 / DONE 被旧 block 覆盖，坑 497-500）
 
 1118 期：daily **459 帖**（队列 495 / 正文 494 / permanent_gone 1 / 二次过滤 36）→ 报告 + press + PDF →
