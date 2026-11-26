@@ -1,12 +1,36 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.109.0
+version: 3.110.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.109.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.110.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.110.0 核心改进（2026-11-26 1126 期实跑：视频号探针跨两次仍假阴性 / 公众号列表重开回退 / 知乎图片口径，坑 546-548）**
+>
+> 1126 期：daily **615 帖** → 报告/PDF（5 页 6846 字）→ 8 场景 content → 审核 9 项 PASS → 双封面
+> → 成片 **98.912s / 6.03MB / 1920×1080**（锚点 **0.7249**）→ 五平台草稿全部 verified
+> （公众号 `100002248` / 知乎 `2109178623542535770` / B站 `4173787` /
+> 抖音 `v0d00fg10000dc3mm27og65g5fcvk590` / 视频号 `export/UzFfBgAAxKGB…`）。内容层零返工；
+> 本期三个卡点都集中在「探针/列表页读到的是假状态」。
+>
+> ① **坑 546：视频号 `/platform` 登录探针可以在两次独立探测里都假阴性；不要把探针结果直接当 sticky block。**
+> 1126 期 06:31 与 06:33 两次独立探测都是 `url=login.html` / `redirected_to_login=true` /
+> 正文「登录视频号助手」，但 07:15 实际上传保存草稿成功（objectId `export/UzFfBgAAxKGB…`，saved=true）。
+> 说明 `/platform` 冷启动可能返回登录壳页，不代表上传会话失效。
+> **判据**：`/platform/post/create`（或 draftListManager 的实际可编辑表单）能打开并出现发布表单，才算登录；
+> `/platform` 探针只记录证据，不落 `login_required`。只有上传入口也被 302 到 login.html 才落 block（坑 514 保持粘性）。
+>
+> ② **坑 547：公众号草稿列表重开失败时，回退到保存后的编辑 URL 新标签核验，不要重传。**
+> 1126 期 `draft-list reopen failed` 后，worker 用 `appmsgid=100002248` 的编辑 URL 在新标签打开并 `MP_VERIFY`
+> 成功（saved=true）；以 appmsgid 为持久凭证，列表页失败只是 UI 问题，重传会造重复草稿。
+>
+> ③ **坑 548：知乎 capture 的 `real_imgs` 与 `https` 图数不是一个口径，落库判据看 https。**
+> 1126 期回读 `real_imgs=3` 而 `https=9`（8 张正文图 + 1 封面），`blob_or_failed_imgs=[]`；
+> `real_imgs` 是编辑器当前已渲染层计数，不代表图片落库数量。**判据**：`https` 图数 == 预期图数且无
+> blob/失败图才算通过；capture 同时写 `https` 与 `real_imgs` 并说明差异。
 
 > **🔴 v3.109.0 核心改进（2026-11-25 1125 期实跑：视频号封面槽被预填 / 长跑脚本日志不可见 / Playwright 无超时静默卡死 / 视频号登录墙假阴性，坑 541-544）**
 >

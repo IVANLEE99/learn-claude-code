@@ -1,12 +1,32 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.20.0
+version: 16.21.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.20.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.21.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
+
+> **🔴 v16.21.0 核心改进（2026-11-26 1126 期实跑：渲染进程崩坏的自愈判据，坑 545）**
+>
+> 1126 期：Source A **2216** / Source B **600** → 队列 **659** → daily **615**（657 含正文 + 2 永久缺失，
+> 二次过滤剔除 42），22:35 触发、次日 02:05 抓取收口，07:17 五平台全部 verified 收工。
+> 本期抓取中段出现一次浏览器渲染进程整体崩坏，值得把判据写死。
+>
+> ① **坑 545：`Page crashed` / `Target crashed` 连续出现是渲染进程崩坏，不是单帖失败；不要用同一个浏览器把全部批次 + retry 跑完。**
+> 1126 期 batch 1–11 正常（179 帖有效），batch 12 起连续 32 个批次 15/15 全部
+> `page.goto: Page crashed`，retry0 又跑 480 个失败 ID，累计 915 条 error，白耗约 30 分钟；
+> 直到旧 attempt 退出、resume 新起 `_crawl_1126.mjs` + 新 Chromium，抓取才恢复，最终 657/659。
+> **判据**：同一批内连续 ≥3 帖都是 `Page crashed`/`Target crashed`（不是 `ERR_ABORTED`/超时）⇒ 判定浏览器实例已坏；
+> 保存已有 checkpoint 后立即结束本次 crawl attempt，让 resume 重启浏览器，而不是继续遍历剩余批次。
+> **不要**因为 scheduler status 仍显示 HEALTHY 就认为抓取正常——status 只看进程与租约，不看批次错误率。
+>
+> ② **永久缺失清单的证据可以跨主批次与 retry 文件。** 1126 期两个 ID（3243276 / 3243974）分别有 9 / 8 条
+> 同 `empty_deleted_private_or_unloaded`、无 title 的证据（主批次 `batch_browser_1.json` / `batch_browser_43.json`
+> + `batch_browser_retry1..8.json`），`attempts == len(attempt_files)` 写成 9 / 8 后，下一次 gated tick
+> 立即通过全量校验并生成 daily 615 帖（坑 540）。不必强求每个 ID 恰好 6 条，也不要因为证据分散在多个
+> retry 文件就继续重试。
 
 > **🔴 v16.20.0 核心改进（2026-11-25 1125 期实跑：永久缺失清单的解锁时机，坑 540）**
 >
