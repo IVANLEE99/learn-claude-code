@@ -1,12 +1,29 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.21.0
+version: 16.22.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.21.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.22.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
+
+> **🔴 v16.22.0 核心改进（2026-11-27 1127 期实跑：单一永久缺失帖制造 553 次 retry，9 条证据清单解锁，坑 554-555）**
+>
+> 1127 期：Source A **2216** / Source B **604** → 队列 **708** → daily **661**（707 含正文 + 1 永久缺失，
+> 二次过滤剔除 46）。抓取在单个 ID 上反复重试约 4 小时、生成 **554 个 batch/retry 文件**，daily 一直不生成；
+> 手写 9 条一致证据清单后，**下一次 gated tick 立即 `valid=707/708` 并启动 downstream**。
+>
+> ① **坑 554：单个永久缺失 ID 会制造数百个 retry 文件；不要等全部证据，也不要把 retry 文件数当进展。**
+> 1127 期 ID `3249741` 连续 **553 次** `empty_deleted_private_or_unloaded`（无 title），retry 序号到 552；
+> 只取主批次 `batch_browser_33.json` + `batch_browser_retry0..7.json` 共 **9 条**一致证据，
+> `attempts == len(attempt_files) == 9`，写入 `data/1127-permanent-gone.json` 后下一次 tick 立即通过全量校验。
+> **判据**：同一 ID ≥6 次同 error、无 title、每条证据文件真实且 `date` 为当期；证据不必覆盖全部 retry。
+> **写入时机**：crawler 可能仍在跑；下一次 validate/tick 会读取新清单，**不要手工起第二个 worker**。
+>
+> ② **坑 555：`BODY COVERAGE 707/708 errors=1` 不是“快好了”，差 1 条就可能差一整晚。**
+> 看到 `errors=1` 且同一 ID 反复出现就按坑 554 处理；`status=HEALTHY` 只看进程/租约，不看批次错误率，
+> 不要用“再等一轮”硬耗，也不要用大量 retry 文件证明“还在跑”。
 
 > **🔴 v16.21.0 核心改进（2026-11-26 1126 期实跑：渲染进程崩坏的自愈判据，坑 545）**
 >
@@ -277,6 +294,7 @@ version: 16.21.0
 > **操作步骤**：`ls data/batch_browser_retry*.json | wc -l` 确认 ≥6 → 逐 id 校验每个文件
 > 「恰好一行 + 无 title + error 逐字一致」→ 原子写清单 → 下一轮 resume 自动读到。
 > 1120 实测：23:39 写入 → 23:41 就 `crawl+merge VALIDATED`（7 份证据：origin batch + retry0..5）。
+> 1127 实测：单个 ID 553 次失败、554 个 retry；只取 origin batch + retry0..7 共 9 条即可解锁（坑 554）。
 > 写清单前**不要**先改门禁或删 retry 文件——那是伪造覆盖率。
 >
 > ② **补坑 504：除了「4 行就退」的真坏会话，还有一种健康压缩循环，绝不能清 session。**
@@ -2033,6 +2051,38 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.22.0 (2026-11-27) — 1127 期实跑：单一永久缺失帖的 retry 洪水与清单提速（坑 554-555）
+
+**实测数据（DATE=2026-11-27）**
+- Source A **2216** / Source B **604** → 队列 **708** → daily **661**（707 含正文 + 1 永久缺失；二次过滤剔除 46）
+- 抓取卡在 ID `3249741` 约 4 小时：553 次同 error、554 个 batch/retry 文件；写 9 条证据清单后
+  下一次 tick 立即 `CHECKPOINT coverage: valid=707/708 errors=1` 并 START downstream
+- 下游 17/17 stage done，10:22:38 DONE；公众号/知乎/B站/抖音四平台 verified；视频号 07:31 真登录墙，用户扫码后 10:15 补传成功
+
+#### 坑 554：单一永久缺失 ID 的 retry 洪水；证据取主批次 + 前 8 个 retry 即可
+
+- **症状**：`data/batch_browser_retry552.json` 已出现，`BODY COVERAGE 707/708 errors=1 missing=1`，
+  daily 长时间不生成；status 一直 HEALTHY，crawler 每轮都“跑完”并新造一个 retry 文件。
+- **根因**：同一 ID `3249741` 连续 553 次 `empty_deleted_private_or_unloaded`（无 title）；
+  `permanent_gone.json` 不存在，`validate_daily` 永远差 1 条，resume 每轮新建 retry 批。
+- **修法**：从主批次 `batch_browser_33.json` + `batch_browser_retry0..7.json` 取 9 条一致证据
+  （同 ID / 同 error / 无 title / date=当期），`attempts=9`、`attempt_files` 列这 9 个文件，
+  写 `data/1127-permanent-gone.json`；下一次 gated tick 立即通过全量校验并启动 downstream。
+- **不要再等**：554 个 retry 文件不是进展；同一 ID ≥6 次同 error 就写清单，证据不必覆盖全部 retry。
+- **写入时机**：crawler 可能仍在跑，下一次 validate/tick 会读取新清单；不要手工起第二个 worker。
+
+#### 坑 555：`BODY COVERAGE ... errors=1` 不是“快好了”
+
+- 1127 期从 02:xx 到 06:33 一直 `valid=707/708 errors=1`，每 3 分钟一个新 retry；
+- 判据：同一 ID 反复出现 + `permanent_gone=0` ⇒ 立即写清单，不要用“再等一轮”硬耗；
+- `status=HEALTHY` 只看进程/租约，不看批次错误率；判抓取健康看 `crawl.log` 的批次错误率与 `BODY COVERAGE` 增长。
+
+#### 正例固化：清单写入后下一次 tick 立即解锁
+
+- 06:33 写入 9 条证据清单 → 06:34 下一次 tick 输出 `CHECKPOINT coverage: valid=707/708 errors=1`
+  并 START downstream（phase=downstream），daily 661 帖；
+- 不需要重启 crawler、不需要清 session、不需要手工改 state。
 
 ### v16.21.0 (2026-11-26) — 1126 期实跑：渲染进程崩坏自愈与永久缺失清单口径（坑 545）
 

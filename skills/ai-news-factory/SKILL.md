@@ -1,12 +1,33 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.110.0
+version: 3.111.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.110.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.111.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.111.0 核心改进（2026-11-27 1127 期实跑：知乎 topics 静默缺失 / 3 个上限 / finish 静默期，坑 556-558）**
+>
+> 1127 期：daily **661 帖** → 17/17 stage done；公众号 `100002261` / 知乎 `2109547288955822269` /
+> B站 `4178768` / 抖音 `v0200fg10000dc4c0t7og65t2gc93k50` 四平台 verified；
+> 视频号 07:31 三入口真登录墙，用户扫码后 10:15 补传成功（objectId `export/UzFfBgAAxNSAfDA0OwLjkszT4DCa4iPQDBPOeW1JdIrQxnOPDQ`）。
+>
+> ① **坑 556：`publish.json` 的 `platform.zhihu.topics` 缺失时，上传脚本会静默跳过话题，五平台仍可能全绿。**
+> 1127 期 `load_topics()` 读到空列表后打印 `[topics] none configured, skip`，capture `chips=[]`；
+> `Validator.receipt` 不校验话题，所以 `upload_zhihu` 仍 verified。发布后 `publish.json` 已 hash-pinned，
+> 不能改；补救只能对现有草稿单独补话题（不重建草稿、不重传图片）。**上传前必须断言 `platform.zhihu.topics`
+> 非空（2–3 个），或在 capture/nonpersistent_fields 明确披露“本期未配置话题”。**
+>
+> ② **坑 557：知乎话题最多 3 个；补到第 3 个后「添加话题」按钮消失，不要为第 4 个反复重试。**
+> 1127 期补了 `人工智能 / 大模型 / OpenAI` 后，`Gemini` / `Claude` 的「添加话题」按钮已消失；
+> 重开草稿回读 chips 仍为 3 个。需要特定话题时，先定好优先级再补，不要先占满 3 个再想换。
+>
+> ③ **坑 558：全 17 stage done 不等于 DONE；worker 在 finish 前可能静默数分钟。**
+> 1127 期 10:16:30 写完 anchor usage log 后 stream 静默约 6 分钟，10:22:38 `1127-DONE` 才落盘；
+> 期间不要起第二个 worker、不要手工改 state。判活看 worker stream mtime、CPU time 与 job lease；
+> 按 180s 退避等 finish；若 >30 分钟无事件才按人工/blocked 处理，汇报时以 DONE 标记为准。
 
 > **🔴 v3.110.0 核心改进（2026-11-26 1126 期实跑：视频号探针跨两次仍假阴性 / 公众号列表重开回退 / 知乎图片口径，坑 546-548）**
 >
@@ -878,11 +899,11 @@ version: 3.110.0
 > ① **公众号必须填写标题（不可跳过）**。`mp_*_run.py` 的 `title` 步不是可选项：`#title` 为空会让草稿在后台显示「无标题」，且 **verify 的 `title_ok` 恒假**。判据 = `#title.value` 与 `publish.json.title` 逐字相等；**只有新建草稿才允许为空**（空 = 刚建的），有标题的旧稿一律关掉重开（坑 379/383 同族）。
 > ② **视频号 description 必须与抖音同格式带话题标签**。抖音侧一直是「描述正文 + \n + `#今日羊报AI #AI日报 …`」，视频号过去只有正文、没有标签行，两个平台在后台的展示形态不一致。**规则：`platform.channels.description` 末尾必须像 `platform.douyin.description` 一样带同一组 hashtag 行**；由 `gen_publish` 生成时写入，**不要在上传脚本里临时拼**（否则 `publish.json` 不再是单一事实源）。
 > ③ **知乎要输出并选择话题**。往期 `publish.json` **整个 `platform.zhihu` 段都缺失**，话题靠平台按正文自动带 1-2 个，等于没管。v3.82.0 起：
->    · `publish.json` 必须有 `platform.zhihu.{title, topics, column, article, images}`，`topics` = **目标话题集合**（2-4 个，对应正文主线）；
+>    · `publish.json` 必须有 `platform.zhihu.{title, topics, column, article, images}`，`topics` = **目标话题集合**（**2-3 个**，对应正文主线；平台硬上限 3，第 3 个后「添加话题」按钮消失——坑 557）；**缺字段时 `load_topics()` 会静默 `[topics] none configured, skip`，上传前必须断言非空（坑 556）**；
 >    · 上传脚本新增 `topics` 步：读 `topics` → 回读现有 chips → 缺的用「添加话题 → 搜索 → 点候选」补齐 → 回读断言；
 >    · **控件实测（2026-11-05）**：chip class = `.css-1d3pntc`；入口 = `button` 文案精确「添加话题」（class `css-1gtqxw0`）；点开后 `input[placeholder="搜索话题..."]`；候选项是 BUTTON，**选完即生效、无确认按钮**；
 >    · **坑（本期实测）**：搜索关键词会同时命中**正文段落**（`y` 为负、不在视口内）→ 候选必须按「**y 在视口内** + 文本完全等于话题名」双重过滤，再走落点自证点击；
->    · **话题缺失不阻断存草稿**（与坑 351 标签同族），但必须打印 `missing` 列表并写进 review-checklist；
+>    · **话题缺失不阻断存草稿**（与坑 351 标签同族），但必须打印 `missing` 列表并写进 review-checklist；**1127 实测 validator 不校验话题，`chips=[]` 仍可 receipt 全绿，所以上传前必须显式断言 topics 非空（坑 556）**；
 >    · **先决条件：编辑器必须按 `platform.zhihu.article_id` 直开**。只按域名找现成标签会捡到 `www.zhihu.com/`（首页）或空 `/write` 新稿——在空页上回读会得到「三个话题全缺」的假结论，而真稿 chip 齐全。`publish.json` 要存 `article_id`（首次上传后回填），`get_editor_page` 在无合格标签时按 id `goto /p/<id>/edit`，并对现成标签跑 `_editor_ok()`（标题含本期标题或正文 >200 字）。
 > ④ **新增字段要过「逐字段 diff」这道门**：`gen_publish` 的 `extra_keys` 断言会把 `platform.zhihu.*` 判成「派生漏改」而中止。**正确处置是显式声明 `ALLOWED_NEW_PREFIXES = ('platform.zhihu.',)`**，不是删掉断言（那会把整道门的价值一起删掉）。同时 `same/changed` 比较要加 `k in pf` 保护，否则新增键会 `KeyError`。
 > ⑤ **上传 daemon 开工前必探活**：`curl -s -m 8 http://127.0.0.1:9222/json/version` 返回非 JSON 就是 daemon 没起；`nohup python3 templates/browser_daemon.py &` 起裸 Chrome（Chrome 156 实测）。**别把「端口不通」误判成「登录失效」**。
@@ -7972,6 +7993,44 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.111.0 (2026-11-27) — 1127 期实跑：知乎话题静默缺失与 finish 静默期（坑 556-558）
+
+**实测数据（DATE=2026-11-27）**
+- daily **661 帖** → 报告/PDF → 8 场景 content → 双封面 → 成片 → 五平台草稿（视频号 10:15 补传）
+- 四平台 verified：公众号 `100002261` / 知乎 `2109547288955822269` / B站 `4178768` / 抖音 `v0200fg10000dc4c0t7og65t2gc93k50`
+- 视频号 objectId `export/UzFfBgAAxNSAfDA0OwLjkszT4DCa4iPQDBPOeW1JdIrQxnOPDQ`
+- 知乎图片 9 张 https（8 正文 + 1 封面）；话题因 `publish.json` 缺字段为空，事后补 3 个
+- 17/17 stage done；10:16:30 写完 anchor usage log 后静默约 6 分钟，10:22:38 `1127-DONE` 落盘（收工以 DONE 标记为准）
+
+#### 坑 556：publish.json 缺 platform.zhihu.topics → 静默跳过话题，receipt 仍全绿
+
+- **症状**：`upload_zhihu` verified，capture `chips=[]`；日志只有 `[topics] none configured, skip`。
+- **根因**：`load_topics()` 只读 `publish.json.platform.zhihu.topics`；缺字段返回 `[]`，`step_topics()` 直接 return；
+  `Validator.receipt` 只校验 https 图数/blob/reload，不校验话题。
+- **修法**：`gen_publish` 必须写 2–3 个 topics；上传前断言非空；若确实没有话题，capture/nonpersistent_fields 明示。
+- **事后补救**：`publish.json` 已 hash-pinned，不能改；只能对现有草稿补话题（不重建、不重传图片），
+  写独立 evidence `zhihu-topics-1127.json`，不要覆盖 `zhihu-capture.json`。
+
+#### 坑 557：知乎话题上限 3 个；第 3 个后「添加话题」按钮消失
+
+- 1127 期实际补入 `人工智能 / 大模型 / OpenAI`；`Gemini` / `Claude` 搜索前按钮已消失（`offsetParent=null`），
+  不是候选不存在。
+- 先定优先级再补；不要先占满 3 个再想换。替换需要先移除现有话题（上传脚本未实现，需人工/新脚本）。
+
+#### 坑 558：全 17 stage done ≠ DONE；finish 静默期可能 >6 分钟
+
+- 1127 期 10:15:42 `upload_channels` done → 10:16:30 anchor usage log 写入 → stream 静默约 6 分钟 →
+  10:22:38 `1127-DONE` 落盘；期间 worker 进程存活（CPU 低、无子进程），job lease 仍持有。
+- **处置**：不要起第二个 worker、不要改 state、不要重传；看 stream mtime/CPU/job lease，按 180s 退避等 finish；
+  若 >30 分钟无事件才按 blocked/人工记录；不能把“17/17 stage done”直接报成 DONE，也不能因为短暂静默就重启。
+
+#### 正例固化：真登录墙 vs 探针假阴性（视频号）
+
+- 07:31 `/platform`、`/platform/post/create`（wujie 未挂载）、`draftListManager` 三入口全落 `login.html`
+  ⇒ 真 `login_required`，不是坑 546 的单点假阴性；
+- 用户 10:07 确认扫码 → 按坑 514 持 `1127-state.lock` 清 block、置 interrupted、删 `1127-BLOCKED.json` → tick 只补
+  `upload_channels`；10:15:42 保存成功，objectId 取 `get_draft_list`，其余四平台未重传。
 
 ### v3.110.0 (2026-11-26) — 1126 期实跑：视频号探针假阴性跨两次 / 公众号列表重开回退 / 知乎图片口径（坑 546-548）
 
