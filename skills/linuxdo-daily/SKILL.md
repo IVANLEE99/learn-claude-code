@@ -1,12 +1,25 @@
 ---
 name: linuxdo-daily
 description: linux.do AI日报/周报/月报自动生成。多 Agent 协作：Crawler 抓取双数据源 → Topic Merger 合并主题 → Trend Analyzer 生成趋势 → Writer 输出日报/周报/月报 → Press Writer 生成新闻稿 → PDF Builder 生成 PDF。触发词：日报、周报、月报、linuxdo日报、AI日报、AI周报、AI月报、技术日报、weekly、monthly、过滤后全部抓取完
-version: 16.22.0
+version: 16.23.0
 ---
 
-# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.22.0）
+# linuxdo-daily — AI 技术日报生成 Skill（多 Agent 架构，v16.23.0）
 
 从 linux.do 自动抓取 AI 相关帖子，通过 6 个专用 Agent 协作生成每日技术日报，并支持周报与月报模式。
+
+> **🔴 v16.23.0 核心改进（2026-11-28 1128 期实跑：多个永久缺失 ID 与 6 条证据，坑 559）**
+>
+> 1128 期：Source A **2215** / Source B **603** → 队列 **631** → daily **566**
+> （629 含正文 + 2 永久缺失；二次过滤剔除 63）。两个 ID `3249741`、`3259629` 各连续 6 次
+> `empty_deleted_private_or_unloaded`（无 title），写 6 条证据（主批次 + retry0..4）后下一次 tick
+> 立即 `BODY COVERAGE 629/631 errors=2 permanent_gone=2 missing=0` 并启动 downstream。
+>
+> ① **坑 559：永久缺失 ID 可能同时有多个；每个 ID 各 6 条证据即可，不要只处理一个。**
+> 1128 期 `BODY COVERAGE 629/631 errors=2 missing=2`，两个 ID 各 6 条同 error 证据；
+> `data/1128-permanent-gone.json` 的 `items` 必须逐个列出，`attempts == len(attempt_files)`，
+> `attempt_files` 只写 basename、不能带目录、不能重复。清单写入后跑一次 `bash data/_l3_tick_1128.sh`，
+> 返回 `START downstream` 才算 daily 通过。**不要等 retry 文件堆到 9 条**：6 条一致证据已足够。
 
 > **🔴 v16.22.0 核心改进（2026-11-27 1127 期实跑：单一永久缺失帖制造 553 次 retry，9 条证据清单解锁，坑 554-555）**
 >
@@ -2051,6 +2064,26 @@ pkill -f "mcp-chrome" 2>/dev/null; sleep 2
 ---
 
 ## 更新日志
+
+### v16.23.0 (2026-11-28) — 1128 期实跑：多个永久缺失 ID 与 6 条证据（坑 559）
+
+**实测数据（DATE=2026-11-28）**
+- Source A **2215** / Source B **603** → 队列 **631** → daily **566**（629 含正文 + 2 永久缺失；二次过滤剔除 63）
+- 两个永久缺失 ID：`3249741`、`3259629`，各 6 次同 `empty_deleted_private_or_unloaded`、无 title；
+  写 6 条证据（主批次 + retry0..4）后下一次 tick 立即 `BODY COVERAGE 629/631 errors=2 permanent_gone=2 missing=0`
+- 下游 17/17 stage done，05:44:28 DONE；五平台草稿全部 verified
+- 视频号 01:09 真登录墙，用户 05:2x 扫码后按坑 514 持锁清 block、只补 `upload_channels`
+
+#### 坑 559：永久缺失 ID 可能同时有多个；每个 ID 各 6 条证据即可
+
+- **症状**：`BODY COVERAGE 629/631 errors=2 permanent_gone=0 missing=2`，两个 ID 同时反复失败；
+  `data/1128-permanent-gone.json` 不存在时 daily 永远差 2 条。
+- **修法**：对**每一个**缺失 ID 各取 6 条一致证据（主批次 + retry0..4，或 retry0..7 中的任意 6 条），
+  写入 `items` 数组；`attempts == len(attempt_files)`，`attempt_files` 只写 `batch_browser_*.json`
+  basename、不能带目录、不能重复；`date`/`issue` 必须是当期。
+- **验证**：写完后下一次 gated tick 应打印 `permanent_gone=2 missing=0` 并 `START downstream`；
+  若仍 `missing>0`，说明还有未覆盖的 ID，继续按同一格式补，不要起第二个 worker。
+- **不要等 9 条**：6 条同 error、无 title、证据文件真实一致已足够；retry 文件数量不是进展。
 
 ### v16.22.0 (2026-11-27) — 1127 期实跑：单一永久缺失帖的 retry 洪水与清单提速（坑 554-555）
 

@@ -1,12 +1,45 @@
 ---
 name: ai-news-factory
 description: AI News Factory - 从日报/周报/月报 Markdown 自动生成短视频+图文的完整 Pipeline。触发词: "AI日报", "AI周报", "AI月报", "新闻工厂", "news factory", "日报视频", "周报视频", "月报视频", "AI news video", "知乎文章", "知乎发文章"
-version: 3.111.0
+version: 3.112.0
 ---
 
-# AI News Factory — 日报/周报/月报短视频自动生成 v3.111.0
+# AI News Factory — 日报/周报/月报短视频自动生成 v3.112.0
 
 将 AI 日报/周报/月报 Markdown 自动转化为 B站风格短视频 + 多平台发布内容，完整 Pipeline：报告 → 去重/选材 → 事件切分 → 视频脚本 → 分镜 → 图片 → TTS → 字幕 → 视频合成 → 封面 → 多平台发布信息 → 公众号图文 → 多平台上传。支持三种模式：日报（单日去重）、周报（7天聚合）、月报（消费 linuxdo-daily v13 已聚合的月报 md，趋势级选材）。
+
+> **🔴 v3.112.0 核心改进（2026-11-28 1128 期实跑：知乎缺图假绿 / 视频号 4:3 分享卡与话题 / finish 租约，坑 560-563）**
+>
+> 1128 期：daily **566 帖** → 17/17 stage done → 五平台 verified
+> （公众号 `100002276` / 知乎 `2109808895241868451` / B站 `4183440` /
+> 抖音 `v0300fg10000dc4refnog65u6p21nnmg` / 视频号 `export/UzFfBgAAxKyBWGoROAfikszT4DCaMXdOUBKAM_5vwq9Aqen9xQ`）。
+> 用户验收时发现知乎少一张正文图、视频号 4:3 分享卡没封面、描述没有话题；均已定点修复并重开验证。
+>
+> ① **坑 560：知乎正文图片块会整块丢失；`https`/`real_imgs` 仍可能全绿。**
+> 1128 期 `content.scenes=7`，保存后正文只有 6 个 IMG 块（scene2 整块丢失），但 capture 仍报
+> `https=8`（7 正文 + 1 封面）——`https` 把视频封面和失败块的 `src` 都算进去了，`real_imgs` 只数当前渲染层。
+> **判据**：重开草稿、逐块滚动后，正文 `img` 块数必须 == `len(content.scenes)`，且每张 `naturalWidth > 100`；
+> 缺块用「段末置光标 → Enter → `input[type=file][accept*="image/webp"]` 上传对应 `sceneN.jpg`」定点补，
+> 不重建草稿、不重传其他图。补完写独立 evidence，不覆盖已 hash-pin 的 capture。
+>
+> ② **坑 561：视频号 4:3 分享卡片是独立槽，竖版 3:4 上传不会顺带覆盖它。**
+> 1128 期脚本只显式上传 `vertical-3-4.png`，`horizon-img-wrap` 仍是 720×405 视频帧。
+> **修法**：点 `.horizon-img-wrap .edit-btn` → `编辑分享卡片4:3` → 上传 `horizontal-4-3.png` →
+> 点弹窗「确认」（不是「确定」）→ 点「保存草稿」；**必须重开草稿回读** `horizon-img-wrap` 为
+> 720×540（4:3）或 1440×1080，不能只看当前编辑态（首次保存可能未持久化）。
+>
+> ③ **坑 562：视频号描述话题不是「写了 # 就算」；误点 #话题 会把选区包成 topic chip。**
+> 1128 期描述末尾 `#今日羊报AI …` 是纯文本；点 `#话题` 时若光标有选区，会把第一句整句包成
+> `<span class="hl topic" data-type="topic">#一位匿名AI高管…</span>`，正文开头多一个 `#`。
+> **修法**：先用 `execCommand('insertText', false, 原文)` 还原整段描述（不要带选区点 `#话题`），
+> 平台会按 `#` 自动解析成 `.input-editor span.hl.topic`；重开草稿回读 chips（1128 实测 7 个：
+> `#今日羊报AI` `#AI日报` `#AI安全` `#腾讯` `#DFly2` `#DeepSeek` `#反重力`）。
+>
+> ④ **坑 563：`finish` 不能 nohup 到后台；必须在 worker 的 foreground Bash 里跑。**
+> 1128 期 worker 用 `nohup python3 -I _scheduler_1128.py finish &`，返回
+> `{"rc":1,"reason":"LEASE OWNER refusal: 1128-job.lock"}`——后台进程没有继承 worker 的 job FD，
+> 被租约身份校验拒绝。**修法**：直接在 worker 的 Bash 工具里前台执行 `finish`（会继承 job 身份），
+> 或至少用同一 shell 的前台子进程；不要 `nohup ... &`，也不要用另一个会话。
 
 > **🔴 v3.111.0 核心改进（2026-11-27 1127 期实跑：知乎 topics 静默缺失 / 3 个上限 / finish 静默期，坑 556-558）**
 >
@@ -7993,6 +8026,56 @@ coll_ok = bool(coll) and '今日羊报' in coll and '未添加' not in coll
 **How to apply:** 公众号 verify 后补两件时：①标题文本匹配（不用 appmsgid）；②列表页从首页标签页内进+点「草稿箱」tab；③发表记录看首页「近期发表」区块首条。任何「找不到草稿/看不到发表」先怀疑入口，别急着重跑 save。
 
 ## 更新日志
+
+### v3.112.0 (2026-11-28) — 1128 期实跑：知乎缺图假绿 / 视频号 4:3 分享卡与话题 / finish 租约（坑 560-563）
+
+**实测数据（DATE=2026-11-28）**
+- daily **566 帖** → 报告/PDF → 7 场景 content → 双封面 → 成片 → 五平台草稿全部 verified
+- 公众号 `100002276` / 知乎 `2109808895241868451` / B站 `4183440` /
+  抖音 `v0300fg10000dc4refnog65u6p21nnmg` / 视频号 `export/UzFfBgAAxKyBWGoROAfikszT4DCaMXdOUBKAM_5vwq9Aqen9xQ`
+- 用户验收发现：知乎正文少 1 张图（scene2）、视频号 4:3 分享卡仍是视频帧、描述没有话题 chip
+- 补修后重开验证：知乎 7 正文图 + 1 视频封面全部 naturalWidth≥1440；视频号横版槽 720×540（4:3）、
+  7 个话题 chip 持久化；独立 evidence 记录，不覆盖 hash-pin capture
+- 17/17 stage done，05:44:28 DONE；视频号 01:09 真登录墙，用户 05:2x 扫码后清 block 只补 channels
+
+#### 坑 560：知乎正文图片块会整块丢失；`https`/`real_imgs` 仍可能全绿
+
+- **症状**：`content.scenes=7`，保存后正文只有 6 个 IMG 块（1128 期缺 scene2，位于第 1 节后）；
+  capture 仍报 `https=8`、`real_imgs=5`、`blob_or_failed_imgs=[]`，receipt 通过。
+- **根因**：`https` 统计把视频封面和失败块的 `src` 都算进正文；`real_imgs` 只数当前渲染层；
+  两者都不等于「正文 IMG 块数」。
+- **修法**：重开草稿后逐块滚动（懒加载），断言正文 `img` 块数 == `len(content.scenes)` 且每张
+  `naturalWidth > 100`；缺块用「目标段末置光标 → Enter → `input[type=file][accept*="image/webp"]`
+  上传 `zhihu-images/sceneN.jpg`」定点补，不重建草稿、不重传其他图。
+- **留证**：原 capture 保持字节不变（已 hash-pin）；补图写独立 `zhihu-image-repair-<issue>.json`，
+  记录 before/after、图片块数、naturalWidth、截图 sha256。
+
+#### 坑 561：视频号 4:3 分享卡片是独立槽，竖版 3:4 上传不会顺带覆盖它
+
+- **症状**：脚本只显式上传 `vertical-3-4.png`，竖版槽 810×1080 正常；`horizon-img-wrap` 仍是
+  720×405 视频帧，分享卡片 4:3 没有自制封面。
+- **修法**：点 `.horizon-img-wrap .edit-btn` → 弹窗「编辑分享卡片4:3」→ 上传 `horizontal-4-3.png` →
+  点弹窗「确认」（按钮文案是「确认」，不是「确定」）→ 点「保存草稿」。
+- **验证**：必须**重开草稿**回读 `.horizon-img-wrap img` 为 720×540（4:3）或 1440×1080；
+  只看当前编辑态会假绿——1128 期第一次保存后重开又回到 720×405，第二次保存才持久化。
+
+#### 坑 562：视频号描述话题不是「写了 # 就算」；误点 #话题 会把选区包成 topic chip
+
+- **症状**：描述末尾 `#今日羊报AI #AI日报 …` 是纯文本；用户看到「没有话题」。
+  点 `#话题` 时若编辑器有选区，会把第一句整句包成
+  `<span class="hl topic" data-type="topic">#一位匿名AI高管…</span>`，正文开头多一个 `#`。
+- **修法**：用 `execCommand('insertText', false, 原文)` 还原整段描述（不带选区点 `#话题`），
+  平台会按 `#` 自动解析成 `.input-editor span.hl.topic`；保存后重开回读 chips。
+  1128 期实测 7 个：`#今日羊报AI` `#AI日报` `#AI安全` `#腾讯` `#DFly2` `#DeepSeek` `#反重力`。
+- **注意**：视频号话题数量上限比知乎宽（本期 7 个正常），不要套用知乎的 3 个上限。
+
+#### 坑 563：`finish` 不能 nohup 到后台；必须在 worker 的 foreground Bash 里跑
+
+- **症状**：`nohup python3 -I _scheduler_<issue>.py finish &` 返回
+  `{"rc":1,"reason":"LEASE OWNER refusal: <issue>-job.lock"}`。
+- **根因**：调度器按 worker 的 job FD/进程血统校验租约；后台进程脱离该血统，被拒绝。
+- **修法**：在 worker 的 Bash 工具里**前台**执行 `finish`，让它继承 job 身份；
+  不要 `nohup ... &`，不要用另一个会话/第二个 worker 代跑。
 
 ### v3.111.0 (2026-11-27) — 1127 期实跑：知乎话题静默缺失与 finish 静默期（坑 556-558）
 

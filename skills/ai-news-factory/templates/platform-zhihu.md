@@ -1,6 +1,7 @@
 # 知乎平台模块（文章派生 + 合规审核 + 草稿上传）
 
 > 本文件是 `SKILL.md` 的**平台子模块**，由 SKILL.md 的 Phase 10.6 / Phase 14 引用。
+> 1128 补丁（v3.112.0）：新增坑 560「正文图片块整块丢失」；正文图块数必须 == len(content.scenes)，不能只信 https/real_imgs。
 > 版本：v3.75.0（2026-10-31 日报三期实跑：专栏「第 0 级」失败 + 草稿箱 `?type=article` + 登录判据假阴性 + `ZHIHU_DRAFT_OK` 覆盖不全，坑 352–355、362–364）
 > 上一版：v3.74.0（2026-10-30 二次实跑：post-to-video 帖文成片，raw CDP + 坑 344–347）
 > 合规依据（同目录）：
@@ -900,6 +901,21 @@ body_imgs = page.evaluate("""(id) => [...document.querySelectorAll('div.public-D
 
 （虽属公众号，但与知乎同批修复，写在此处以免遗漏）
 `document.querySelectorAll('.ProseMirror')[0].click()` 后 `document.activeElement` 仍是 `body` → `Input.insertText` 被静默丢弃 → 隐藏 `textarea#title` 恒空 → `AssertionError: title not synced: ''`。必须 `.focus()` 并断言 `document.activeElement === p`，再双回读（`#title` 的 value + ProseMirror 的 textContent）。
+
+---
+
+### 坑 560：正文图片块会整块丢失；`https`/`real_imgs` 仍可能全绿（v3.112.0 / 2026-11-28 1128 期实测）
+
+- **症状**：`content.scenes=7`，保存后正文只有 6 个 IMG 块（1128 期缺 scene2，位于第 1 节后）；capture 仍报
+  `https=8`、`real_imgs=5`、`blob_or_failed_imgs=[]`，receipt 通过。
+- **根因**：`https` 统计把视频封面和失败块的 `src` 都算进正文；`real_imgs` 只数当前渲染层；
+  两者都不等于「正文 IMG 块数」。
+- **修法**：重开草稿后逐块滚动（懒加载），断言正文 `img` 块数 == `len(content.scenes)` 且每张
+  `naturalWidth > 100`；缺块用「目标段末置光标 → Enter → `input[type=file][accept*="image/webp"]`
+  上传 `zhihu-images/sceneN.jpg`」定点补，不重建草稿、不重传其他图。
+- **留证**：原 capture 保持字节不变（已 hash-pin）；补图写独立 `zhihu-image-repair-<issue>.json`，
+  记录 before/after、图片块数、naturalWidth、截图 sha256。
+- **注意**：重载后视口外图片可能 `naturalWidth=0` 是懒加载，不是失败；必须滚动全部块再判定。
 
 ---
 
